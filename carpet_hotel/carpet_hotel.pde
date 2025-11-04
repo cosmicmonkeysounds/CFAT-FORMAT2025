@@ -26,9 +26,14 @@ boolean isFullscreen = false;    // Toggle with 'f' key
 // "carpets/" = videos in subfolder (data/carpets/carpet1.mp4)
 String videoFolderPath = "";
 
+// Display configuration
+// 1 = primary display, 2 = second display, 3 = third display, etc.
+// To see available displays, uncomment the line in setup() that prints display info
+int DISPLAY_NUMBER = 2;  // ← CHANGE THIS to select which screen to use (1, 2, 3, etc.)
+
 void setup() {
-  // Start in fullscreen mode by default
-  fullScreen(P3D);
+  // Start in fullscreen mode on specified display
+  fullScreen(P3D, DISPLAY_NUMBER);
   pixelDensity(1); // Explicitly set to 1 to avoid high-density display issues
   background(0);
 
@@ -36,6 +41,12 @@ void setup() {
 
   // Initialize global timer
   startTime = millis() / 1000.0;
+
+  // Display info
+  println("=== DISPLAY INFO ===");
+  println("Using display " + DISPLAY_NUMBER);
+  println("Display size: " + displayWidth + "x" + displayHeight);
+  println("");
   
   // Find all carpet video filenames (don't load them yet)
   videoFilenames = new ArrayList<String>();
