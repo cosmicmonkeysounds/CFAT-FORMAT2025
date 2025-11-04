@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Generate unique test media files (MP4, JPG, PNG, GIF, WAV) with random characteristics.
+Generate unique test media files (MP4, JPG, PNG, GIF, WAV, OGG, MP3, WebP, BMP, TIFF, SVG)
+with random characteristics.
+
 Videos and images use random colors and effects. Audio files use triangle wave tones.
+Self-contained with bundled ffmpeg - no external dependencies required!
 """
 
 import cv2
@@ -15,6 +18,14 @@ import scipy.io.wavfile as wavfile
 import tempfile
 import subprocess
 import os
+
+# Import bundled ffmpeg
+try:
+    from imageio_ffmpeg import get_ffmpeg_exe
+    FFMPEG_PATH = get_ffmpeg_exe()
+except ImportError:
+    # Fallback to system ffmpeg if imageio-ffmpeg not installed
+    FFMPEG_PATH = 'ffmpeg'
 
 
 def find_existing_files(output_dir, base_name, extension):
@@ -198,9 +209,9 @@ def generate_video(output_path, width=1920, height=1080, fps=30, duration=1,
         try:
             # Only embed audio if the flag was set (not just save_separate_audio)
             if embed_audio:
-                # Use ffmpeg to combine video and audio
+                # Use bundled ffmpeg to combine video and audio
                 result = subprocess.run([
-                    'ffmpeg', '-y', '-i', str(video_path_to_write),
+                    FFMPEG_PATH, '-y', '-i', str(video_path_to_write),
                     '-i', tmp_audio_path,
                     '-c:v', 'copy', '-c:a', 'aac', '-strict', 'experimental',
                     '-shortest', str(final_output_path)
@@ -229,18 +240,18 @@ def generate_video(output_path, width=1920, height=1080, fps=30, duration=1,
                 if audio_format == 'wav':
                     wavfile.write(str(audio_output_path), sample_rate, audio_data)
                 elif audio_format == 'ogg':
-                    # Convert WAV to OGG using ffmpeg
+                    # Convert WAV to OGG using bundled ffmpeg
                     conv_result = subprocess.run([
-                        'ffmpeg', '-y', '-i', tmp_audio_path,
+                        FFMPEG_PATH, '-y', '-i', tmp_audio_path,
                         '-c:a', 'libvorbis', '-q:a', '5',
                         str(audio_output_path)
                     ], capture_output=True, text=True)
                     if conv_result.returncode != 0:
                         print(f"  ⚠ Warning: Failed to create separate OGG audio file")
                 elif audio_format == 'mp3':
-                    # Convert WAV to MP3 using ffmpeg
+                    # Convert WAV to MP3 using bundled ffmpeg
                     conv_result = subprocess.run([
-                        'ffmpeg', '-y', '-i', tmp_audio_path,
+                        FFMPEG_PATH, '-y', '-i', tmp_audio_path,
                         '-c:a', 'libmp3lame', '-b:a', '192k',
                         str(audio_output_path)
                     ], capture_output=True, text=True)
@@ -543,7 +554,7 @@ def generate_ogg(output_path, frequency, duration=1, sample_rate=44100, channels
                 bit_depth=16, max_freq=1000):
     """
     Generate an OGG file with low-pass filtered triangle wave tone at -12dBFS.
-    Requires ffmpeg to be installed.
+    Uses bundled ffmpeg (no external installation needed).
     """
     audio_data, sample_rate = generate_audio_data(
         frequency, duration, sample_rate, channels, bit_depth, max_freq
@@ -555,15 +566,15 @@ def generate_ogg(output_path, frequency, duration=1, sample_rate=44100, channels
         wavfile.write(tmp_wav_path, sample_rate, audio_data)
 
     try:
-        # Convert WAV to OGG using ffmpeg
+        # Convert WAV to OGG using bundled ffmpeg
         result = subprocess.run([
-            'ffmpeg', '-y', '-i', tmp_wav_path,
+            FFMPEG_PATH, '-y', '-i', tmp_wav_path,
             '-c:a', 'libvorbis', '-q:a', '5',
             str(output_path)
         ], capture_output=True, text=True)
 
         if result.returncode != 0:
-            print(f"⚠ Error: Failed to generate OGG file (ffmpeg error). Is ffmpeg installed?")
+            print(f"⚠ Error: Failed to generate OGG file (ffmpeg error).")
             print(f"   Error: {result.stderr}")
             return
 
@@ -579,7 +590,7 @@ def generate_mp3(output_path, frequency, duration=1, sample_rate=44100, channels
                 bit_depth=16, max_freq=1000, bitrate='192k'):
     """
     Generate an MP3 file with low-pass filtered triangle wave tone at -12dBFS.
-    Requires ffmpeg to be installed.
+    Uses bundled ffmpeg (no external installation needed).
     """
     audio_data, sample_rate = generate_audio_data(
         frequency, duration, sample_rate, channels, bit_depth, max_freq
@@ -591,15 +602,15 @@ def generate_mp3(output_path, frequency, duration=1, sample_rate=44100, channels
         wavfile.write(tmp_wav_path, sample_rate, audio_data)
 
     try:
-        # Convert WAV to MP3 using ffmpeg
+        # Convert WAV to MP3 using bundled ffmpeg
         result = subprocess.run([
-            'ffmpeg', '-y', '-i', tmp_wav_path,
+            FFMPEG_PATH, '-y', '-i', tmp_wav_path,
             '-c:a', 'libmp3lame', '-b:a', bitrate,
             str(output_path)
         ], capture_output=True, text=True)
 
         if result.returncode != 0:
-            print(f"⚠ Error: Failed to generate MP3 file (ffmpeg error). Is ffmpeg installed?")
+            print(f"⚠ Error: Failed to generate MP3 file (ffmpeg error).")
             print(f"   Error: {result.stderr}")
             return
 
@@ -704,14 +715,14 @@ def main():
         type=str,
         choices=['h264', 'h265', 'vp9', 'av1', 'mpeg4', 'mjpeg', 'xvid'],
         default='mpeg4',
-        help='Video codec to use for MP4/video generation (default: mpeg4). Note: Some codecs may require ffmpeg.'
+        help='Video codec to use for MP4/video generation (default: mpeg4)'
     )
 
     # Audio options for videos (independent flags)
     parser.add_argument(
         '--embed-audio',
         action='store_true',
-        help='Embed audio track into video files (requires ffmpeg). Can be used independently or with --audio-file.'
+        help='Embed audio track into video files. Can be used independently or with --audio-file.'
     )
     parser.add_argument(
         '--audio-file',
