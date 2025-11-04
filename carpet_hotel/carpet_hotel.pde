@@ -21,6 +21,17 @@ ArrayList<String> videoFilenames; // Store filenames, load videos on demand
 boolean showDebugPanel = false;  // Toggle with 'd' key
 boolean isFullscreen = false;    // Toggle with 'f' key
 
+// Camera/Scene settings for elevator effect
+float cameraYOffset = 0;         // Current camera Y position
+float targetCameraY = 0;         // Target camera Y position (for animation)
+float cameraAnimationSpeed = 0.08; // Easing speed (0.0-1.0, higher = faster)
+boolean isAnimating = false;     // Is camera currently moving?
+int targetFloorIndex = 0;        // Floor we're animating towards
+
+// Scene configuration
+int VIDEO_HEIGHT = 1080;         // Height of each video floor in scene units
+                                 // Should match your video resolution height
+
 // Video folder path - UPDATE THIS if your videos are in a subfolder
 // "" = videos directly in data folder (data/carpet1.mp4)
 // "carpets/" = videos in subfolder (data/carpets/carpet1.mp4)
@@ -57,12 +68,12 @@ void setup() {
   if (videoFilenames.size() > 0) {
     // Load only the first video
     Movie firstMovie = new Movie(this, videoFilenames.get(0));
-    Floor firstFloor = new Floor(videoFilenames.get(0), firstMovie);
+    Floor firstFloor = new Floor(videoFilenames.get(0), firstMovie, 0);
     floors.add(firstFloor);
 
     // Create placeholder floors for the rest
     for (int i = 1; i < videoFilenames.size(); i++) {
-      floors.add(new Floor(videoFilenames.get(i), null));
+      floors.add(new Floor(videoFilenames.get(i), null, i));
     }
   }
 
@@ -100,8 +111,46 @@ void draw() {
   background(0);
 
   if (floors.size() > 0) {
-    Floor currentFloor = floors.get(currentFloorIndex);
-    currentFloor.display(globalTime);
+    // Update camera animation (smooth easing)
+    if (isAnimating) {
+      // Ease towards target
+      float diff = targetCameraY - cameraYOffset;
+      cameraYOffset += diff * cameraAnimationSpeed;
+
+      // Stop animating when close enough
+      if (abs(diff) < 0.5) {
+        cameraYOffset = targetCameraY;
+        isAnimating = false;
+        currentFloorIndex = targetFloorIndex;
+        println("Arrived at floor " + currentFloorIndex);
+      }
+    }
+
+    // Save drawing state
+    pushMatrix();
+
+    // Apply camera offset (translate scene vertically)
+    translate(0, cameraYOffset);
+
+    // Draw all floors at their positions
+    // Only draw floors that are potentially visible (within 2 floors of camera)
+    for (int i = 0; i < floors.size(); i++) {
+      Floor floor = floors.get(i);
+
+      // Check if this floor is close enough to camera to be visible
+      float distanceFromCamera = abs(floor.yPosition - (-cameraYOffset));
+      if (distanceFromCamera < VIDEO_HEIGHT * 2.5) {
+        // Render this floor at its Y position
+        pushMatrix();
+        translate(0, floor.yPosition);
+        floor.display(globalTime);
+        popMatrix();
+      }
+    }
+
+    // Restore drawing state
+    popMatrix();
+
   } else {
     // Show error message
     fill(255);
@@ -192,17 +241,39 @@ void keyPressed() {
 
   // Switch floor if valid and different from current
   if (newFloor >= 0 && newFloor < floors.size() && newFloor != currentFloorIndex) {
-    // Stop current video
-    floors.get(currentFloorIndex).stopPlaying();
-
-    // Switch to new floor
-    currentFloorIndex = newFloor;
-
-    // Start new video
-    floors.get(currentFloorIndex).startPlaying();
-
-    println("Switched to floor " + currentFloorIndex + ": " + floors.get(currentFloorIndex).name);
+    // Start animation to new floor
+    startFloorTransition(newFloor);
   }
+}
+
+/**
+ * Start smooth animated transition to a new floor
+ */
+void startFloorTransition(int newFloorIndex) {
+  if (newFloorIndex < 0 || newFloorIndex >= floors.size()) return;
+  if (newFloorIndex == currentFloorIndex && !isAnimating) return;
+
+  println("Transitioning to floor " + newFloorIndex + ": " + floors.get(newFloorIndex).name);
+
+  // Set target floor
+  targetFloorIndex = newFloorIndex;
+
+  // Calculate target camera position
+  // Camera should move to show the target floor at Y=0 (screen center)
+  targetCameraY = -floors.get(newFloorIndex).yPosition;
+
+  // Start animation
+  isAnimating = true;
+
+  // Load the target floor video if not loaded
+  floors.get(newFloorIndex).ensureLoaded();
+  floors.get(newFloorIndex).startPlaying();
+
+  // Optionally stop the old video (or leave it playing during transition)
+  // Uncomment if you want to stop the previous floor:
+  // if (currentFloorIndex >= 0 && currentFloorIndex < floors.size()) {
+  //   floors.get(currentFloorIndex).stopPlaying();
+  // }
 }
 
 void findCarpetVideos() {
@@ -254,11 +325,18 @@ class Floor {
   Movie video;
   float duration; // in seconds
   boolean isLoaded;
+  int floorIndex;  // Position in the building (0 = ground floor, 1 = first floor, etc.)
+  float yPosition; // Y position in scene space
 
-  Floor(String name, Movie video) {
+  Floor(String name, Movie video, int index) {
     this.name = name;
     this.video = video;
     this.isLoaded = (video != null);
+    this.floorIndex = index;
+
+    // Calculate Y position: floors are stacked vertically
+    // Floor 0 at Y=0, Floor 1 at Y=-VIDEO_HEIGHT, etc. (negative Y goes up)
+    this.yPosition = -index * VIDEO_HEIGHT;
 
     if (this.isLoaded) {
       // Get duration
@@ -320,19 +398,23 @@ class Floor {
   }
   
   /**
-   * Display this floor's video
+   * Display this floor's video in scene space
    */
   void display(float globalTime) {
     // Make sure video is loaded
     if (!isLoaded || video == null) {
+      // Draw placeholder
+      fill(50);
+      rectMode(CORNER);
+      rect(0, 0, width, VIDEO_HEIGHT);
       fill(255);
       textAlign(CENTER, CENTER);
       textSize(20);
-      text("Video not loaded", width/2, height/2);
+      text("Floor " + floorIndex + " - Not loaded", width/2, VIDEO_HEIGHT/2);
       return;
     }
 
-    // Read video frame if available (like in working test)
+    // Read video frame if available
     if (video.available()) {
       video.read();
     }
@@ -342,37 +424,43 @@ class Floor {
       // Calculate where we should be in the loop
       float loopTime = getLoopTime(globalTime);
 
-      // Draw the video centered with letterboxing (black bars)
-      imageMode(CENTER);
+      // Draw video to fill the scene width and VIDEO_HEIGHT
+      imageMode(CORNER);
 
-      // Calculate aspect ratios
+      // Calculate scaling to fill width while maintaining aspect ratio
       float videoAspect = (float)video.width / (float)video.height;
-      float screenAspect = (float)width / (float)height;
+      float sceneAspect = (float)width / (float)VIDEO_HEIGHT;
 
       float drawWidth, drawHeight;
+      float drawX = 0, drawY = 0;
 
-      // CONTAIN mode: Scale to fit within screen, add black bars as needed
-      if (videoAspect > screenAspect) {
-        // Video is wider than screen - fit to width, black bars top/bottom
+      // COVER mode: Fill the scene area completely
+      if (videoAspect > sceneAspect) {
+        // Video is wider - fit to height, crop sides
+        drawHeight = VIDEO_HEIGHT;
+        drawWidth = VIDEO_HEIGHT * videoAspect;
+        drawX = (width - drawWidth) / 2; // Center horizontally
+      } else {
+        // Video is taller - fit to width, crop top/bottom
         drawWidth = width;
         drawHeight = width / videoAspect;
-      } else {
-        // Video is taller than screen - fit to height, black bars left/right
-        drawHeight = height;
-        drawWidth = height * videoAspect;
+        drawY = (VIDEO_HEIGHT - drawHeight) / 2; // Center vertically
       }
 
-      // Draw video centered (black bars fill remaining space naturally)
-      image(video, width/2, height/2, drawWidth, drawHeight);
+      // Draw video
+      image(video, drawX, drawY, drawWidth, drawHeight);
 
       // Draw floor info overlay
       drawOverlay(loopTime);
     } else {
       // Video not ready yet, show loading message
+      fill(100);
+      rectMode(CORNER);
+      rect(0, 0, width, VIDEO_HEIGHT);
       fill(255);
       textAlign(CENTER, CENTER);
       textSize(20);
-      text("Loading video...", width/2, height/2);
+      text("Loading floor " + floorIndex + "...", width/2, VIDEO_HEIGHT/2);
     }
   }
   
@@ -384,19 +472,28 @@ class Floor {
       // Extended debug panel
       fill(0, 200);
       noStroke();
-      rect(10, 10, 400, 220);
+      rect(10, 10, 450, 280);
 
       fill(255);
       textAlign(LEFT, TOP);
-      textSize(16);
-      int y = 20;
-      int lineHeight = 22;
+      textSize(14);
+      int y = 15;
+      int lineHeight = 20;
 
       text("=== CARPET HOTEL DEBUG ===", 20, y); y += lineHeight;
       text("Floor: " + currentFloorIndex + " / " + (floors.size() - 1), 20, y); y += lineHeight;
       text("Name: " + name, 20, y); y += lineHeight;
+      text("Floor Y Pos: " + nf(yPosition, 0, 1), 20, y); y += lineHeight;
       text("Loop: " + nf(loopTime, 0, 2) + " / " + nf(duration, 0, 2) + "s", 20, y); y += lineHeight;
       text("Global Time: " + nf(globalTime, 0, 2) + "s", 20, y); y += lineHeight;
+      y += 5; // Spacer
+      text("Camera Y: " + nf(cameraYOffset, 0, 1), 20, y); y += lineHeight;
+      text("Target Y: " + nf(targetCameraY, 0, 1), 20, y); y += lineHeight;
+      text("Animating: " + isAnimating, 20, y); y += lineHeight;
+      if (isAnimating) {
+        text("Target Floor: " + targetFloorIndex, 20, y); y += lineHeight;
+      }
+      y += 5; // Spacer
       text("Loaded: " + isLoaded, 20, y); y += lineHeight;
       if (isLoaded && video != null) {
         text("Video Time: " + nf(video.time(), 0, 2) + "s", 20, y); y += lineHeight;
