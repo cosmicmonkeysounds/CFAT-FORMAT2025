@@ -12,6 +12,9 @@ from pathlib import Path
 from PIL import Image
 import scipy.signal
 import scipy.io.wavfile as wavfile
+import tempfile
+import subprocess
+import os
 
 
 def find_existing_files(output_dir, base_name, extension):
@@ -128,49 +131,136 @@ def generate_random_frame(width, height, seed=None):
     return frame, base_color
 
 
-def generate_video(output_path, width=1920, height=1080, fps=30, duration=1):
+def generate_video(output_path, width=1920, height=1080, fps=30, duration=1,
+                  codec='mpeg4', audio_frequency=None, audio_sample_rate=44100,
+                  audio_channels=1, audio_bit_depth=16, max_freq=1000,
+                  embed_audio=False, save_separate_audio=False, audio_format='wav'):
     """
     Generate a single test video with random color and effects.
+    Optionally embeds audio and/or saves separate audio file.
+
+    Args:
+        audio_frequency: If provided, generate audio at this frequency
+        embed_audio: If True, embed audio into video file
+        save_separate_audio: If True, save audio as separate file
+        audio_format: Format for separate audio file ('wav', 'ogg', 'mp3')
     """
     # Random base color
     base_color = np.random.randint(0, 256, 3, dtype=np.uint8)
-
-    # Add some color variation for interest
     color_variance = np.random.randint(5, 30)
 
+    # Get codec info
+    fourcc_str, _, codec_desc = get_video_codec(codec)
+    fourcc = cv2.VideoWriter_fourcc(*fourcc_str)
+
+    # Generate video without audio first (always needed)
+    temp_video_path = None
+    final_output_path = output_path
+
+    if audio_frequency is not None:
+        # Create temp file for video without audio
+        temp_video_path = output_path.with_suffix('.temp.mp4')
+        video_path_to_write = temp_video_path
+    else:
+        video_path_to_write = output_path
+
     # Setup video writer
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+    out = cv2.VideoWriter(str(video_path_to_write), fourcc, fps, (width, height))
 
     total_frames = fps * duration
-
-    # Generate unique noise seed for this video
     video_seed = np.random.randint(0, 1000000)
 
     for frame_num in range(total_frames):
-        # Set seed for reproducible but unique per-video randomness
         np.random.seed(video_seed + frame_num)
-
-        # Create base frame with slight color variation
         color = base_color + np.random.randint(-color_variance, color_variance, 3, dtype=np.int16)
         color = np.clip(color, 0, 255).astype(np.uint8)
-
-        # Create solid color frame (BGR format for OpenCV)
         frame = np.full((height, width, 3), color[::-1], dtype=np.uint8)
-
-        # Apply random effects
         frame = apply_random_effects(frame, effect_intensity=0.4)
-
-        # Write frame
         out.write(frame)
 
     out.release()
-    print(f"✓ Generated: {output_path.name} (Color: RGB{tuple(base_color)})")
+
+    # Handle audio if requested
+    audio_info = ""
+
+    if audio_frequency is not None:
+        # Generate audio data
+        audio_data, sample_rate = generate_audio_data(
+            audio_frequency, duration, audio_sample_rate,
+            audio_channels, audio_bit_depth, max_freq
+        )
+
+        # Create temporary WAV file for ffmpeg
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_audio:
+            tmp_audio_path = tmp_audio.name
+            wavfile.write(tmp_audio_path, sample_rate, audio_data)
+
+        try:
+            # Only embed audio if the flag was set (not just save_separate_audio)
+            if embed_audio:
+                # Use ffmpeg to combine video and audio
+                result = subprocess.run([
+                    'ffmpeg', '-y', '-i', str(video_path_to_write),
+                    '-i', tmp_audio_path,
+                    '-c:v', 'copy', '-c:a', 'aac', '-strict', 'experimental',
+                    '-shortest', str(final_output_path)
+                ], capture_output=True, text=True)
+
+                if result.returncode != 0:
+                    print(f"⚠ Warning: Failed to embed audio (ffmpeg error). Keeping video without audio.")
+                    if temp_video_path and temp_video_path.exists():
+                        temp_video_path.rename(final_output_path)
+                else:
+                    # Clean up temp video file
+                    if temp_video_path and temp_video_path.exists():
+                        os.remove(temp_video_path)
+
+                    ch_desc = f"{audio_channels}ch" if audio_channels > 2 else ("stereo" if audio_channels == 2 else "mono")
+                    audio_info = f", Audio: {audio_frequency:.1f}Hz {ch_desc}"
+            else:
+                # No audio embedding, just move temp video to final location if needed
+                if temp_video_path and temp_video_path.exists():
+                    temp_video_path.rename(final_output_path)
+
+            # Save separate audio file if requested
+            if save_separate_audio:
+                audio_output_path = output_path.with_suffix(f'.{audio_format}')
+
+                if audio_format == 'wav':
+                    wavfile.write(str(audio_output_path), sample_rate, audio_data)
+                elif audio_format == 'ogg':
+                    # Convert WAV to OGG using ffmpeg
+                    conv_result = subprocess.run([
+                        'ffmpeg', '-y', '-i', tmp_audio_path,
+                        '-c:a', 'libvorbis', '-q:a', '5',
+                        str(audio_output_path)
+                    ], capture_output=True, text=True)
+                    if conv_result.returncode != 0:
+                        print(f"  ⚠ Warning: Failed to create separate OGG audio file")
+                elif audio_format == 'mp3':
+                    # Convert WAV to MP3 using ffmpeg
+                    conv_result = subprocess.run([
+                        'ffmpeg', '-y', '-i', tmp_audio_path,
+                        '-c:a', 'libmp3lame', '-b:a', '192k',
+                        str(audio_output_path)
+                    ], capture_output=True, text=True)
+                    if conv_result.returncode != 0:
+                        print(f"  ⚠ Warning: Failed to create separate MP3 audio file")
+
+                if os.path.exists(audio_output_path):
+                    print(f"  ↳ Audio: {audio_output_path.name}")
+
+        finally:
+            # Clean up temp audio file
+            if os.path.exists(tmp_audio_path):
+                os.remove(tmp_audio_path)
+
+    print(f"✓ Generated: {output_path.name} (Color: RGB{tuple(base_color)}, Codec: {codec_desc}{audio_info})")
 
 
 def generate_image(output_path, width=1920, height=1080, format='jpg'):
     """
-    Generate a single test image (JPG or PNG) with random color and effects.
+    Generate a single test image (JPG, PNG, WebP, BMP, TIFF) with random color and effects.
     """
     seed = np.random.randint(0, 1000000)
     frame, base_color = generate_random_frame(width, height, seed)
@@ -180,9 +270,85 @@ def generate_image(output_path, width=1920, height=1080, format='jpg'):
 
     # Save using PIL
     img = Image.fromarray(frame_rgb)
-    img.save(str(output_path), quality=95 if format.lower() == 'jpg' else None)
+
+    # Set quality for lossy formats
+    save_kwargs = {}
+    if format.lower() == 'jpg':
+        save_kwargs['quality'] = 95
+    elif format.lower() == 'webp':
+        save_kwargs['quality'] = 90
+        save_kwargs['method'] = 6
+
+    img.save(str(output_path), **save_kwargs)
 
     print(f"✓ Generated: {output_path.name} (Color: RGB{tuple(base_color)})")
+
+
+def generate_svg(output_path, width=1920, height=1080):
+    """
+    Generate a single test SVG with random color and geometric patterns.
+    """
+    seed = np.random.randint(0, 1000000)
+    np.random.seed(seed)
+
+    # Random base color
+    base_color = np.random.randint(0, 256, 3, dtype=np.uint8)
+
+    # Create SVG with random geometric shapes
+    svg_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="{width}" height="{height}" fill="rgb({base_color[0]},{base_color[1]},{base_color[2]})"/>
+
+'''
+
+    # Add random shapes for visual variety
+    num_shapes = np.random.randint(5, 15)
+    for _ in range(num_shapes):
+        shape_type = np.random.choice(['circle', 'rect', 'ellipse', 'polygon'])
+
+        # Random color with some variation from base
+        color_var = np.random.randint(-50, 50, 3)
+        shape_color = np.clip(base_color.astype(np.int16) + color_var, 0, 255).astype(np.uint8)
+        opacity = np.random.uniform(0.1, 0.7)
+
+        if shape_type == 'circle':
+            cx = np.random.randint(0, width)
+            cy = np.random.randint(0, height)
+            r = np.random.randint(20, min(width, height) // 4)
+            svg_content += f'  <circle cx="{cx}" cy="{cy}" r="{r}" fill="rgb({shape_color[0]},{shape_color[1]},{shape_color[2]})" opacity="{opacity:.2f}"/>\n'
+
+        elif shape_type == 'rect':
+            x = np.random.randint(0, width - 100)
+            y = np.random.randint(0, height - 100)
+            w = np.random.randint(50, min(300, width - x))
+            h = np.random.randint(50, min(300, height - y))
+            svg_content += f'  <rect x="{x}" y="{y}" width="{w}" height="{h}" fill="rgb({shape_color[0]},{shape_color[1]},{shape_color[2]})" opacity="{opacity:.2f}"/>\n'
+
+        elif shape_type == 'ellipse':
+            cx = np.random.randint(0, width)
+            cy = np.random.randint(0, height)
+            rx = np.random.randint(20, min(width, height) // 6)
+            ry = np.random.randint(20, min(width, height) // 6)
+            svg_content += f'  <ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="rgb({shape_color[0]},{shape_color[1]},{shape_color[2]})" opacity="{opacity:.2f}"/>\n'
+
+        elif shape_type == 'polygon':
+            points = []
+            num_points = np.random.randint(3, 8)
+            for _ in range(num_points):
+                px = np.random.randint(0, width)
+                py = np.random.randint(0, height)
+                points.append(f"{px},{py}")
+            points_str = " ".join(points)
+            svg_content += f'  <polygon points="{points_str}" fill="rgb({shape_color[0]},{shape_color[1]},{shape_color[2]})" opacity="{opacity:.2f}"/>\n'
+
+    svg_content += '</svg>'
+
+    # Write SVG file
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(svg_content)
+
+    print(f"✓ Generated: {output_path.name} (Color: RGB{tuple(base_color)}, {num_shapes} shapes)")
 
 
 def generate_gif(output_path, width=1920, height=1080, fps=30, duration=1):
@@ -227,6 +393,29 @@ def generate_gif(output_path, width=1920, height=1080, fps=30, duration=1):
     print(f"✓ Generated: {output_path.name} (Color: RGB{tuple(base_color)}, {len(frames)} frames)")
 
 
+def get_video_codec(codec_name):
+    """
+    Get the appropriate fourcc code and file extension for the specified codec.
+    Returns (fourcc_code, recommended_extension, description)
+    """
+    codecs = {
+        'h264': ('avc1', 'mp4', 'H.264/AVC'),
+        'h265': ('hev1', 'mp4', 'H.265/HEVC'),
+        'vp9': ('VP90', 'webm', 'VP9'),
+        'av1': ('av01', 'mp4', 'AV1'),
+        'mpeg4': ('mp4v', 'mp4', 'MPEG-4'),
+        'mjpeg': ('MJPG', 'avi', 'Motion JPEG'),
+        'xvid': ('XVID', 'avi', 'Xvid'),
+    }
+
+    codec_name = codec_name.lower()
+    if codec_name not in codecs:
+        # Default to mpeg4 if unknown
+        return codecs['mpeg4']
+
+    return codecs[codec_name]
+
+
 def generate_triangle_wave(frequency, sample_rate, duration):
     """
     Generate a triangle wave at the specified frequency.
@@ -237,28 +426,24 @@ def generate_triangle_wave(frequency, sample_rate, duration):
     return wave
 
 
-def generate_wav(output_path, frequency, duration=1, sample_rate=44100, channels=1,
-                bit_depth=16, max_freq=1000):
+def generate_audio_data(frequency, duration, sample_rate=44100, channels=1,
+                       bit_depth=16, max_freq=1000):
     """
-    Generate a WAV file with low-pass filtered triangle wave tone at -12dBFS.
-    Supports arbitrary bit depths (1-32 bits). Non-standard bit depths are quantized
-    and stored in the next larger standard container (8, 16, 24, or 32-bit).
+    Generate audio data as numpy array (returns data ready for scipy.io.wavfile).
+    This is used internally by other audio generation functions.
     """
-
     # Generate triangle wave
     wave = generate_triangle_wave(frequency, sample_rate, duration)
 
-    # Apply low-pass filter (cutoff at 2x the frequency or max_freq, whichever is lower)
+    # Apply low-pass filter
     cutoff = min(frequency * 2, max_freq)
     nyquist = sample_rate / 2
     normalized_cutoff = cutoff / nyquist
 
-    # Design a 4th order Butterworth low-pass filter
     b, a = scipy.signal.butter(4, normalized_cutoff, btype='low')
     wave = scipy.signal.filtfilt(b, a, wave)
 
     # Normalize to -12dBFS
-    # -12dBFS means the amplitude should be 10^(-12/20) = 0.251189
     target_amplitude = 10 ** (-12 / 20)
     wave = wave / np.max(np.abs(wave)) * target_amplitude
 
@@ -266,7 +451,7 @@ def generate_wav(output_path, frequency, duration=1, sample_rate=44100, channels
     if bit_depth < 1 or bit_depth > 32:
         raise ValueError(f"Bit depth must be between 1 and 32, got {bit_depth}")
 
-    # Determine container format (standard WAV bit depths)
+    # Determine container format
     if bit_depth <= 8:
         container_bits = 8
         dtype = np.uint8
@@ -277,55 +462,44 @@ def generate_wav(output_path, frequency, duration=1, sample_rate=44100, channels
         is_unsigned = False
     elif bit_depth <= 24:
         container_bits = 24
-        dtype = np.int32  # 24-bit stored in 32-bit container
+        dtype = np.int32
         is_unsigned = False
-    else:  # bit_depth <= 32
+    else:
         container_bits = 32
         dtype = np.int32
         is_unsigned = False
 
-    # For arbitrary bit depths, we quantize to that many levels (2^bit_depth)
+    # Quantize
     if is_unsigned:
-        # 8-bit audio is unsigned (0-255)
         offset = 2 ** (container_bits - 1)
-        max_value = offset - 1  # 127 for 8-bit
-        # Quantize to desired bit depth
+        max_value = offset - 1
         quant_max = (2 ** bit_depth) // 2 - 1
         wave_quantized = np.round(wave * quant_max) / quant_max
-        # Scale to container
         wave_scaled = np.clip(wave_quantized * max_value, -max_value, max_value).astype(dtype) + offset
     else:
-        # Signed formats (16, 24, 32-bit)
         if container_bits == 16:
             container_max = 32767
         elif container_bits == 24:
-            container_max = 8388607  # 2^23 - 1
-        else:  # 32-bit
-            container_max = 2147483647  # 2^31 - 1
+            container_max = 8388607
+        else:
+            container_max = 2147483647
 
-        # Quantize to desired bit depth
         quant_max = (2 ** bit_depth) // 2 - 1
         wave_quantized = np.round(wave * quant_max) / quant_max
-
-        # Scale to container format
-        offset = 0
         wave_scaled = np.clip(wave_quantized * container_max, -container_max, container_max).astype(dtype)
 
     # Create multi-channel audio if needed
     if channels == 1:
         audio_data = wave_scaled
     else:
-        # For multi-channel, create slightly different random variations
         audio_data = np.zeros((len(wave_scaled), channels), dtype=dtype)
         for ch in range(channels):
-            # Add slight random phase variation for each channel
             phase_shift = np.random.uniform(0, 0.1)
             ch_wave = generate_triangle_wave(frequency, sample_rate, duration + phase_shift)
-            ch_wave = ch_wave[:len(wave)]  # Trim to match length
+            ch_wave = ch_wave[:len(wave)]
             ch_wave = scipy.signal.filtfilt(b, a, ch_wave)
             ch_wave = ch_wave / np.max(np.abs(ch_wave)) * target_amplitude
 
-            # Apply same quantization
             if is_unsigned:
                 ch_wave_quantized = np.round(ch_wave * quant_max) / quant_max
                 audio_data[:, ch] = np.clip(ch_wave_quantized * max_value, -max_value, max_value).astype(dtype) + offset
@@ -333,12 +507,108 @@ def generate_wav(output_path, frequency, duration=1, sample_rate=44100, channels
                 ch_wave_quantized = np.round(ch_wave * quant_max) / quant_max
                 audio_data[:, ch] = np.clip(ch_wave_quantized * container_max, -container_max, container_max).astype(dtype)
 
+    return audio_data, sample_rate
+
+
+def generate_wav(output_path, frequency, duration=1, sample_rate=44100, channels=1,
+                bit_depth=16, max_freq=1000):
+    """
+    Generate a WAV file with low-pass filtered triangle wave tone at -12dBFS.
+    Supports arbitrary bit depths (1-32 bits). Non-standard bit depths are quantized
+    and stored in the next larger standard container (8, 16, 24, or 32-bit).
+    """
+    audio_data, sample_rate = generate_audio_data(
+        frequency, duration, sample_rate, channels, bit_depth, max_freq
+    )
+
     # Write WAV file
     wavfile.write(str(output_path), sample_rate, audio_data)
+
+    # Determine container bits for display
+    if bit_depth <= 8:
+        container_bits = 8
+    elif bit_depth <= 16:
+        container_bits = 16
+    elif bit_depth <= 24:
+        container_bits = 24
+    else:
+        container_bits = 32
 
     ch_desc = f"{channels}-channel" if channels > 2 else ("stereo" if channels == 2 else "mono")
     bit_desc = f"{bit_depth}-bit" if container_bits == bit_depth else f"{bit_depth}-bit (in {container_bits}-bit container)"
     print(f"✓ Generated: {output_path.name} ({ch_desc}, {bit_desc}, {frequency:.1f}Hz, -12dBFS)")
+
+
+def generate_ogg(output_path, frequency, duration=1, sample_rate=44100, channels=1,
+                bit_depth=16, max_freq=1000):
+    """
+    Generate an OGG file with low-pass filtered triangle wave tone at -12dBFS.
+    Requires ffmpeg to be installed.
+    """
+    audio_data, sample_rate = generate_audio_data(
+        frequency, duration, sample_rate, channels, bit_depth, max_freq
+    )
+
+    # Create temporary WAV file
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_wav:
+        tmp_wav_path = tmp_wav.name
+        wavfile.write(tmp_wav_path, sample_rate, audio_data)
+
+    try:
+        # Convert WAV to OGG using ffmpeg
+        result = subprocess.run([
+            'ffmpeg', '-y', '-i', tmp_wav_path,
+            '-c:a', 'libvorbis', '-q:a', '5',
+            str(output_path)
+        ], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"⚠ Error: Failed to generate OGG file (ffmpeg error). Is ffmpeg installed?")
+            print(f"   Error: {result.stderr}")
+            return
+
+        ch_desc = f"{channels}-channel" if channels > 2 else ("stereo" if channels == 2 else "mono")
+        print(f"✓ Generated: {output_path.name} ({ch_desc}, OGG Vorbis, {frequency:.1f}Hz, -12dBFS)")
+    finally:
+        # Clean up temp file
+        if os.path.exists(tmp_wav_path):
+            os.remove(tmp_wav_path)
+
+
+def generate_mp3(output_path, frequency, duration=1, sample_rate=44100, channels=1,
+                bit_depth=16, max_freq=1000, bitrate='192k'):
+    """
+    Generate an MP3 file with low-pass filtered triangle wave tone at -12dBFS.
+    Requires ffmpeg to be installed.
+    """
+    audio_data, sample_rate = generate_audio_data(
+        frequency, duration, sample_rate, channels, bit_depth, max_freq
+    )
+
+    # Create temporary WAV file
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_wav:
+        tmp_wav_path = tmp_wav.name
+        wavfile.write(tmp_wav_path, sample_rate, audio_data)
+
+    try:
+        # Convert WAV to MP3 using ffmpeg
+        result = subprocess.run([
+            'ffmpeg', '-y', '-i', tmp_wav_path,
+            '-c:a', 'libmp3lame', '-b:a', bitrate,
+            str(output_path)
+        ], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"⚠ Error: Failed to generate MP3 file (ffmpeg error). Is ffmpeg installed?")
+            print(f"   Error: {result.stderr}")
+            return
+
+        ch_desc = f"{channels}-channel" if channels > 2 else ("stereo" if channels == 2 else "mono")
+        print(f"✓ Generated: {output_path.name} ({ch_desc}, MP3 {bitrate}, {frequency:.1f}Hz, -12dBFS)")
+    finally:
+        # Clean up temp file
+        if os.path.exists(tmp_wav_path):
+            os.remove(tmp_wav_path)
 
 
 def main():
@@ -353,7 +623,7 @@ def main():
     parser.add_argument(
         '-t', '--type',
         type=str,
-        choices=['mp4', 'jpg', 'png', 'gif', 'wav'],
+        choices=['mp4', 'jpg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg', 'wav', 'ogg', 'mp3'],
         default='mp4',
         help='Media type to generate (default: mp4)'
     )
@@ -428,6 +698,40 @@ def main():
         help='Bit depth for WAV files: 1-32 bits (default: 16). Non-standard depths are quantized and stored in next larger container.'
     )
 
+    # Video codec options
+    parser.add_argument(
+        '--codec',
+        type=str,
+        choices=['h264', 'h265', 'vp9', 'av1', 'mpeg4', 'mjpeg', 'xvid'],
+        default='mpeg4',
+        help='Video codec to use for MP4/video generation (default: mpeg4). Note: Some codecs may require ffmpeg.'
+    )
+
+    # Audio options for videos (independent flags)
+    parser.add_argument(
+        '--embed-audio',
+        action='store_true',
+        help='Embed audio track into video files (requires ffmpeg). Can be used independently or with --audio-file.'
+    )
+    parser.add_argument(
+        '--audio-file',
+        action='store_true',
+        help='Generate standalone audio file alongside video. Can be used independently or with --embed-audio.'
+    )
+    parser.add_argument(
+        '--audio-format',
+        type=str,
+        choices=['wav', 'ogg', 'mp3'],
+        default='wav',
+        help='Format for standalone audio files when using --audio-file (default: wav)'
+    )
+    parser.add_argument(
+        '--mp3-bitrate',
+        type=str,
+        default='192k',
+        help='Bitrate for MP3 files (default: 192k)'
+    )
+
     args = parser.parse_args()
 
     # Create output directory
@@ -446,20 +750,36 @@ def main():
             print(f"\n➕ Continuing from number {start_num}")
 
     # Display generation info based on media type
+    codec_desc = f', Codec: {args.codec.upper()}' if args.type == 'mp4' else ''
+    audio_mode_desc = ''
+    if args.type == 'mp4' and (args.embed_audio or args.audio_file):
+        modes = []
+        if args.embed_audio:
+            modes.append('embedded')
+        if args.audio_file:
+            modes.append(f'file:{args.audio_format.upper()}')
+        audio_mode_desc = f', Audio: {" + ".join(modes)}'
+
     media_type_desc = {
-        'mp4': f'MP4 videos ({args.width}x{args.height}, {args.duration}s @ {args.fps}fps)',
+        'mp4': f'MP4 videos ({args.width}x{args.height}, {args.duration}s @ {args.fps}fps{codec_desc}{audio_mode_desc})',
         'jpg': f'JPG images ({args.width}x{args.height})',
         'png': f'PNG images ({args.width}x{args.height})',
+        'webp': f'WebP images ({args.width}x{args.height})',
+        'bmp': f'BMP images ({args.width}x{args.height})',
+        'tiff': f'TIFF images ({args.width}x{args.height})',
+        'svg': f'SVG vector graphics ({args.width}x{args.height})',
         'gif': f'GIF animations ({args.width}x{args.height}, {args.duration}s @ {args.fps}fps)',
-        'wav': f'WAV audio ({args.channels}ch, {args.bit_depth}-bit, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)'
+        'wav': f'WAV audio ({args.channels}ch, {args.bit_depth}-bit, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)',
+        'ogg': f'OGG audio ({args.channels}ch, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)',
+        'mp3': f'MP3 audio ({args.channels}ch, {args.mp3_bitrate}, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)'
     }
 
     print(f"\n🎬 Generating {args.n} {args.type.upper()} files...")
     print(f"   Type: {media_type_desc[args.type]}")
     print(f"   Output: {output_dir}/\n")
 
-    # Pre-calculate frequencies for WAV files (evenly spaced)
-    if args.type == 'wav':
+    # Pre-calculate frequencies for audio files and videos with audio (evenly spaced)
+    if args.type in ['wav', 'ogg', 'mp3'] or (args.type == 'mp4' and (args.embed_audio or args.audio_file)):
         if args.n == 1:
             # Single file uses min_freq
             frequencies = [args.min_freq]
@@ -475,19 +795,37 @@ def main():
         output_path = output_dir / f"{args.name}_{file_num}.{args.type}"
 
         if args.type == 'mp4':
+            # Determine if we need to generate audio for video
+            audio_freq = frequencies[i] if (args.embed_audio or args.audio_file) else None
+
             generate_video(
                 output_path,
                 width=args.width,
                 height=args.height,
                 fps=args.fps,
-                duration=args.duration
+                duration=args.duration,
+                codec=args.codec,
+                audio_frequency=audio_freq,
+                audio_sample_rate=args.sample_rate,
+                audio_channels=args.channels,
+                audio_bit_depth=args.bit_depth,
+                max_freq=args.max_freq,
+                embed_audio=args.embed_audio,
+                save_separate_audio=args.audio_file,
+                audio_format=args.audio_format
             )
-        elif args.type in ['jpg', 'png']:
+        elif args.type in ['jpg', 'png', 'webp', 'bmp', 'tiff']:
             generate_image(
                 output_path,
                 width=args.width,
                 height=args.height,
                 format=args.type
+            )
+        elif args.type == 'svg':
+            generate_svg(
+                output_path,
+                width=args.width,
+                height=args.height
             )
         elif args.type == 'gif':
             generate_gif(
@@ -506,6 +844,27 @@ def main():
                 channels=args.channels,
                 bit_depth=args.bit_depth,
                 max_freq=args.max_freq
+            )
+        elif args.type == 'ogg':
+            generate_ogg(
+                output_path,
+                frequency=frequencies[i],
+                duration=args.duration,
+                sample_rate=args.sample_rate,
+                channels=args.channels,
+                bit_depth=args.bit_depth,
+                max_freq=args.max_freq
+            )
+        elif args.type == 'mp3':
+            generate_mp3(
+                output_path,
+                frequency=frequencies[i],
+                duration=args.duration,
+                sample_rate=args.sample_rate,
+                channels=args.channels,
+                bit_depth=args.bit_depth,
+                max_freq=args.max_freq,
+                bitrate=args.mp3_bitrate
             )
 
     print(f"\n✅ Done! Generated {args.n} {args.type.upper()} files in '{output_dir}/'")
