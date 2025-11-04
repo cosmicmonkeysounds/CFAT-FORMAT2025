@@ -29,8 +29,10 @@ boolean isAnimating = false;     // Is camera currently moving?
 int targetFloorIndex = 0;        // Floor we're animating towards
 
 // Scene configuration
-int VIDEO_HEIGHT = 1080;         // Height of each video floor in scene units
-                                 // Should match your video resolution height
+// Set these to match your video files' resolution
+int VIDEO_WIDTH = 1920;          // Width of video resolution (e.g., 1920 for 1080p)
+int VIDEO_HEIGHT = 1080;         // Height of video resolution (e.g., 1080 for 1080p)
+                                 // The viewport will be centered with letterboxing on higher-res displays
 
 // Video folder path - UPDATE THIS if your videos are in a subfolder
 // "" = videos directly in data folder (data/carpet1.mp4)
@@ -57,6 +59,8 @@ void setup() {
   println("=== DISPLAY INFO ===");
   println("Using display " + DISPLAY_NUMBER);
   println("Display size: " + displayWidth + "x" + displayHeight);
+  println("Video viewport: " + VIDEO_WIDTH + "x" + VIDEO_HEIGHT);
+  println("(Videos will be centered with letterboxing)");
   println("");
   
   // Find all carpet video filenames (don't load them yet)
@@ -108,7 +112,7 @@ void draw() {
   globalTime = (millis() / 1000.0) - startTime;
   frameCounter++;
 
-  background(0);
+  background(0); // Black bars
 
   if (floors.size() > 0) {
     // Update camera animation (smooth easing)
@@ -126,8 +130,38 @@ void draw() {
       }
     }
 
+    // Calculate viewport dimensions (fit VIDEO_WIDTH x VIDEO_HEIGHT in screen)
+    float videoAspect = (float)VIDEO_WIDTH / (float)VIDEO_HEIGHT;
+    float screenAspect = (float)width / (float)height;
+
+    float viewportWidth, viewportHeight;
+    float viewportX, viewportY;
+
+    // CONTAIN mode: Fit viewport within screen with letterboxing
+    if (videoAspect > screenAspect) {
+      // Video is wider - fit to screen width
+      viewportWidth = width;
+      viewportHeight = width / videoAspect;
+      viewportX = 0;
+      viewportY = (height - viewportHeight) / 2;
+    } else {
+      // Video is taller - fit to screen height
+      viewportHeight = height;
+      viewportWidth = height * videoAspect;
+      viewportX = (width - viewportWidth) / 2;
+      viewportY = 0;
+    }
+
+    // Calculate scale factor to map VIDEO_WIDTH/HEIGHT to viewport
+    float scaleX = viewportWidth / VIDEO_WIDTH;
+    float scaleY = viewportHeight / VIDEO_HEIGHT;
+
     // Save drawing state
     pushMatrix();
+
+    // Position and scale viewport
+    translate(viewportX, viewportY);
+    scale(scaleX, scaleY);
 
     // Apply camera offset (translate scene vertically)
     translate(0, cameraYOffset);
@@ -406,11 +440,11 @@ class Floor {
       // Draw placeholder
       fill(50);
       rectMode(CORNER);
-      rect(0, 0, width, VIDEO_HEIGHT);
+      rect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
       fill(255);
       textAlign(CENTER, CENTER);
       textSize(20);
-      text("Floor " + floorIndex + " - Not loaded", width/2, VIDEO_HEIGHT/2);
+      text("Floor " + floorIndex + " - Not loaded", VIDEO_WIDTH/2, VIDEO_HEIGHT/2);
       return;
     }
 
@@ -424,26 +458,26 @@ class Floor {
       // Calculate where we should be in the loop
       float loopTime = getLoopTime(globalTime);
 
-      // Draw video to fill the scene width and VIDEO_HEIGHT
+      // Draw video to fill VIDEO_WIDTH x VIDEO_HEIGHT
       imageMode(CORNER);
 
-      // Calculate scaling to fill width while maintaining aspect ratio
+      // Calculate scaling to fill viewport while maintaining aspect ratio
       float videoAspect = (float)video.width / (float)video.height;
-      float sceneAspect = (float)width / (float)VIDEO_HEIGHT;
+      float sceneAspect = (float)VIDEO_WIDTH / (float)VIDEO_HEIGHT;
 
       float drawWidth, drawHeight;
       float drawX = 0, drawY = 0;
 
-      // COVER mode: Fill the scene area completely
+      // COVER mode: Fill the viewport completely (crop if needed)
       if (videoAspect > sceneAspect) {
         // Video is wider - fit to height, crop sides
         drawHeight = VIDEO_HEIGHT;
         drawWidth = VIDEO_HEIGHT * videoAspect;
-        drawX = (width - drawWidth) / 2; // Center horizontally
+        drawX = (VIDEO_WIDTH - drawWidth) / 2; // Center horizontally
       } else {
         // Video is taller - fit to width, crop top/bottom
-        drawWidth = width;
-        drawHeight = width / videoAspect;
+        drawWidth = VIDEO_WIDTH;
+        drawHeight = VIDEO_WIDTH / videoAspect;
         drawY = (VIDEO_HEIGHT - drawHeight) / 2; // Center vertically
       }
 
@@ -456,11 +490,11 @@ class Floor {
       // Video not ready yet, show loading message
       fill(100);
       rectMode(CORNER);
-      rect(0, 0, width, VIDEO_HEIGHT);
+      rect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
       fill(255);
       textAlign(CENTER, CENTER);
       textSize(20);
-      text("Loading floor " + floorIndex + "...", width/2, VIDEO_HEIGHT/2);
+      text("Loading floor " + floorIndex + "...", VIDEO_WIDTH/2, VIDEO_HEIGHT/2);
     }
   }
   
