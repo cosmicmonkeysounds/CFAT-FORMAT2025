@@ -42,7 +42,7 @@ String videoFolderPath = "";
 // Display configuration
 // 1 = primary display, 2 = second display, 3 = third display, etc.
 // To see available displays, uncomment the line in setup() that prints display info
-int DISPLAY_NUMBER = 1;  // ← CHANGE THIS to select which screen to use (1, 2, 3, etc.)
+int DISPLAY_NUMBER = 2;  // ← CHANGE THIS to select which screen to use (1, 2, 3, etc.)
 
 void setup() {
   // Start in fullscreen mode on specified display
@@ -166,19 +166,36 @@ void draw() {
     // Apply camera offset (translate scene vertically)
     translate(0, cameraYOffset);
 
-    // Draw all floors at their positions
-    // Only draw floors that are potentially visible (within 2 floors of camera)
+    // Calculate visible range in scene coordinates
+    // After camera transform, screen shows from -cameraYOffset to -cameraYOffset + VIDEO_HEIGHT
+    float visibleTop = -cameraYOffset - VIDEO_HEIGHT; // Add buffer for smooth transitions
+    float visibleBottom = -cameraYOffset + VIDEO_HEIGHT * 2; // Add buffer for smooth transitions
+
+    // Draw only visible floors and manage video playback
     for (int i = 0; i < floors.size(); i++) {
       Floor floor = floors.get(i);
 
-      // Check if this floor is close enough to camera to be visible
-      float distanceFromCamera = abs(floor.yPosition - (-cameraYOffset));
-      if (distanceFromCamera < VIDEO_HEIGHT * 2.5) {
-        // Render this floor at its Y position
+      // Check if this floor is within visible range
+      // Floor occupies yPosition to yPosition + VIDEO_HEIGHT
+      boolean isVisible = (floor.yPosition + VIDEO_HEIGHT >= visibleTop &&
+                          floor.yPosition <= visibleBottom);
+
+      if (isVisible) {
+        // Render this floor
         pushMatrix();
         translate(0, floor.yPosition);
         floor.display(globalTime);
         popMatrix();
+
+        // Ensure video is playing if loaded
+        if (floor.isLoaded && floor.video != null) {
+          floor.video.play(); // Safe to call even if already playing
+        }
+      } else {
+        // Pause off-screen videos to save resources
+        if (floor.isLoaded && floor.video != null) {
+          floor.video.pause(); // Safe to call even if already paused
+        }
       }
     }
 
@@ -306,11 +323,7 @@ void startFloorTransition(int newFloorIndex) {
   floors.get(newFloorIndex).ensureLoaded();
   floors.get(newFloorIndex).startPlaying();
 
-  // Optionally stop the old video (or leave it playing during transition)
-  // Uncomment if you want to stop the previous floor:
-  // if (currentFloorIndex >= 0 && currentFloorIndex < floors.size()) {
-  //   floors.get(currentFloorIndex).stopPlaying();
-  // }
+  // Note: Old videos will be automatically paused by the visibility check in draw()
 }
 
 void findCarpetVideos() {
@@ -506,10 +519,28 @@ class Floor {
    */
   void drawOverlay(float loopTime) {
     if (showDebugPanel) {
+      // Count playing videos by checking if they're actually playing
+      int playingCount = 0;
+      int loadedCount = 0;
+      for (Floor f : floors) {
+        if (f.isLoaded) {
+          loadedCount++;
+          // Check if video is actually playing (not paused)
+          try {
+            if (f.video != null && f.video.isPlaying()) {
+              playingCount++;
+            }
+          } catch (Exception e) {
+            // Fallback if isPlaying() not available
+            if (f.video != null && f.video.time() > 0) playingCount++;
+          }
+        }
+      }
+
       // Extended debug panel
       fill(0, 200);
       noStroke();
-      rect(10, 10, 450, 280);
+      rect(10, 10, 450, 300);
 
       fill(255);
       textAlign(LEFT, TOP);
@@ -531,7 +562,8 @@ class Floor {
         text("Target Floor: " + targetFloorIndex, 20, y); y += lineHeight;
       }
       y += 5; // Spacer
-      text("Loaded: " + isLoaded, 20, y); y += lineHeight;
+      text("Videos Playing: " + playingCount + " / " + loadedCount + " loaded", 20, y); y += lineHeight;
+      text("This Floor Loaded: " + isLoaded, 20, y); y += lineHeight;
       if (isLoaded && video != null) {
         text("Video Time: " + nf(video.time(), 0, 2) + "s", 20, y); y += lineHeight;
         text("Video Dims: " + video.width + "x" + video.height, 20, y); y += lineHeight;
