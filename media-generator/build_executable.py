@@ -56,6 +56,9 @@ def build_executable():
         "--hidden-import", "PIL",
         "--hidden-import", "scipy.signal",
         "--hidden-import", "scipy.io.wavfile",
+        "--hidden-import", "imageio_ffmpeg",
+        # Collect ffmpeg binary
+        "--collect-binaries", "imageio_ffmpeg",
         # Entry point
         "media_generator/__main__.py",
     ]
