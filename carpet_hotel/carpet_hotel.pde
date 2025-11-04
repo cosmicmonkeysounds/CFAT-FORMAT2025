@@ -115,16 +115,17 @@ void keyPressed() {
   else if (key == 'f' || key == 'F') {
     isFullscreen = !isFullscreen;
     if (isFullscreen) {
-      // Set to display dimensions
+      // Fullscreen: maximize window to display size
       surface.setSize(displayWidth, displayHeight);
       surface.setLocation(0, 0);
     } else {
-      // Return to windowed mode
+      // Windowed: restore to default size
       surface.setSize(1280, 720);
-      // Center the window
+      // Center window
       surface.setLocation((displayWidth - 1280) / 2, (displayHeight - 720) / 2);
     }
     println("Fullscreen: " + (isFullscreen ? "ON" : "OFF"));
+    println("Window size: " + width + "x" + height);
     return;
   }
   // Space bar - show info
@@ -325,30 +326,28 @@ class Floor {
       // Calculate where we should be in the loop
       float loopTime = getLoopTime(globalTime);
 
-      // Draw the video scaled to fit screen
-      imageMode(CORNER);
+      // Draw the video centered with letterboxing (black bars)
+      imageMode(CENTER);
 
-      // Scale video to fit screen while maintaining aspect ratio
+      // Calculate aspect ratios
       float videoAspect = (float)video.width / (float)video.height;
       float screenAspect = (float)width / (float)height;
 
       float drawWidth, drawHeight;
-      float drawX = 0, drawY = 0;
 
+      // CONTAIN mode: Scale to fit within screen, add black bars as needed
       if (videoAspect > screenAspect) {
-        // Video is wider than screen
+        // Video is wider than screen - fit to width, black bars top/bottom
         drawWidth = width;
         drawHeight = width / videoAspect;
-        drawY = (height - drawHeight) / 2;
       } else {
-        // Video is taller than screen
+        // Video is taller than screen - fit to height, black bars left/right
         drawHeight = height;
         drawWidth = height * videoAspect;
-        drawX = (width - drawWidth) / 2;
       }
 
-      // Draw video
-      image(video, drawX, drawY, drawWidth, drawHeight);
+      // Draw video centered (black bars fill remaining space naturally)
+      image(video, width/2, height/2, drawWidth, drawHeight);
 
       // Draw floor info overlay
       drawOverlay(loopTime);
