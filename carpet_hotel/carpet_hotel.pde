@@ -42,7 +42,7 @@ String videoFolderPath = "";
 // Display configuration
 // 1 = primary display, 2 = second display, 3 = third display, etc.
 // To see available displays, uncomment the line in setup() that prints display info
-int DISPLAY_NUMBER = 2;  // ← CHANGE THIS to select which screen to use (1, 2, 3, etc.)
+int DISPLAY_NUMBER = 1;  // ← CHANGE THIS to select which screen to use (1, 2, 3, etc.)
 
 void setup() {
   // Start in fullscreen mode on specified display
@@ -98,7 +98,7 @@ void setup() {
     println("1-9, 0, A-Z: Switch floors");
     println("UP/DOWN arrows: Navigate floors");
     println("D: Toggle debug panel");
-    println("F or ESC: Exit fullscreen (restart to return to fullscreen)");
+    println("F or ESC: Toggle fullscreen/windowed mode");
     println("SPACE: Print current floor info");
 
     // Start playing the first video
@@ -208,22 +208,25 @@ void keyPressed() {
     println("Debug panel: " + (showDebugPanel ? "ON" : "OFF"));
     return;
   }
-  // 'f' or ESC key - exit fullscreen to windowed mode
+  // 'f' or ESC key - toggle fullscreen/windowed mode
   else if (key == 'f' || key == 'F' || key == ESC) {
     if (key == ESC) {
       key = 0; // Prevent Processing from auto-exiting on ESC
     }
 
+    isFullscreen = !isFullscreen;
+
     if (isFullscreen) {
+      // Enter fullscreen: resize to display dimensions
+      surface.setSize(displayWidth, displayHeight);
+      surface.setLocation(0, 0);
+      println("Fullscreen mode: " + displayWidth + "x" + displayHeight);
+    } else {
       // Exit fullscreen to windowed mode
-      isFullscreen = false;
       surface.setSize(1280, 720);
       // Center window
       surface.setLocation((displayWidth - 1280) / 2, (displayHeight - 720) / 2);
-      println("Switched to windowed mode (1280x720)");
-      println("Note: Restart sketch to return to fullscreen");
-    } else {
-      println("Already in windowed mode. Restart sketch for fullscreen.");
+      println("Windowed mode: 1280x720");
     }
     return;
   }
