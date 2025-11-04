@@ -7,7 +7,49 @@ Each video is 1 second long with randomized visual noise/distortion.
 import cv2
 import numpy as np
 import argparse
+import re
 from pathlib import Path
+
+
+def find_existing_videos(output_dir, base_name):
+    """
+    Find existing videos matching the naming pattern and return the highest number.
+    Returns None if no matching files found.
+    """
+    pattern = re.compile(rf'^{re.escape(base_name)}_(\d+)\.mp4$')
+    max_num = 0
+    found = False
+    
+    if output_dir.exists():
+        for file in output_dir.iterdir():
+            match = pattern.match(file.name)
+            if match:
+                found = True
+                num = int(match.group(1))
+                max_num = max(max_num, num)
+    
+    return max_num if found else None
+
+
+def prompt_conflict_resolution(output_dir, base_name, max_existing):
+    """
+    Prompt user to decide how to handle existing files.
+    Returns (start_number, overwrite_mode)
+    """
+    print(f"\n⚠️  Found existing videos matching pattern '{base_name}_*.mp4'")
+    print(f"    Highest number found: {max_existing}")
+    print(f"\nOptions:")
+    print(f"  1) Overwrite - Start from 1 (will overwrite existing files)")
+    print(f"  2) Continue - Start from {max_existing + 1} (preserve existing files)")
+    
+    while True:
+        choice = input("\nEnter choice (1 or 2): ").strip()
+        if choice == '1':
+            return 1, True
+        elif choice == '2':
+            return max_existing + 1, False
+        else:
+            print("Invalid choice. Please enter 1 or 2.")
 
 
 def apply_random_effects(frame, effect_intensity=0.3):
@@ -109,6 +151,12 @@ def main():
         help='Number of videos to generate'
     )
     parser.add_argument(
+        '-n', '--name',
+        type=str,
+        default='test_video',
+        help='Base name for video files (default: test_video)'
+    )
+    parser.add_argument(
         '-o', '--output-dir',
         type=str,
         default='test_videos',
@@ -145,6 +193,17 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True)
     
+    # Check for existing files and handle conflicts
+    max_existing = find_existing_videos(output_dir, args.name)
+    start_num = 1
+    
+    if max_existing is not None:
+        start_num, overwrite = prompt_conflict_resolution(output_dir, args.name, max_existing)
+        if overwrite:
+            print(f"\n🔄 Will overwrite existing files starting from 1")
+        else:
+            print(f"\n➕ Continuing from number {start_num}")
+    
     print(f"\n🎬 Generating {args.n} test videos...")
     print(f"   Resolution: {args.width}x{args.height}")
     print(f"   Duration: {args.duration}s @ {args.fps}fps")
@@ -152,7 +211,8 @@ def main():
     
     # Generate videos
     for i in range(args.n):
-        output_path = output_dir / f"test_video_{i+1:04d}.mp4"
+        video_num = start_num + i
+        output_path = output_dir / f"{args.name}_{video_num}.mp4"
         generate_video(
             output_path,
             width=args.width,

@@ -1,0 +1,32 @@
+CONFLICT HANDLING EXAMPLE
+=========================
+
+When you run the script and files already exist with the same naming pattern,
+you'll see this interactive prompt:
+
+$ python generate_test_videos.py 5 -o test_videos --name carpet
+
+⚠️  Found existing videos matching pattern 'carpet_*.mp4'
+    Highest number found: 15
+
+Options:
+  1) Overwrite - Start from 1 (will overwrite existing files)
+  2) Continue - Start from 16 (preserve existing files)
+
+Enter choice (1 or 2): 
+
+
+CHOOSING OPTION 1 (Overwrite):
+------------------------------
+Will create: carpet_1.mp4, carpet_2.mp4, carpet_3.mp4, carpet_4.mp4, carpet_5.mp4
+(Overwrites any existing files with these names)
+
+
+CHOOSING OPTION 2 (Continue):
+-----------------------------
+Will create: carpet_16.mp4, carpet_17.mp4, carpet_18.mp4, carpet_19.mp4, carpet_20.mp4
+(Preserves all existing files, starts after the highest number found)
+
+
+This makes it safe to add more test videos to a directory without
+accidentally destroying your existing test files!
