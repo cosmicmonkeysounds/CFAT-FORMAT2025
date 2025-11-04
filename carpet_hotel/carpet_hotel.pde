@@ -43,6 +43,9 @@ void setup() {
 }
 
 void draw() {
+  // Update shared state once per frame
+  sharedState.update();
+
   background(40);
   fill(255);
   textAlign(LEFT, TOP);
@@ -71,6 +74,10 @@ void draw() {
 
 void keyPressed() {
   sharedState.handleKey(key, keyCode);
+}
+
+void movieEvent(Movie m) {
+  m.read();
 }
 
 void exit() {
@@ -290,8 +297,6 @@ class FloorWindow extends PApplet {
   }
 
   public void draw() {
-    sharedState.update();
-
     background(0);
 
     // Calculate which floor to show
@@ -346,10 +351,6 @@ class FloorWindow extends PApplet {
 
       popMatrix();
     }
-  }
-
-  public void movieEvent(Movie m) {
-    m.read();
   }
 }
 
