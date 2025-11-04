@@ -1,5 +1,15 @@
 # Adding Shader Effects to Carpet Hotel
 
+## Important: P3D Renderer = Shader Support ✨
+
+Even though we're using Processing's standard Video library (not GLVideo), **you still have full shader support!** The P3D renderer converts videos to OpenGL textures, which means you can apply any GLSL shader to your video streams.
+
+This is the best of both worlds:
+- ✅ Reliable video playback (standard Video library)
+- ✅ Full shader capabilities (P3D renderer)
+- ✅ Works great on macOS and all platforms
+- ✅ Stable and well-documented
+
 ## Quick Start
 
 ### 1. Basic Shader Integration
@@ -198,7 +208,8 @@ carpet_hotel/
 
 ## Resources
 
-- **GLVideo + Shaders**: Videos are already textures, perfect for shader input
+- **Standard Video Library + P3D**: Videos become OpenGL textures, perfect for shaders!
+- **Why not GLVideo?**: Better cross-platform compatibility, especially on macOS
 - **The Book of Shaders**: https://thebookofshaders.com/
 - **Shadertoy**: Convert GLSL shaders to Processing format
 - **Processing Shader Tutorial**: https://processing.org/tutorials/pshader

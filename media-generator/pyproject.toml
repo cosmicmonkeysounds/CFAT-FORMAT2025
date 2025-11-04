@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "media-generator"
+version = "1.0.0"
+description = "Generate unique test media files (MP4, JPG, PNG, GIF, WAV) with random characteristics"
+readme = "README.md"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia",
+    "Topic :: Software Development :: Testing",
+]
+keywords = ["media", "generator", "test", "video", "audio", "image"]
+
+dependencies = [
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "scipy>=1.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=23.0",
+    "flake8>=6.0",
+]
+build = [
+    "pyinstaller>=5.13.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/media-generator"
+Repository = "https://github.com/yourusername/media-generator"
+Issues = "https://github.com/yourusername/media-generator/issues"
+
+[project.scripts]
+media-generator = "media_generator:main"
+mediagen = "media_generator:main"
+
+[tool.setuptools]
+packages = ["media_generator"]
+
+[tool.setuptools.package-data]
+media_generator = ["*.txt"]

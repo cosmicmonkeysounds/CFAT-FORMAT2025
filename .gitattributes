@@ -1,0 +1,153 @@
+# ============================================================================
+# Git LFS - Media Files
+# ============================================================================
+# Use Git LFS to track large media files efficiently
+# Install Git LFS: https://git-lfs.github.com/
+# Initialize in repo: git lfs install
+
+# Video files
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.mov filter=lfs diff=lfs merge=lfs -text
+*.avi filter=lfs diff=lfs merge=lfs -text
+*.mkv filter=lfs diff=lfs merge=lfs -text
+*.webm filter=lfs diff=lfs merge=lfs -text
+*.flv filter=lfs diff=lfs merge=lfs -text
+*.wmv filter=lfs diff=lfs merge=lfs -text
+*.m4v filter=lfs diff=lfs merge=lfs -text
+
+# Image files
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.jpeg filter=lfs diff=lfs merge=lfs -text
+*.gif filter=lfs diff=lfs merge=lfs -text
+*.bmp filter=lfs diff=lfs merge=lfs -text
+*.tiff filter=lfs diff=lfs merge=lfs -text
+*.tif filter=lfs diff=lfs merge=lfs -text
+*.psd filter=lfs diff=lfs merge=lfs -text
+*.ai filter=lfs diff=lfs merge=lfs -text
+*.webp filter=lfs diff=lfs merge=lfs -text
+*.svg filter=lfs diff=lfs merge=lfs -text
+*.ico filter=lfs diff=lfs merge=lfs -text
+
+# Audio files
+*.mp3 filter=lfs diff=lfs merge=lfs -text
+*.wav filter=lfs diff=lfs merge=lfs -text
+*.ogg filter=lfs diff=lfs merge=lfs -text
+*.flac filter=lfs diff=lfs merge=lfs -text
+*.aac filter=lfs diff=lfs merge=lfs -text
+*.m4a filter=lfs diff=lfs merge=lfs -text
+*.wma filter=lfs diff=lfs merge=lfs -text
+*.aiff filter=lfs diff=lfs merge=lfs -text
+
+# 3D models and textures
+*.obj filter=lfs diff=lfs merge=lfs -text
+*.fbx filter=lfs diff=lfs merge=lfs -text
+*.gltf filter=lfs diff=lfs merge=lfs -text
+*.glb filter=lfs diff=lfs merge=lfs -text
+*.blend filter=lfs diff=lfs merge=lfs -text
+*.ma filter=lfs diff=lfs merge=lfs -text
+*.mb filter=lfs diff=lfs merge=lfs -text
+
+# Archives and compiled assets
+*.zip filter=lfs diff=lfs merge=lfs -text
+*.tar.gz filter=lfs diff=lfs merge=lfs -text
+*.rar filter=lfs diff=lfs merge=lfs -text
+*.7z filter=lfs diff=lfs merge=lfs -text
+
+# Processing-specific media
+*.mov filter=lfs diff=lfs merge=lfs -text
+
+# ============================================================================
+# Line Ending Normalization (Cross-Platform)
+# ============================================================================
+# Automatically normalize line endings for text files
+* text=auto
+
+# Source code
+*.pde text eol=lf
+*.py text eol=lf
+*.java text eol=lf
+*.glsl text eol=lf
+*.frag text eol=lf
+*.vert text eol=lf
+*.shader text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+
+# Scripts
+*.sh text eol=lf
+*.bash text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+*.rst text eol=lf
+README text eol=lf
+LICENSE text eol=lf
+AUTHORS text eol=lf
+
+# Configuration files
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+*.properties text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# ============================================================================
+# Binary Files (Explicit)
+# ============================================================================
+# Ensure these are always treated as binary
+
+# Executables
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+
+# Java/Processing compiled
+*.class binary
+*.jar binary
+
+# Python compiled
+*.pyc binary
+*.pyo binary
+*.pyd binary
+
+# ============================================================================
+# Diff Configuration
+# ============================================================================
+# Better diff output for specific file types
+
+# Python
+*.py diff=python
+
+# Markdown - generate useful diffs
+*.md diff=markdown
+
+# Images - show that they changed but don't try to diff
+*.png diff=lfs
+*.jpg diff=lfs
+*.jpeg diff=lfs
+*.gif diff=lfs
+
+# ============================================================================
+# Merge Strategy
+# ============================================================================
+# Custom merge strategies for specific files
+
+# Lock files should not be merged
+package-lock.json merge=binary
+poetry.lock merge=binary
+Pipfile.lock merge=binary
+
+# Generated documentation - prefer theirs or ours, not auto-merge
+*.generated.md merge=ours

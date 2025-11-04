@@ -25,9 +25,69 @@ Generate unique test media files (MP4 videos, JPG/PNG images, GIF animations, WA
 
 ## Installation
 
+### Option 1: Install as Python Package (Recommended for Developers)
+
+Install directly from the repository:
 ```bash
-pip3 install -r requirements.txt
+# Clone the repository
+git clone https://github.com/yourusername/media-generator.git
+cd media-generator
+
+# Install in development mode
+pip3 install -e .
 ```
+
+Or install from PyPI (if published):
+```bash
+pip3 install media-generator
+```
+
+After installation, you can run it from anywhere:
+```bash
+media-generator 10 -t mp4
+# or
+mediagen 10 -t wav
+```
+
+### Option 2: Use Standalone Executable (For End Users)
+
+Download the pre-built executable for your platform from the [Releases](https://github.com/yourusername/media-generator/releases) page:
+
+- **Windows**: `media-generator.exe`
+- **macOS**: `media-generator` (may need to run: `xattr -cr media-generator`)
+- **Linux**: `media-generator` (may need to run: `chmod +x media-generator`)
+
+No Python installation required!
+
+### Option 3: Run from Source
+
+```bash
+# Install dependencies
+pip3 install -r requirements.txt
+
+# Run directly
+python3 -m media_generator 10 -t mp4
+# or
+python3 media_generator.py 10 -t mp4
+```
+
+## Building Executables
+
+To build standalone executables for distribution:
+
+```bash
+# Install build dependencies
+pip3 install -e ".[build]"
+
+# Build executable for your platform
+python3 build_executable.py
+```
+
+The executable will be created in `dist/media-generator` (or `dist/media-generator.exe` on Windows).
+
+**Cross-platform builds:**
+- Build on each target platform (Windows, macOS, Linux) to create native executables
+- Or use GitHub Actions / CI for automated multi-platform builds
 
 ## Usage
 
@@ -232,3 +292,109 @@ High-quality test audio with precise characteristics:
 - 24-bit: Standard 24-bit PCM
 
 Perfect for testing audio systems, DAWs, and media players!
+
+## Package Structure
+
+```
+media-generator/
+├── media_generator/          # Main package
+│   ├── __init__.py          # Package initialization
+│   └── __main__.py          # Main application code
+├── build_executable.py      # Build script for creating executables
+├── pyproject.toml           # Package configuration
+├── requirements.txt         # Python dependencies
+├── MANIFEST.in             # Package data files
+├── LICENSE                 # MIT License
+├── README.md               # This file
+└── .github/
+    └── workflows/
+        └── build.yml        # GitHub Actions CI/CD
+
+Generated files (not in repo):
+├── dist/                    # Built executables
+├── build/                   # Build artifacts
+└── *.spec                   # PyInstaller spec files
+```
+
+## Development
+
+### Running Tests
+
+```bash
+# Install dev dependencies
+pip3 install -e ".[dev]"
+
+# Run tests (add tests in tests/ directory)
+pytest
+```
+
+### Code Formatting
+
+```bash
+# Format code with black
+black media_generator/
+
+# Lint with flake8
+flake8 media_generator/
+```
+
+### Making Changes
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature-name`
+3. Make your changes
+4. Test thoroughly
+5. Commit: `git commit -am 'Add new feature'`
+6. Push: `git push origin feature-name`
+7. Create a Pull Request
+
+## Distribution
+
+### Publishing to PyPI
+
+```bash
+# Build distribution packages
+python3 -m build
+
+# Upload to PyPI (requires account)
+python3 -m twine upload dist/*
+```
+
+### Creating Releases
+
+1. Tag a version: `git tag v1.0.0`
+2. Push tag: `git push origin v1.0.0`
+3. GitHub Actions will automatically build executables for all platforms
+4. Download artifacts from Actions or check the Releases page
+
+### Manual Distribution
+
+If not using GitHub Actions:
+
+1. Build on each platform (Windows, macOS, Linux)
+2. Run: `python3 build_executable.py`
+3. Collect executables from `dist/` directory
+4. Distribute to users
+
+## Command Aliases
+
+After installing as a package, you can use either command:
+
+```bash
+media-generator 10 -t mp4    # Full name
+mediagen 10 -t wav           # Short alias
+```
+
+For standalone executables, use:
+```bash
+./media-generator 10 -t mp4  # Unix/macOS
+media-generator.exe 10 -t mp4  # Windows
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+MIT License - see LICENSE file for details.
