@@ -27,9 +27,12 @@ boolean isFullscreen = false;    // Toggle with 'f' key
 String videoFolderPath = "";
 
 void setup() {
-  size(1280, 720, P3D); // P3D renderer for shader support
+  // Start in fullscreen mode by default
+  fullScreen(P3D);
   pixelDensity(1); // Explicitly set to 1 to avoid high-density display issues
   background(0);
+
+  isFullscreen = true; // Track that we started in fullscreen
 
   // Initialize global timer
   startTime = millis() / 1000.0;
@@ -69,12 +72,12 @@ void setup() {
     println("1-9, 0, A-Z: Switch floors");
     println("UP/DOWN arrows: Navigate floors");
     println("D: Toggle debug panel");
-    println("F: Toggle fullscreen");
+    println("F or ESC: Exit fullscreen (restart to return to fullscreen)");
     println("SPACE: Print current floor info");
 
     // Start playing the first video
     floors.get(0).startPlaying();
-    println("\nSetup complete!");
+    println("\nSetup complete! Running in FULLSCREEN mode.");
   }
 }
 
@@ -111,21 +114,23 @@ void keyPressed() {
     println("Debug panel: " + (showDebugPanel ? "ON" : "OFF"));
     return;
   }
-  // 'f' key - toggle fullscreen
-  else if (key == 'f' || key == 'F') {
-    isFullscreen = !isFullscreen;
+  // 'f' or ESC key - exit fullscreen to windowed mode
+  else if (key == 'f' || key == 'F' || key == ESC) {
+    if (key == ESC) {
+      key = 0; // Prevent Processing from auto-exiting on ESC
+    }
+
     if (isFullscreen) {
-      // Fullscreen: maximize window to display size
-      surface.setSize(displayWidth, displayHeight);
-      surface.setLocation(0, 0);
-    } else {
-      // Windowed: restore to default size
+      // Exit fullscreen to windowed mode
+      isFullscreen = false;
       surface.setSize(1280, 720);
       // Center window
       surface.setLocation((displayWidth - 1280) / 2, (displayHeight - 720) / 2);
+      println("Switched to windowed mode (1280x720)");
+      println("Note: Restart sketch to return to fullscreen");
+    } else {
+      println("Already in windowed mode. Restart sketch for fullscreen.");
     }
-    println("Fullscreen: " + (isFullscreen ? "ON" : "OFF"));
-    println("Window size: " + width + "x" + height);
     return;
   }
   // Space bar - show info
