@@ -2,6 +2,11 @@
 
 Generate unique test media files (MP4 videos, JPG/PNG images, GIF animations, WAV audio) with random characteristics for testing media applications.
 
+**📖 Documentation Guide:**
+- **Non-technical users**: See [USER_GUIDE.md](USER_GUIDE.md) for simple installation and usage instructions
+- **Developers**: Continue reading this README for technical details
+- **Quick reference**: See [QUICKSTART.md](QUICKSTART.md) for command examples
+
 ## Features
 
 ### Video & Image Features

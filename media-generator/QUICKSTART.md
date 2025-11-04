@@ -1,39 +1,20 @@
 # Quick Start Guide
 
-## For End Users (No Python Required)
+**🆕 New user?** See [USER_GUIDE.md](USER_GUIDE.md) for detailed installation instructions.
 
-1. Download the executable for your platform:
-   - Windows: `media-generator.exe`
-   - macOS: `media-generator`
-   - Linux: `media-generator`
+## Installation
 
-2. Make it executable (macOS/Linux only):
-   ```bash
-   chmod +x media-generator
-   ```
+### For End Users (No Python Required)
+Download the executable from [Releases](https://github.com/yourusername/media-generator/releases):
+```bash
+# Windows: Run media-generator.exe
+# macOS/Linux: chmod +x media-generator && ./media-generator
+```
 
-3. Run it:
-   ```bash
-   # Windows
-   media-generator.exe 10 -t mp4
-
-   # macOS/Linux
-   ./media-generator 10 -t mp4
-   ```
-
-## For Developers (With Python)
-
-1. Install the package:
-   ```bash
-   pip3 install -e .
-   ```
-
-2. Run from anywhere:
-   ```bash
-   media-generator 10 -t mp4
-   # or
-   mediagen 10 -t wav
-   ```
+### For Developers (With Python)
+```bash
+pip3 install -e .
+```
 
 ## Quick Examples
 

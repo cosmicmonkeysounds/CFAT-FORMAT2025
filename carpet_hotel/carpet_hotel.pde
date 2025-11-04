@@ -17,6 +17,10 @@ ArrayList<Floor> floors;
 int currentFloorIndex = 0;
 ArrayList<String> videoFilenames; // Store filenames, load videos on demand
 
+// Display settings
+boolean showDebugPanel = false;  // Toggle with 'd' key
+boolean isFullscreen = false;    // Toggle with 'f' key
+
 // Video folder path - UPDATE THIS if your videos are in a subfolder
 // "" = videos directly in data folder (data/carpet1.mp4)
 // "carpets/" = videos in subfolder (data/carpets/carpet1.mp4)
@@ -61,12 +65,16 @@ void setup() {
   } else {
     println("Found " + videoFilenames.size() + " video files");
     println("Loaded 1 video (others will load on demand)");
-    println("Press keys 1-9, 0, A-Z to switch floors");
-    println("Press SPACE to show current floor info");
+    println("\n=== CONTROLS ===");
+    println("1-9, 0, A-Z: Switch floors");
+    println("UP/DOWN arrows: Navigate floors");
+    println("D: Toggle debug panel");
+    println("F: Toggle fullscreen");
+    println("SPACE: Print current floor info");
 
     // Start playing the first video
     floors.get(0).startPlaying();
-    println("Setup complete!");
+    println("\nSetup complete!");
   }
 }
 
@@ -94,22 +102,30 @@ void draw() {
 
 void keyPressed() {
   if (floors.size() == 0) return;
-  
-  // Map keys to floor indices
-  int newFloor = -1;
-  
-  // Numbers 1-9
-  if (key >= '1' && key <= '9') {
-    newFloor = key - '1';
+
+  // Check for special function keys FIRST (before A-Z handler catches them)
+
+  // 'd' key - toggle debug panel
+  if (key == 'd' || key == 'D') {
+    showDebugPanel = !showDebugPanel;
+    println("Debug panel: " + (showDebugPanel ? "ON" : "OFF"));
+    return;
   }
-  // Number 0
-  else if (key == '0') {
-    newFloor = 9;
-  }
-  // Letters A-Z (case insensitive)
-  else if ((key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z')) {
-    char upperKey = Character.toUpperCase(key);
-    newFloor = 10 + (upperKey - 'A');
+  // 'f' key - toggle fullscreen
+  else if (key == 'f' || key == 'F') {
+    isFullscreen = !isFullscreen;
+    if (isFullscreen) {
+      // Set to display dimensions
+      surface.setSize(displayWidth, displayHeight);
+      surface.setLocation(0, 0);
+    } else {
+      // Return to windowed mode
+      surface.setSize(1280, 720);
+      // Center the window
+      surface.setLocation((displayWidth - 1280) / 2, (displayHeight - 720) / 2);
+    }
+    println("Fullscreen: " + (isFullscreen ? "ON" : "OFF"));
+    return;
   }
   // Space bar - show info
   else if (key == ' ') {
@@ -126,25 +142,39 @@ void keyPressed() {
     }
     return;
   }
-  // 'd' key - debug mode
-  else if (key == 'd' || key == 'D') {
-    println("\n=== DEBUG INFO ===");
-    println("Current Floor: " + currentFloorIndex);
-    println("Total Floors: " + floors.size());
-    println("Global Time: " + globalTime);
-    Floor f = floors.get(currentFloorIndex);
-    println("Loaded: " + f.isLoaded);
-    if (f.isLoaded) {
-      println("Current video playing: " + (f.video.time() > 0));
-      println("Current video time: " + f.video.time());
-      println("Video width: " + f.video.width + ", height: " + f.video.height);
-    }
-    println("Frame rate: " + frameRate);
-    return;
+
+  // Map keys to floor indices
+  int newFloor = -1;
+
+  // Numbers 1-9
+  if (key >= '1' && key <= '9') {
+    newFloor = key - '1';
   }
-  
-  // Switch floor if valid
-  if (newFloor >= 0 && newFloor < floors.size()) {
+  // Number 0
+  else if (key == '0') {
+    newFloor = 9;
+  }
+  // Letters A-Z (case insensitive) - for floors 10+
+  else if ((key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z')) {
+    char upperKey = Character.toUpperCase(key);
+    newFloor = 10 + (upperKey - 'A');
+  }
+
+  // Handle arrow keys (keyCode for special keys)
+  if (key == CODED) {
+    if (keyCode == UP) {
+      // Go UP to higher floor number
+      newFloor = currentFloorIndex + 1;
+      if (newFloor >= floors.size()) newFloor = floors.size() - 1; // Clamp to max
+    } else if (keyCode == DOWN) {
+      // Go DOWN to lower floor number
+      newFloor = currentFloorIndex - 1;
+      if (newFloor < 0) newFloor = 0; // Clamp to 0
+    }
+  }
+
+  // Switch floor if valid and different from current
+  if (newFloor >= 0 && newFloor < floors.size() && newFloor != currentFloorIndex) {
     // Stop current video
     floors.get(currentFloorIndex).stopPlaying();
 
@@ -335,16 +365,31 @@ class Floor {
    * Draw UI overlay with floor information
    */
   void drawOverlay(float loopTime) {
-    fill(0, 180);
-    noStroke();
-    rect(10, 10, 300, 90);
-    
-    fill(255);
-    textAlign(LEFT, TOP);
-    textSize(16);
-    text("Floor: " + currentFloorIndex, 20, 20);
-    text("Name: " + name, 20, 40);
-    text("Loop: " + nf(loopTime, 0, 2) + " / " + nf(duration, 0, 2) + "s", 20, 60);
-    text("Global: " + nf(globalTime, 0, 2) + "s", 20, 80);
+    if (showDebugPanel) {
+      // Extended debug panel
+      fill(0, 200);
+      noStroke();
+      rect(10, 10, 400, 220);
+
+      fill(255);
+      textAlign(LEFT, TOP);
+      textSize(16);
+      int y = 20;
+      int lineHeight = 22;
+
+      text("=== CARPET HOTEL DEBUG ===", 20, y); y += lineHeight;
+      text("Floor: " + currentFloorIndex + " / " + (floors.size() - 1), 20, y); y += lineHeight;
+      text("Name: " + name, 20, y); y += lineHeight;
+      text("Loop: " + nf(loopTime, 0, 2) + " / " + nf(duration, 0, 2) + "s", 20, y); y += lineHeight;
+      text("Global Time: " + nf(globalTime, 0, 2) + "s", 20, y); y += lineHeight;
+      text("Loaded: " + isLoaded, 20, y); y += lineHeight;
+      if (isLoaded && video != null) {
+        text("Video Time: " + nf(video.time(), 0, 2) + "s", 20, y); y += lineHeight;
+        text("Video Dims: " + video.width + "x" + video.height, 20, y); y += lineHeight;
+        text("Playing: " + (video.time() > 0), 20, y); y += lineHeight;
+      }
+      text("Frame Rate: " + nf(frameRate, 0, 1) + " fps", 20, y); y += lineHeight;
+    }
+    // No overlay when debug panel is off - clean video display
   }
 }
