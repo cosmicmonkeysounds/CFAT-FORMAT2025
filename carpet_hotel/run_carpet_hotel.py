@@ -415,6 +415,19 @@ class CarpetHotelLauncher:
             except Exception as e:
                 print(f"  Warning: {e}")
 
+        # Kill any remaining SuperCollider/sclang processes
+        try:
+            print("Killing any remaining SuperCollider processes...")
+            if self.platform == 'Darwin' or self.platform == 'Linux':
+                subprocess.run(['pkill', '-9', 'sclang'], capture_output=True)
+                subprocess.run(['pkill', '-9', 'scsynth'], capture_output=True)
+            elif self.platform == 'Windows':
+                subprocess.run(['taskkill', '/F', '/IM', 'sclang.exe'], capture_output=True)
+                subprocess.run(['taskkill', '/F', '/IM', 'scsynth.exe'], capture_output=True)
+            print("✓ All SuperCollider processes terminated")
+        except Exception as e:
+            print(f"  Warning: {e}")
+
         print("\n✓ Shutdown complete\n")
 
 def select_audio_device():
