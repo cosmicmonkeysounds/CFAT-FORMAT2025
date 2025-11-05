@@ -4,6 +4,7 @@
  */
 
 import processing.video.*;
+import processing.sound.*;
 import java.io.File;
 
 // Configuration
@@ -33,7 +34,9 @@ void setup() {
 
   println("\n=== CARPET HOTEL CONTROL ===");
   println("Windows launched: " + NUM_WINDOWS);
-  println("Videos loaded: " + sharedState.videos.size());
+  println("Floors loaded: " + sharedState.floors.size());
+  println("Videos: " + sharedState.videoNames.size());
+  println("Audio: " + sharedState.audioNames.size());
   println("\nTIP: Edit 'transition_config.txt' to customize transition effects");
   println("(Config file is in the same folder as the .pde file)");
   println("\nCONTROLS:");
@@ -42,6 +45,7 @@ void setup() {
   println("F: Toggle fullscreen");
   println("R: Reload config file");
   println("SPACE: Print info");
+  println("SCROLL: Adjust master volume");
   println("ESC: Close all windows");
 }
 
@@ -56,9 +60,10 @@ void draw() {
 
   int y = 20;
   text("=== CARPET HOTEL CONTROL ===", 20, y); y += 30;
-  text("Videos: " + sharedState.videos.size(), 20, y); y += 25;
+  text("Floors: " + sharedState.floors.size() + " (" + sharedState.videoNames.size() + " videos, " + sharedState.audioNames.size() + " audio)", 20, y); y += 25;
   text("Scenes: " + sharedState.getNumScenes(), 20, y); y += 25;
   text("Current scene: " + sharedState.currentScene, 20, y); y += 25;
+  text("Master volume: " + nf(sharedState.masterVolume * 100, 0, 0) + "%", 20, y); y += 25;
   if (sharedState.isAnimating) {
     float pct = (sharedState.animationProgress / sharedState.totalDistance) * 100;
     text("Animating: " + sharedState.startScene + " -> " + sharedState.targetScene, 20, y); y += 20;
@@ -106,6 +111,12 @@ void keyPressed() {
 
 void movieEvent(Movie m) {
   m.read();
+}
+
+void mouseWheel(MouseEvent event) {
+  float delta = event.getCount();
+  sharedState.masterVolume = constrain(sharedState.masterVolume - delta * 0.05, 0.0, 1.0);
+  println("Master volume: " + nf(sharedState.masterVolume * 100, 0, 0) + "%");
 }
 
 void exit() {
@@ -209,8 +220,9 @@ class TransitionConfig {
  * Shared state synchronized across all windows
  */
 class SharedState {
-  ArrayList<Movie> videos;
+  ArrayList<Floor> floors;
   ArrayList<String> videoNames;
+  ArrayList<String> audioNames;
   int currentScene = 0;
   boolean showDebug = true;
   boolean isFullscreen = true;
@@ -223,34 +235,44 @@ class SharedState {
   int animationDirection = 0;     // 1 = up (to higher floor), -1 = down (to lower floor)
   float totalDistance = 0;        // Total floors to travel
 
+  // Audio mixing
+  float masterVolume = 0.7;       // Master volume control (0.0 to 1.0)
+
   // Configuration
   TransitionConfig config;
 
   PApplet parent;
 
+  // Keep reference to videos for compatibility
+  ArrayList<Movie> videos;
+
   void init(PApplet p) {
     parent = p;
     videos = new ArrayList<Movie>();
     videoNames = new ArrayList<String>();
+    audioNames = new ArrayList<String>();
+    floors = new ArrayList<Floor>();
 
     // Load configuration
     config = new TransitionConfig();
     config.loadFromFile(parent);
 
-    // Find all carpet videos
-    findCarpetVideos();
+    // Find all carpet videos and audio
+    findCarpetMedia();
 
-    // Load first NUM_WINDOWS videos
+    // Load first NUM_WINDOWS floors
     for (int i = 0; i < min(NUM_WINDOWS, videoNames.size()); i++) {
-      Movie m = new Movie(parent, videoNames.get(i));
-      m.loop();
-      m.play();
-      videos.add(m);
-      println("Loaded: " + videoNames.get(i));
+      String videoFile = videoNames.get(i);
+      String audioFile = i < audioNames.size() ? audioNames.get(i) : null;
+      Floor floor = new Floor(parent, videoFile, audioFile, i);
+      floors.add(floor);
+      videos.add(floor.video); // For compatibility
+      println("Loaded Floor " + i + ": " + videoFile + " + " + audioFile);
     }
 
-    // Placeholder for unloaded videos
-    while (videos.size() < videoNames.size()) {
+    // Placeholder for unloaded floors
+    while (floors.size() < videoNames.size()) {
+      floors.add(null);
       videos.add(null);
     }
   }
@@ -270,6 +292,111 @@ class SharedState {
         isAnimating = false;
         currentScene = targetScene;
         println("Arrived at scene " + currentScene);
+      }
+
+      // Update audio mixing for transition
+      updateTransitionAudio();
+    } else {
+      // Update audio mixing for current scene
+      updateSceneAudio();
+    }
+  }
+
+  void updateSceneAudio() {
+    // Equal power mixing for active screens in current scene
+    // Volume per floor = masterVolume / sqrt(NUM_WINDOWS)
+    float volumePerFloor = masterVolume / sqrt(NUM_WINDOWS);
+
+    // Set all floors to silent first
+    for (int i = 0; i < floors.size(); i++) {
+      Floor floor = floors.get(i);
+      if (floor != null && floor.audio != null) {
+        floor.audio.amp(0.0);
+      }
+    }
+
+    // Set volume for active floors in current scene
+    for (int i = 0; i < NUM_WINDOWS; i++) {
+      int floorIdx = currentScene + i;
+      if (floorIdx >= 0 && floorIdx < floors.size()) {
+        Floor floor = floors.get(floorIdx);
+        if (floor != null && floor.audio != null) {
+          floor.audio.amp(volumePerFloor);
+        }
+      }
+    }
+  }
+
+  void updateTransitionAudio() {
+    // During transition, up to 4 floors can be audible (cross-fading)
+    // Calculate which floors are currently "zooming past"
+    int currentFloor = startScene + (int)animationProgress * animationDirection;
+    float fractionalProgress = animationProgress - floor(animationProgress);
+
+    // Set all floors to silent first
+    for (int i = 0; i < floors.size(); i++) {
+      Floor floor = floors.get(i);
+      if (floor != null && floor.audio != null) {
+        floor.audio.amp(0.0);
+      }
+    }
+
+    // Calculate which floors are audible
+    // We need floors for current window positions plus the next ones sliding in
+    ArrayList<Integer> audibleFloors = new ArrayList<Integer>();
+
+    // Current floors for each window
+    for (int i = 0; i < NUM_WINDOWS; i++) {
+      int floorIdx = currentFloor + i;
+      if (!audibleFloors.contains(floorIdx)) {
+        audibleFloors.add(floorIdx);
+      }
+    }
+
+    // Next floors sliding in
+    int nextFloor = currentFloor + animationDirection;
+    for (int i = 0; i < NUM_WINDOWS; i++) {
+      int floorIdx = nextFloor + i;
+      if (!audibleFloors.contains(floorIdx)) {
+        audibleFloors.add(floorIdx);
+      }
+    }
+
+    // Limit to 4 floors maximum
+    while (audibleFloors.size() > 4) {
+      audibleFloors.remove(audibleFloors.size() - 1);
+    }
+
+    // Equal power mixing for audible floors
+    float volumePerFloor = masterVolume / sqrt(audibleFloors.size());
+
+    // Crossfade between current and next floors based on fractional progress
+    for (int floorIdx : audibleFloors) {
+      if (floorIdx >= 0 && floorIdx < floors.size()) {
+        Floor floor = floors.get(floorIdx);
+        if (floor != null && floor.audio != null) {
+          // Calculate crossfade based on whether this floor is fading in or out
+          float volume = volumePerFloor;
+
+          // Floors in the "next" set fade in, floors in the "current" set fade out
+          boolean isNext = false;
+          for (int i = 0; i < NUM_WINDOWS; i++) {
+            if (floorIdx == nextFloor + i) {
+              isNext = true;
+              break;
+            }
+          }
+
+          if (isNext) {
+            // Fading in
+            volume *= fractionalProgress;
+          } else {
+            // Fading out
+            volume *= (1.0 - fractionalProgress);
+          }
+
+          floor.audio.amp(volume);
+        }
       }
     }
   }
@@ -311,18 +438,23 @@ class SharedState {
     return sin(normalizedProgress * PI) * config.maxEffectIntensity;
   }
 
-  void ensureVideoLoaded(int index) {
-    if (index >= 0 && index < videoNames.size() && videos.get(index) == null) {
-      println("Loading: " + videoNames.get(index));
-      Movie m = new Movie(parent, videoNames.get(index));
-      m.loop();
-      m.play();
-      videos.set(index, m);
+  void ensureFloorLoaded(int index) {
+    if (index >= 0 && index < videoNames.size() && floors.get(index) == null) {
+      String videoFile = videoNames.get(index);
+      String audioFile = index < audioNames.size() ? audioNames.get(index) : null;
+      println("Loading Floor " + index + ": " + videoFile + " + " + audioFile);
+      Floor floor = new Floor(parent, videoFile, audioFile, index);
+      floors.set(index, floor);
+      videos.set(index, floor.video);
     }
   }
 
-  void findCarpetVideos() {
-    println("\nSearching for videos in: " + parent.dataPath(""));
+  void ensureVideoLoaded(int index) {
+    ensureFloorLoaded(index);
+  }
+
+  void findCarpetMedia() {
+    println("\nSearching for media in: " + parent.dataPath(""));
 
     File dataFolder = new File(parent.dataPath(""));
     if (!dataFolder.exists() || !dataFolder.isDirectory()) {
@@ -337,30 +469,56 @@ class SharedState {
     }
 
     // Find all carpet videos
-    ArrayList<String> foundFiles = new ArrayList<String>();
+    ArrayList<String> foundVideos = new ArrayList<String>();
     for (String filename : files) {
       String lower = filename.toLowerCase();
       if ((lower.startsWith("carpet_") || lower.startsWith("carpet")) &&
           (lower.endsWith(".mp4") || lower.endsWith(".mov"))) {
-        foundFiles.add(filename);
+        foundVideos.add(filename);
+      }
+    }
+
+    // Find all carpet audio
+    ArrayList<String> foundAudio = new ArrayList<String>();
+    for (String filename : files) {
+      String lower = filename.toLowerCase();
+      if ((lower.startsWith("carpet_") || lower.startsWith("carpet")) &&
+          (lower.endsWith(".wav") || lower.endsWith(".mp3") || lower.endsWith(".aiff"))) {
+        foundAudio.add(filename);
       }
     }
 
     // Sort by number
-    java.util.Collections.sort(foundFiles, new java.util.Comparator<String>() {
+    java.util.Comparator<String> numberComparator = new java.util.Comparator<String>() {
       public int compare(String a, String b) {
         int numA = extractNumber(a);
         int numB = extractNumber(b);
         return Integer.compare(numA, numB);
       }
-    });
+    };
 
-    // Add to list (sorted low to high by number)
-    println("\nVideos found (sorted by floor number):");
-    for (int i = 0; i < foundFiles.size(); i++) {
-      String filename = foundFiles.get(i);
-      videoNames.add(filename);
-      println("  Floor " + i + ": " + filename);
+    java.util.Collections.sort(foundVideos, numberComparator);
+    java.util.Collections.sort(foundAudio, numberComparator);
+
+    // Add to lists (sorted low to high by number)
+    println("\nMedia found (sorted by floor number):");
+    int maxFloors = max(foundVideos.size(), foundAudio.size());
+    for (int i = 0; i < maxFloors; i++) {
+      String videoFile = i < foundVideos.size() ? foundVideos.get(i) : null;
+      String audioFile = i < foundAudio.size() ? foundAudio.get(i) : null;
+
+      if (videoFile != null) {
+        videoNames.add(videoFile);
+      }
+      if (audioFile != null) {
+        audioNames.add(audioFile);
+      }
+
+      print("  Floor " + i + ": ");
+      if (videoFile != null) print(videoFile);
+      if (videoFile != null && audioFile != null) print(" + ");
+      if (audioFile != null) print(audioFile);
+      println();
     }
   }
 
@@ -375,10 +533,50 @@ class SharedState {
   }
 
   void cleanup() {
-    for (Movie m : videos) {
-      if (m != null) {
-        m.stop();
+    for (Floor f : floors) {
+      if (f != null) {
+        f.cleanup();
       }
+    }
+  }
+}
+
+/**
+ * Floor class - contains a video and audio file that loop independently
+ */
+class Floor {
+  Movie video;
+  SoundFile audio;
+  String videoName;
+  String audioName;
+  int floorNumber;
+
+  Floor(PApplet parent, String videoFile, String audioFile, int number) {
+    this.videoName = videoFile;
+    this.audioName = audioFile;
+    this.floorNumber = number;
+
+    // Load video
+    if (videoFile != null) {
+      video = new Movie(parent, videoFile);
+      video.loop();
+      video.play();
+    }
+
+    // Load audio
+    if (audioFile != null) {
+      audio = new SoundFile(parent, audioFile);
+      audio.loop();
+      audio.amp(0.0); // Start silent, will be controlled by mixing
+    }
+  }
+
+  void cleanup() {
+    if (video != null) {
+      video.stop();
+    }
+    if (audio != null) {
+      audio.stop();
     }
   }
 }
@@ -561,7 +759,7 @@ class FloorWindow extends PApplet {
     // Semi-transparent background
     fill(0, 200);
     noStroke();
-    rect(10, 10, 600, 500);
+    rect(10, 10, 600, 580);
 
     // Debug text
     fill(0, 255, 0);
@@ -588,6 +786,22 @@ class FloorWindow extends PApplet {
     }
     text("Video Index: " + videoIdx + " / " + (sharedState.videoNames.size() - 1), 20, y); y += lineHeight;
     text("Video File: " + sharedState.videoNames.get(videoIdx), 20, y); y += lineHeight;
+
+    // Audio info
+    Floor floor = sharedState.floors.get(videoIdx);
+    if (floor != null && floor.audio != null) {
+      text("Audio File: " + floor.audioName, 20, y); y += lineHeight;
+      text("Audio Playing: " + floor.audio.isPlaying(), 20, y); y += lineHeight;
+    } else {
+      text("Audio File: none", 20, y); y += lineHeight;
+    }
+
+    y += 5;
+    fill(255, 200, 100);
+    text("=== AUDIO MIXING ===", 20, y); y += lineHeight;
+    fill(255);
+    text("Master Volume: " + nf(sharedState.masterVolume * 100, 0, 0) + "% (scroll to adjust)", 20, y); y += lineHeight;
+    text("Active floors: " + (sharedState.isAnimating ? "transitioning" : NUM_WINDOWS), 20, y); y += lineHeight;
 
     y += 5;
     text("Video Resolution: " + video.width + "x" + video.height, 20, y); y += lineHeight;
@@ -622,7 +836,7 @@ class FloorWindow extends PApplet {
 
     y += 5;
     fill(100);
-    text("Press D to hide | F for fullscreen | R to reload config", 20, y);
+    text("Press D to hide | F for fullscreen | R to reload config | Scroll for volume", 20, y);
   }
 
   public void keyPressed() {
@@ -658,5 +872,11 @@ class FloorWindow extends PApplet {
       sharedState.config.loadFromFile(sharedState.parent);
       println("Configuration reloaded!");
     }
+  }
+
+  public void mouseWheel(MouseEvent event) {
+    float delta = event.getCount();
+    sharedState.masterVolume = constrain(sharedState.masterVolume - delta * 0.05, 0.0, 1.0);
+    println("Master volume: " + nf(sharedState.masterVolume * 100, 0, 0) + "%");
   }
 }
