@@ -67,7 +67,7 @@ run-windows.bat 10 -t mp4 --embed-audio
 Run the comprehensive test suite (20 tests):
 
 ```bash
-python3 test.py
+python3 -m media_generator.test
 ```
 
 ## Getting Help

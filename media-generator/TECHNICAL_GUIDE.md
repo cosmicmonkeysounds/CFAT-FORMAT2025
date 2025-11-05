@@ -176,22 +176,16 @@ media-generator/
 │   ├── __main__.py              # CLI and orchestration
 │   ├── audio.py                 # Audio generation (WAV, OGG, MP3, M4A, FLAC)
 │   ├── video.py                 # Video generation (MP4, codecs)
-│   └── image.py                 # Image/animation (JPG, PNG, WebP, BMP, TIFF, SVG, GIF)
+│   ├── image.py                 # Image/animation (JPG, PNG, WebP, BMP, TIFF, SVG, GIF)
+│   └── test.py                  # Test suite (20 comprehensive tests)
 │
-├── tests/                        # Test suite
-│   ├── __init__.py
-│   └── test_media_generator.py  # 20 comprehensive tests
-│
-├── test.py                       # Convenience test runner
 ├── run-macos-linux.sh           # Smart launcher (macOS/Linux)
 ├── run-windows.bat              # Smart launcher (Windows)
 ├── pyproject.toml               # Package configuration
 ├── requirements.txt             # Dependencies
-│
-└── docs/
-    ├── README.md                # Entry point
-    ├── USER_GUIDE.md            # Non-technical guide
-    └── TECHNICAL_GUIDE.md       # This file
+├── README.md                    # Entry point
+├── USER_GUIDE.md                # Non-technical guide
+└── TECHNICAL_GUIDE.md           # This file
 ```
 
 ### Code Architecture
@@ -275,10 +269,10 @@ The `-e` flag installs in editable mode - code changes take effect immediately.
 **Automated Test Suite:**
 ```bash
 # Run comprehensive test suite (20 tests)
-python3 test.py
+python3 -m media_generator.test
 
-# Or run directly from tests directory
-python3 tests/test_media_generator.py
+# Or run directly
+python3 media_generator/test.py
 ```
 
 **Manual Testing:**

@@ -2,6 +2,9 @@
 """
 Comprehensive test suite for media_generator package.
 Tests all media types, formats, and parameter combinations.
+
+Run from project root:
+    python3 -m media_generator.test
 """
 
 import sys
@@ -9,7 +12,7 @@ import shutil
 from pathlib import Path
 import numpy as np
 
-# Import from the local package
+# Import from the package
 from media_generator.audio import AudioConfig, MediaOutput, write_audio_file
 from media_generator.video import VideoConfig, write_video_file, embed_audio_in_video
 from media_generator.image import write_image_file, write_svg_file, write_gif_file
