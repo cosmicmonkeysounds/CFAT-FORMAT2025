@@ -26,6 +26,7 @@ import signal
 import argparse
 import platform
 import threading
+import atexit
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -40,6 +41,14 @@ except ImportError:
     OSC_AVAILABLE = False
     print("Warning: python-osc not installed. OSC control mode will not be available.")
     print("  Install with: pip install python-osc")
+
+try:
+    from screeninfo import get_monitors
+    SCREENINFO_AVAILABLE = True
+except ImportError:
+    SCREENINFO_AVAILABLE = False
+    print("Warning: screeninfo not installed. Screen detection will be limited.")
+    print("  Install with: pip install screeninfo")
 
 class CarpetHotelLauncher:
     def __init__(self, audio_device=None, enable_keyboard=True, enable_python_terminal=True,
@@ -74,6 +83,13 @@ class CarpetHotelLauncher:
 
         # Platform-specific paths
         self.setup_platform_paths()
+
+        # Register cleanup handlers - CRITICAL: ensure SuperCollider always dies
+        atexit.register(self.emergency_cleanup)
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        if hasattr(signal, 'SIGBREAK'):  # Windows
+            signal.signal(signal.SIGBREAK, self.signal_handler)
 
     def init_log_file(self):
         """Initialize/wipe the log file."""
@@ -622,6 +638,26 @@ class CarpetHotelLauncher:
                 break
             time.sleep(0.5)
 
+    def signal_handler(self, signum, frame):
+        """Handle signals (SIGINT, SIGTERM, etc.) - ensure SuperCollider dies."""
+        print(f"\n\nReceived signal {signum} - forcing cleanup...")
+        self.emergency_cleanup()
+        sys.exit(0)
+
+    def emergency_cleanup(self):
+        """Emergency cleanup - ALWAYS kill SuperCollider no matter what."""
+        # This runs on exit, signals, crashes, etc.
+        # Be aggressive - make sure SuperCollider DIES
+        try:
+            if self.platform == 'Darwin' or self.platform == 'Linux':
+                subprocess.run(['pkill', '-9', 'sclang'], capture_output=True, timeout=2)
+                subprocess.run(['pkill', '-9', 'scsynth'], capture_output=True, timeout=2)
+            elif self.platform == 'Windows':
+                subprocess.run(['taskkill', '/F', '/IM', 'sclang.exe'], capture_output=True, timeout=2)
+                subprocess.run(['taskkill', '/F', '/IM', 'scsynth.exe'], capture_output=True, timeout=2)
+        except:
+            pass  # Fail silently on emergency cleanup
+
     def cleanup(self):
         """Clean up both Processing and SuperCollider processes."""
         print("\n=== Cleaning up ===")
@@ -650,7 +686,7 @@ class CarpetHotelLauncher:
             except Exception as e:
                 print(f"  Warning: {e}")
 
-        # Kill any remaining SuperCollider/sclang processes
+        # CRITICAL: Kill any remaining SuperCollider/sclang processes
         try:
             print("Killing any remaining SuperCollider processes...")
             if self.platform == 'Darwin' or self.platform == 'Linux':
@@ -675,48 +711,43 @@ class CarpetHotelLauncher:
         print("\n✓ Shutdown complete\n")
 
 def detect_screens():
-    """Detect available screens using tkinter."""
-    root = tk.Tk()
-    root.withdraw()  # Hide the root window
-
+    """Detect available screens using screeninfo library."""
     screens = []
-    try:
-        # Try to detect screens by checking screen geometry
-        # This is a simple heuristic - we'll detect up to 6 screens
-        for i in range(6):
-            try:
-                # Try to get screen width at different positions
-                # If successful, we have that many screens
-                width = root.winfo_screenwidth()
-                height = root.winfo_screenheight()
-                if width > 0 and height > 0:
-                    screens.append({
-                        'index': i + 1,
-                        'width': width,
-                        'height': height,
-                        'x': i * width  # Approximate position
-                    })
-            except:
-                break
 
-        # If we couldn't detect any, assume at least one screen
-        if not screens:
-            width = root.winfo_screenwidth()
-            height = root.winfo_screenheight()
-            screens = [{'index': 1, 'width': width, 'height': height, 'x': 0}]
-    finally:
-        root.destroy()
+    if SCREENINFO_AVAILABLE:
+        try:
+            monitors = get_monitors()
+            for i, monitor in enumerate(monitors):
+                # Get the monitor name - this is the REAL name like "MacBook Built-In", "Samsung Odyssey G9", etc.
+                display_name = getattr(monitor, 'name', f'Display {i + 1}')
 
-    # For simplicity, assume we have at least 1 screen and up to 4 screens available
-    # (Most installations won't have more than 4)
-    if len(screens) == 1:
-        # Can't reliably detect multiple screens with basic tkinter
-        # Default to showing options for 1-4 screens
+                # Clean up the name if it's too technical
+                if display_name.startswith('\\\\'):
+                    # Windows device path - extract friendly name
+                    display_name = f'Display {i + 1}'
+
+                screens.append({
+                    'index': i + 1,
+                    'name': display_name,
+                    'width': monitor.width,
+                    'height': monitor.height,
+                    'x': monitor.x,
+                    'y': monitor.y,
+                    'is_primary': getattr(monitor, 'is_primary', i == 0)
+                })
+        except Exception as e:
+            print(f"Warning: Could not detect screens: {e}")
+            # Fallback to default
+            screens = [
+                {'index': 1, 'name': 'Display 1 (Primary)', 'width': 1920, 'height': 1080, 'x': 0, 'y': 0, 'is_primary': True}
+            ]
+    else:
+        # screeninfo not available - provide default options
         screens = [
-            {'index': 1, 'name': 'Display 1 (Primary)'},
-            {'index': 2, 'name': 'Display 2'},
-            {'index': 3, 'name': 'Display 3'},
-            {'index': 4, 'name': 'Display 4'}
+            {'index': 1, 'name': 'Display 1 (Primary)', 'width': 1920, 'height': 1080, 'x': 0, 'y': 0, 'is_primary': True},
+            {'index': 2, 'name': 'Display 2', 'width': 1920, 'height': 1080, 'x': 1920, 'y': 0, 'is_primary': False},
+            {'index': 3, 'name': 'Display 3', 'width': 1920, 'height': 1080, 'x': 3840, 'y': 0, 'is_primary': False},
+            {'index': 4, 'name': 'Display 4', 'width': 1920, 'height': 1080, 'x': 5760, 'y': 0, 'is_primary': False}
         ]
 
     return screens
@@ -811,9 +842,12 @@ def guided_setup_gui():
     selected_listbox = tk.Listbox(right_frame, height=8, selectmode=tk.SINGLE, font=('Arial', 10))
     selected_listbox.pack(fill='both', expand=True, pady=5)
 
-    # Pre-populate with displays 1 and 2
-    selected_listbox.insert(tk.END, "Display 1 (Primary)")
-    selected_listbox.insert(tk.END, "Display 2")
+    # Pre-populate with displays 1 and 2 (only if they exist)
+    for screen in available_screens:
+        if screen['index'] == 1:
+            selected_listbox.insert(tk.END, screen.get('name', 'Display 1 (Primary)'))
+        elif screen['index'] == 2:
+            selected_listbox.insert(tk.END, screen.get('name', 'Display 2'))
 
     # Helper function to get display number from name
     def get_display_number(display_name):
@@ -833,28 +867,40 @@ def guided_setup_gui():
         if display_num in preview_windows:
             return
 
+        # Find the actual screen info for this display
+        screen_info = None
+        for screen in available_screens:
+            if screen['index'] == display_num:
+                screen_info = screen
+                break
+
+        if not screen_info:
+            return  # Can't show preview if we don't know where the screen is
+
         # Create a preview window
         preview = tk.Toplevel(root)
-        preview.title(f"Display {display_num}")
+        preview.title(f"{screen_info['name']}")
         preview.attributes('-alpha', 0.7)  # Semi-transparent
         preview.attributes('-topmost', True)  # Always on top
 
-        # Create colored label
+        # Create colored label with screen name
         colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F']
         color = colors[(display_num - 1) % len(colors)]
 
-        label = tk.Label(preview, text=f"DISPLAY {display_num}", font=('Arial', 48, 'bold'),
-                        bg=color, fg='white', width=20, height=10)
+        text = f"DISPLAY {display_num}\n{screen_info['name']}\n{screen_info['width']}x{screen_info['height']}"
+        label = tk.Label(preview, text=text, font=('Arial', 24, 'bold'),
+                        bg=color, fg='white')
         label.pack(fill='both', expand=True)
 
-        # Try to position on the correct screen
-        # This is approximate - tkinter has limited multi-screen support
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
+        # Position on the ACTUAL screen using real coordinates
+        preview_width = 500
+        preview_height = 350
 
-        # Place at approximate position for screen
-        x_offset = (display_num - 1) * screen_width
-        preview.geometry(f"400x300+{x_offset + 100}+100")
+        # Center the preview on the target screen
+        x = screen_info['x'] + (screen_info['width'] - preview_width) // 2
+        y = screen_info['y'] + (screen_info['height'] - preview_height) // 2
+
+        preview.geometry(f"{preview_width}x{preview_height}+{x}+{y}")
 
         preview_windows[display_num] = preview
 
