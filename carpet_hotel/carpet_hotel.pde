@@ -236,7 +236,28 @@ class FloorWindow extends PApplet {
 
         // Draw video
         if (video.width > 0 && video.height > 0) {
-          image(video, 0, 0, width, height);
+          // Calculate letterboxing to maintain aspect ratio
+          float videoAspect = (float)video.width / (float)video.height;
+          float screenAspect = (float)width / (float)height;
+
+          float drawWidth, drawHeight, drawX, drawY;
+
+          if (videoAspect > screenAspect) {
+            // Video is wider - fit to width
+            drawWidth = width;
+            drawHeight = width / videoAspect;
+            drawX = 0;
+            drawY = (height - drawHeight) / 2;
+          } else {
+            // Video is taller - fit to height
+            drawHeight = height;
+            drawWidth = height * videoAspect;
+            drawX = (width - drawWidth) / 2;
+            drawY = 0;
+          }
+
+          // Draw video centered with letterboxing
+          image(video, drawX, drawY, drawWidth, drawHeight);
 
           // Debug indicator
           fill(0, 255, 0);
