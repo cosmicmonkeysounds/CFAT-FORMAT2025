@@ -229,7 +229,7 @@ class SharedState {
   ArrayList<String> videoNames;
   ArrayList<String> audioNames;
   int currentScene = 0;
-  boolean showDebug = true;
+  boolean showDebug = false;  // Start with debug hidden (toggle with 'D')
   boolean isFullscreen = true;
 
   // Animation state
@@ -311,6 +311,7 @@ class SharedState {
     msg.add(NUM_WINDOWS);            // Number of active floors
     msg.add(0);                      // Not animating
     oscP5.send(msg, scAddress);
+    println("[OSC-SEND] /carpet/scene " + currentScene + " " + NUM_WINDOWS + " 0");
   }
 
   void sendTransitionOSC() {
@@ -324,6 +325,7 @@ class SharedState {
     msg.add(animationDirection);     // Direction: 1 = up, -1 = down
     msg.add(NUM_WINDOWS);            // Number of screens
     oscP5.send(msg, scAddress);
+    println("[OSC-SEND] /carpet/transition " + currentFloor + " " + fractionalProgress + " " + animationDirection + " " + NUM_WINDOWS);
   }
 
   void startTransition(int newScene) {

@@ -16,12 +16,26 @@ OSC Messages:
 Audio files should be in: ~/Documents/CFAT2025/carpets/carpet_hotel/data/
 Named as: carpet_1.wav, carpet_2.wav, etc.
 
-USAGE: Select all code and press Cmd+Enter
+USAGE: Run with sclang carpet_hotel_audio.scd
 */
 
-(
+// Global variables to store state
+var audioPath, floors, players, volumes;
+var numFloors = 10;
+var masterVolume = 0.7;
+var audioDevice;
+
 // ===== SERVER CONFIGURATION =====
 "=== CARPET HOTEL AUDIO ENGINE ===".postln;
+
+// Get audio device from command line argument (if provided)
+audioDevice = thisProcess.argv.at(0);
+if(audioDevice.notNil, {
+    ("Using audio device: " ++ audioDevice).postln;
+}, {
+    "Using default audio device".postln;
+});
+
 "Configuring audio server...".postln;
 
 // Set server options BEFORE booting
@@ -31,18 +45,22 @@ s.options.numInputBusChannels = 0;   // No input needed
 s.options.blockSize = 512;           // Balance between latency and CPU
 s.options.memSize = 65536;           // Increased memory for buffers
 
-// Boot server if not already booted
-if(s.serverRunning.not, {
-    "Booting audio server...".postln;
-    s.boot;
+// IMPORTANT: Set input and output device separately to avoid microphone issues
+if(audioDevice.notNil, {
+    s.options.outDevice = audioDevice;   // Output only
+    s.options.inDevice = nil;            // Explicitly no input
+}, {
+    // Even with default, explicitly disable input
+    s.options.inDevice = nil;
 });
 
-// ===== WAIT FOR BOOT, THEN INITIALIZE =====
-s.waitForBoot({
-    var audioPath, floors, players, volumes;
-    var numFloors = 10;
-    var masterVolume = 0.7;
+// Boot server and wait
+"Booting audio server...".postln;
 
+// Keep sclang alive with a simple recurring task
+SystemClock.sched(1.0, { 1.0 }); // Reschedule every second to keep alive
+
+s.waitForBoot({
     "Audio server ready!".postln;
     ("Sample rate: " ++ s.sampleRate ++ " Hz").postln;
 
@@ -67,8 +85,10 @@ s.waitForBoot({
             floors[i] = buffer;
             ("  Loaded floor " ++ i ++ ": " ++ file.fileName).postln;
 
-            // Create looping player for each floor (start silent)
+            // Wait for buffer to load
             s.sync;
+
+            // Create looping player for each floor (start silent)
             players[i] = {
                 var sig = PlayBuf.ar(
                     2, // stereo
@@ -93,7 +113,7 @@ s.waitForBoot({
     "  /carpet/transition [currentFloor, progress, direction, numWindows]".postln;
     "  /carpet/volume [volume]".postln;
     "\n▶ Now run the Processing sketch!".postln;
-    "▶ Press Cmd+. to stop all audio\n".postln;
+    "▶ Press Cmd+. (or Ctrl+C) to stop all audio\n".postln;
 
     // OSC Responder for static scenes
     OSCdef(\carpetScene, { |msg|
@@ -103,6 +123,8 @@ s.waitForBoot({
         numWindows = msg[2].asInteger;
         isAnimating = msg[3].asInteger;
         volumePerFloor = masterVolume / sqrt(numWindows);
+
+        ("[OSC-RECV] /carpet/scene " ++ sceneNum ++ " " ++ numWindows ++ " " ++ isAnimating).postln;
 
         // Set all floors to silent first
         floors.keys.do({ |floorNum|
@@ -118,9 +140,6 @@ s.waitForBoot({
                 players[floorNum].set(\amp, volumePerFloor);
             });
         });
-
-        // Debug output
-        // ("Scene: " ++ sceneNum ++ " | Active floors: " ++ numWindows).postln;
     }, '/carpet/scene');
 
     // OSC Responder for transitions
@@ -133,6 +152,8 @@ s.waitForBoot({
         numWindows = msg[4].asInteger;
         nextFloor = currentFloor + direction;
         audibleFloors = Set.new;
+
+        ("[OSC-RECV] /carpet/transition " ++ currentFloor ++ " " ++ progress ++ " " ++ direction ++ " " ++ numWindows).postln;
 
         // Calculate which floors are audible (current + next)
         numWindows.do({ |i|
@@ -169,9 +190,6 @@ s.waitForBoot({
                 players[floorNum].set(\amp, finalVolume);
             });
         });
-
-        // Debug output
-        // ("Transition: floor " ++ currentFloor ++ " -> " ++ nextFloor ++ " | progress: " ++ progress).postln;
     }, '/carpet/transition');
 
     // Master volume control via OSC
@@ -180,6 +198,7 @@ s.waitForBoot({
 
         newVolume = msg[1].asFloat.clip(0.0, 1.0);
         masterVolume = newVolume;
+        ("[OSC-RECV] /carpet/volume " ++ newVolume).postln;
         ("Master volume: " ++ (masterVolume * 100).round(1) ++ "%").postln;
     }, '/carpet/volume');
 
@@ -193,13 +212,12 @@ s.waitForBoot({
         OSCdef(\carpetVolume).free;
     });
 });
-)
 
 /*
 USAGE:
 ------
-1. Make sure SuperCollider is running
-2. Evaluate this file (Cmd+Enter with cursor in the parentheses)
+1. Make sure SuperCollider is installed
+2. Run with: sclang carpet_hotel_audio.scd
 3. Run the Processing sketch
 4. Audio will automatically follow the visual transitions
 
