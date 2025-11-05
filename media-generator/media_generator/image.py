@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, List, Any
 
 from media_generator.audio import MediaOutput
 from media_generator.video import VideoConfig, apply_random_effects, generate_video_frames
@@ -20,12 +20,12 @@ from media_generator.video import VideoConfig, apply_random_effects, generate_vi
 def generate_image_data(width: int, height: int, seed: int) -> Tuple[np.ndarray, np.ndarray]:
     """Generate random image data with effects. Returns (frame, base_color)."""
     np.random.seed(seed)
-    base_color = np.random.randint(0, 256, 3, dtype=np.uint8)
-    color_variance = np.random.randint(5, 30)
+    base_color: np.ndarray = np.random.randint(0, 256, 3, dtype=np.uint8)
+    color_variance: int = np.random.randint(5, 30)
 
-    color = base_color + np.random.randint(-color_variance, color_variance, 3, dtype=np.int16)
+    color: np.ndarray = base_color + np.random.randint(-color_variance, color_variance, 3, dtype=np.int16)
     color = np.clip(color, 0, 255).astype(np.uint8)
-    frame = np.full((height, width, 3), color[::-1], dtype=np.uint8)
+    frame: np.ndarray = np.full((height, width, 3), color[::-1], dtype=np.uint8)
     frame = apply_random_effects(frame, effect_intensity=0.4)
 
     return frame, base_color
@@ -33,13 +33,15 @@ def generate_image_data(width: int, height: int, seed: int) -> Tuple[np.ndarray,
 
 def write_image_file(output: MediaOutput, width: int, height: int) -> np.ndarray:
     """Write image file (JPG, PNG, WebP, BMP, TIFF). Returns base_color."""
-    seed = np.random.randint(0, 1000000)
+    seed: int = np.random.randint(0, 1000000)
+    frame: np.ndarray
+    base_color: np.ndarray
     frame, base_color = generate_image_data(width, height, seed)
 
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    img = Image.fromarray(frame_rgb)
+    frame_rgb: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    img: Image.Image = Image.fromarray(frame_rgb)
 
-    save_kwargs = {}
+    save_kwargs: dict[str, Any] = {}
     if output.format == 'jpg':
         save_kwargs['quality'] = 95
     elif output.format == 'webp':
@@ -92,11 +94,11 @@ def generate_svg_content(width: int, height: int, base_color: np.ndarray) -> str
 
 def write_svg_file(output: MediaOutput, width: int, height: int) -> np.ndarray:
     """Write SVG file. Returns base_color."""
-    seed = np.random.randint(0, 1000000)
+    seed: int = np.random.randint(0, 1000000)
     np.random.seed(seed)
-    base_color = np.random.randint(0, 256, 3, dtype=np.uint8)
+    base_color: np.ndarray = np.random.randint(0, 256, 3, dtype=np.uint8)
 
-    svg_content = generate_svg_content(width, height, base_color)
+    svg_content: str = generate_svg_content(width, height, base_color)
     output.path.write_text(svg_content)
     return base_color
 
@@ -107,11 +109,13 @@ def write_svg_file(output: MediaOutput, width: int, height: int) -> np.ndarray:
 
 def write_gif_file(output: MediaOutput, config: VideoConfig) -> np.ndarray:
     """Write animated GIF. Returns base_color."""
-    seed = np.random.randint(0, 1000000)
+    seed: int = np.random.randint(0, 1000000)
+    frames: List[np.ndarray]
+    base_color: np.ndarray
     frames, base_color = generate_video_frames(config, seed)
 
-    pil_frames = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames]
-    duration_ms = int((config.duration / len(frames)) * 1000)
+    pil_frames: List[Image.Image] = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames]
+    duration_ms: int = int((config.duration / len(frames)) * 1000)
 
     pil_frames[0].save(
         str(output.path),

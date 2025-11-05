@@ -4,7 +4,8 @@
  */
 
 import processing.video.*;
-import processing.sound.*;
+import oscP5.*;
+import netP5.*;
 import java.io.File;
 
 // Configuration
@@ -12,8 +13,10 @@ int NUM_WINDOWS = 2;              // Number of separate windows
 int[] DISPLAY_NUMBERS = {1, 2};   // Which display for each window
 int VIDEO_HEIGHT = 1080;          // Standard video height for animation
 
-// Audio configuration
-int AUDIO_SAMPLE_RATE = 44100;    // MUST match sample rate of audio files (check with ffprobe)
+// OSC configuration for audio
+OscP5 oscP5;
+NetAddress scAddress;
+int SC_PORT = 57120;              // SuperCollider default port
 
 // Shared state across all windows
 static SharedState sharedState;
@@ -24,10 +27,10 @@ void setup() {
   pixelDensity(1);
   surface.setTitle("Carpet Hotel - Control");
 
-  // Configure audio engine for smooth playback
-  // Sample rate must match audio files (44100 Hz)
-  Sound s = new Sound(this);
-  s.sampleRate(AUDIO_SAMPLE_RATE);
+  // Initialize OSC for SuperCollider communication
+  oscP5 = new OscP5(this, 12000); // Listen on port 12000
+  scAddress = new NetAddress("127.0.0.1", SC_PORT);
+  println("\nOSC initialized - sending to SuperCollider on port " + SC_PORT);
 
   // Initialize shared state
   sharedState = new SharedState();
@@ -44,7 +47,7 @@ void setup() {
   println("Windows launched: " + NUM_WINDOWS);
   println("Floors loaded: " + sharedState.floors.size());
   println("Videos: " + sharedState.videoNames.size());
-  println("Audio: " + sharedState.audioNames.size());
+  println("Audio: " + sharedState.audioNames.size() + " (handled by SuperCollider)");
   println("\nTIP: Edit 'transition_config.txt' to customize transition effects");
   println("(Config file is in the same folder as the .pde file)");
   println("\nCONTROLS:");
@@ -53,7 +56,6 @@ void setup() {
   println("F: Toggle fullscreen");
   println("R: Reload config file");
   println("SPACE: Print info");
-  println("SCROLL: Adjust master volume");
   println("ESC: Close all windows");
 }
 
@@ -71,7 +73,7 @@ void draw() {
   text("Floors: " + sharedState.floors.size() + " (" + sharedState.videoNames.size() + " videos, " + sharedState.audioNames.size() + " audio)", 20, y); y += 25;
   text("Scenes: " + sharedState.getNumScenes(), 20, y); y += 25;
   text("Current scene: " + sharedState.currentScene, 20, y); y += 25;
-  text("Master volume: " + nf(sharedState.masterVolume * 100, 0, 0) + "%", 20, y); y += 25;
+  text("Audio: SuperCollider via OSC", 20, y); y += 25;
   if (sharedState.isAnimating) {
     float pct = (sharedState.animationProgress / sharedState.totalDistance) * 100;
     text("Animating: " + sharedState.startScene + " -> " + sharedState.targetScene, 20, y); y += 20;
@@ -121,11 +123,6 @@ void movieEvent(Movie m) {
   m.read();
 }
 
-void mouseWheel(MouseEvent event) {
-  float delta = event.getCount();
-  sharedState.masterVolume = constrain(sharedState.masterVolume - delta * 0.05, 0.0, 1.0);
-  println("Master volume: " + nf(sharedState.masterVolume * 100, 0, 0) + "%");
-}
 
 void exit() {
   if (sharedState != null) {
@@ -243,10 +240,6 @@ class SharedState {
   int animationDirection = 0;     // 1 = up (to higher floor), -1 = down (to lower floor)
   float totalDistance = 0;        // Total floors to travel
 
-  // Audio mixing
-  float masterVolume = 0.7;       // Master volume control (0.0 to 1.0)
-  int audioUpdateCounter = 0;     // Counter for reducing audio update frequency
-
   // Configuration
   TransitionConfig config;
 
@@ -303,126 +296,34 @@ class SharedState {
         println("Arrived at scene " + currentScene);
       }
 
-      // Update audio mixing for transition
-      updateTransitionAudio();
+      // Send transition state to SuperCollider
+      sendTransitionOSC();
     } else {
-      // Update audio mixing for current scene
-      updateSceneAudio();
-    }
-
-    // Update audio amplitudes at reduced frequency (every 3 frames = ~20fps)
-    audioUpdateCounter++;
-    if (audioUpdateCounter >= 3) {
-      audioUpdateCounter = 0;
-      for (Floor floor : floors) {
-        if (floor != null) {
-          floor.updateAmp();
-        }
-      }
+      // Send static scene state to SuperCollider
+      sendSceneOSC();
     }
   }
 
-  void updateSceneAudio() {
-    // Equal power mixing for active screens in current scene
-    // Volume per floor = masterVolume / sqrt(NUM_WINDOWS)
-    float volumePerFloor = masterVolume / sqrt(NUM_WINDOWS);
-
-    // Set all floors to silent first
-    for (int i = 0; i < floors.size(); i++) {
-      Floor floor = floors.get(i);
-      if (floor != null) {
-        floor.setTargetAmp(0.0);
-      }
-    }
-
-    // Set volume for active floors in current scene
-    for (int i = 0; i < NUM_WINDOWS; i++) {
-      int floorIdx = currentScene + i;
-      if (floorIdx >= 0 && floorIdx < floors.size()) {
-        Floor floor = floors.get(floorIdx);
-        if (floor != null) {
-          floor.setTargetAmp(volumePerFloor);
-        }
-      }
-    }
+  void sendSceneOSC() {
+    // Send current scene and number of active floors
+    OscMessage msg = new OscMessage("/carpet/scene");
+    msg.add(currentScene);           // Current scene number
+    msg.add(NUM_WINDOWS);            // Number of active floors
+    msg.add(0);                      // Not animating
+    oscP5.send(msg, scAddress);
   }
 
-  void updateTransitionAudio() {
-    // During transition, up to 4 floors can be audible (cross-fading)
-    // Calculate which floors are currently "zooming past"
+  void sendTransitionOSC() {
+    // Send transition state to SuperCollider
     int currentFloor = startScene + (int)animationProgress * animationDirection;
     float fractionalProgress = animationProgress - floor(animationProgress);
 
-    // Set all floors to silent first
-    for (int i = 0; i < floors.size(); i++) {
-      Floor floor = floors.get(i);
-      if (floor != null) {
-        floor.setTargetAmp(0.0);
-      }
-    }
-
-    // Calculate which floors are audible
-    // We need floors for current window positions plus the next ones sliding in
-    ArrayList<Integer> audibleFloors = new ArrayList<Integer>();
-
-    // Current floors for each window
-    for (int i = 0; i < NUM_WINDOWS; i++) {
-      int floorIdx = currentFloor + i;
-      if (!audibleFloors.contains(floorIdx)) {
-        audibleFloors.add(floorIdx);
-      }
-    }
-
-    // Next floors sliding in
-    int nextFloor = currentFloor + animationDirection;
-    for (int i = 0; i < NUM_WINDOWS; i++) {
-      int floorIdx = nextFloor + i;
-      if (!audibleFloors.contains(floorIdx)) {
-        audibleFloors.add(floorIdx);
-      }
-    }
-
-    // Limit to 4 floors maximum
-    while (audibleFloors.size() > 4) {
-      audibleFloors.remove(audibleFloors.size() - 1);
-    }
-
-    // Equal power mixing for audible floors
-    float volumePerFloor = masterVolume / sqrt(audibleFloors.size());
-
-    // Smooth equal-power crossfade using cosine curves
-    // This prevents crackling and maintains perceived loudness
-    for (int floorIdx : audibleFloors) {
-      if (floorIdx >= 0 && floorIdx < floors.size()) {
-        Floor floor = floors.get(floorIdx);
-        if (floor != null) {
-          // Determine if this floor is fading in or out
-          boolean isNext = false;
-          for (int i = 0; i < NUM_WINDOWS; i++) {
-            if (floorIdx == nextFloor + i) {
-              isNext = true;
-              break;
-            }
-          }
-
-          // Apply smooth equal-power crossfade curves
-          float crossfadeGain;
-          if (isNext) {
-            // Fading in: use sine curve (0 to 1)
-            // Starts at 0 when progress=0, ends at 1 when progress=1
-            crossfadeGain = sin(fractionalProgress * HALF_PI);
-          } else {
-            // Fading out: use cosine curve (1 to 0)
-            // Starts at 1 when progress=0, ends at 0 when progress=1
-            crossfadeGain = cos(fractionalProgress * HALF_PI);
-          }
-
-          // Set target volume with smooth crossfade
-          float finalVolume = volumePerFloor * crossfadeGain;
-          floor.setTargetAmp(finalVolume);
-        }
-      }
-    }
+    OscMessage msg = new OscMessage("/carpet/transition");
+    msg.add(currentFloor);           // Current floor during transition
+    msg.add(fractionalProgress);     // Progress within current floor (0.0-1.0)
+    msg.add(animationDirection);     // Direction: 1 = up, -1 = down
+    msg.add(NUM_WINDOWS);            // Number of screens
+    oscP5.send(msg, scAddress);
   }
 
   void startTransition(int newScene) {
@@ -492,57 +393,55 @@ class SharedState {
       return;
     }
 
+    // Build maps of floor number -> filename
+    java.util.HashMap<Integer, String> videoMap = new java.util.HashMap<Integer, String>();
+    java.util.HashMap<Integer, String> audioMap = new java.util.HashMap<Integer, String>();
+    java.util.TreeSet<Integer> allFloorNumbers = new java.util.TreeSet<Integer>();
+
     // Find all carpet videos
-    ArrayList<String> foundVideos = new ArrayList<String>();
     for (String filename : files) {
       String lower = filename.toLowerCase();
       if ((lower.startsWith("carpet_") || lower.startsWith("carpet")) &&
           (lower.endsWith(".mp4") || lower.endsWith(".mov"))) {
-        foundVideos.add(filename);
+        int floorNum = extractNumber(filename);
+        videoMap.put(floorNum, filename);
+        allFloorNumbers.add(floorNum);
       }
     }
 
     // Find all carpet audio
-    ArrayList<String> foundAudio = new ArrayList<String>();
     for (String filename : files) {
       String lower = filename.toLowerCase();
       if ((lower.startsWith("carpet_") || lower.startsWith("carpet")) &&
           (lower.endsWith(".wav") || lower.endsWith(".mp3") || lower.endsWith(".aiff"))) {
-        foundAudio.add(filename);
+        int floorNum = extractNumber(filename);
+        audioMap.put(floorNum, filename);
+        allFloorNumbers.add(floorNum);
       }
     }
 
-    // Sort by number
-    java.util.Comparator<String> numberComparator = new java.util.Comparator<String>() {
-      public int compare(String a, String b) {
-        int numA = extractNumber(a);
-        int numB = extractNumber(b);
-        return Integer.compare(numA, numB);
-      }
-    };
+    // Create pairs based on floor number
+    println("\nMedia found (paired by floor number):");
+    for (int floorNum : allFloorNumbers) {
+      String videoFile = videoMap.get(floorNum);
+      String audioFile = audioMap.get(floorNum);
 
-    java.util.Collections.sort(foundVideos, numberComparator);
-    java.util.Collections.sort(foundAudio, numberComparator);
-
-    // Add to lists (sorted low to high by number)
-    println("\nMedia found (sorted by floor number):");
-    int maxFloors = max(foundVideos.size(), foundAudio.size());
-    for (int i = 0; i < maxFloors; i++) {
-      String videoFile = i < foundVideos.size() ? foundVideos.get(i) : null;
-      String audioFile = i < foundAudio.size() ? foundAudio.get(i) : null;
-
+      // Only add if we have at least a video (audio is optional)
       if (videoFile != null) {
         videoNames.add(videoFile);
-      }
-      if (audioFile != null) {
-        audioNames.add(audioFile);
-      }
+        audioNames.add(audioFile); // Can be null
 
-      print("  Floor " + i + ": ");
-      if (videoFile != null) print(videoFile);
-      if (videoFile != null && audioFile != null) print(" + ");
-      if (audioFile != null) print(audioFile);
-      println();
+        print("  Floor " + floorNum + ": " + videoFile);
+        if (audioFile != null) {
+          print(" + " + audioFile);
+        } else {
+          print(" (no audio)");
+        }
+        println();
+      } else if (audioFile != null) {
+        // Audio without video - skip but warn
+        println("  WARNING: Floor " + floorNum + " has audio (" + audioFile + ") but no video - skipping");
+      }
     }
   }
 
@@ -566,17 +465,14 @@ class SharedState {
 }
 
 /**
- * Floor class - contains a video and audio file that loop independently
+ * Floor class - contains a video and audio file reference
+ * Audio is handled by SuperCollider via OSC
  */
 class Floor {
   Movie video;
-  SoundFile audio;
   String videoName;
   String audioName;
   int floorNumber;
-  float currentAmp = 0.0;          // Track current amplitude
-  float targetAmp = 0.0;           // Target amplitude
-  static final float AMP_THRESHOLD = 0.01;  // Only update if change > 1%
 
   Floor(PApplet parent, String videoFile, String audioFile, int number) {
     this.videoName = videoFile;
@@ -589,47 +485,11 @@ class Floor {
       video.loop();
       video.play();
     }
-
-    // Load audio
-    if (audioFile != null) {
-      audio = new SoundFile(parent, audioFile);
-      audio.loop();
-      audio.amp(0.0); // Start silent, will be controlled by mixing
-      currentAmp = 0.0;
-      targetAmp = 0.0;
-    }
-  }
-
-  // Set target amplitude (will be smoothly applied)
-  void setTargetAmp(float amp) {
-    targetAmp = constrain(amp, 0.0, 1.0);
-  }
-
-  // Update amplitude smoothly (call less frequently than every frame)
-  void updateAmp() {
-    if (audio == null) return;
-
-    // Smooth interpolation toward target
-    float diff = targetAmp - currentAmp;
-
-    // Only update if difference is significant
-    if (abs(diff) > AMP_THRESHOLD) {
-      // Smooth step toward target (slower movement = smoother audio)
-      currentAmp += diff * 0.15; // 15% per update
-      audio.amp(currentAmp);
-    } else if (abs(diff) > 0.001) {
-      // Final snap to target when very close
-      currentAmp = targetAmp;
-      audio.amp(currentAmp);
-    }
   }
 
   void cleanup() {
     if (video != null) {
       video.stop();
-    }
-    if (audio != null) {
-      audio.stop();
     }
   }
 }
@@ -812,7 +672,7 @@ class FloorWindow extends PApplet {
     // Semi-transparent background
     fill(0, 200);
     noStroke();
-    rect(10, 10, 600, 580);
+    rect(10, 10, 600, 480);
 
     // Debug text
     fill(0, 255, 0);
@@ -842,19 +702,12 @@ class FloorWindow extends PApplet {
 
     // Audio info
     Floor floor = sharedState.floors.get(videoIdx);
-    if (floor != null && floor.audio != null) {
+    if (floor != null && floor.audioName != null) {
       text("Audio File: " + floor.audioName, 20, y); y += lineHeight;
-      text("Audio Playing: " + floor.audio.isPlaying(), 20, y); y += lineHeight;
+      text("Audio: SuperCollider (OSC)", 20, y); y += lineHeight;
     } else {
       text("Audio File: none", 20, y); y += lineHeight;
     }
-
-    y += 5;
-    fill(255, 200, 100);
-    text("=== AUDIO MIXING ===", 20, y); y += lineHeight;
-    fill(255);
-    text("Master Volume: " + nf(sharedState.masterVolume * 100, 0, 0) + "% (scroll to adjust)", 20, y); y += lineHeight;
-    text("Active floors: " + (sharedState.isAnimating ? "transitioning" : NUM_WINDOWS), 20, y); y += lineHeight;
 
     y += 5;
     text("Video Resolution: " + video.width + "x" + video.height, 20, y); y += lineHeight;
@@ -889,7 +742,7 @@ class FloorWindow extends PApplet {
 
     y += 5;
     fill(100);
-    text("Press D to hide | F for fullscreen | R to reload config | Scroll for volume", 20, y);
+    text("Press D to hide | F for fullscreen | R to reload config", 20, y);
   }
 
   public void keyPressed() {
@@ -927,9 +780,4 @@ class FloorWindow extends PApplet {
     }
   }
 
-  public void mouseWheel(MouseEvent event) {
-    float delta = event.getCount();
-    sharedState.masterVolume = constrain(sharedState.masterVolume - delta * 0.05, 0.0, 1.0);
-    println("Master volume: " + nf(sharedState.masterVolume * 100, 0, 0) + "%");
-  }
 }

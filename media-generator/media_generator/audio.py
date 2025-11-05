@@ -11,13 +11,13 @@ import subprocess
 import os
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, List, Any
 
 try:
     from imageio_ffmpeg import get_ffmpeg_exe
-    FFMPEG_PATH = get_ffmpeg_exe()
+    FFMPEG_PATH: str = get_ffmpeg_exe()
 except ImportError:
-    FFMPEG_PATH = 'ffmpeg'
+    FFMPEG_PATH: str = 'ffmpeg'
 
 
 # =============================================================================
@@ -55,15 +55,17 @@ def generate_triangle_wave(frequency: float, sample_rate: float, duration: float
 
 def apply_lowpass_filter(wave: np.ndarray, cutoff: float, sample_rate: float) -> np.ndarray:
     """Apply Butterworth low-pass filter to audio wave."""
-    nyquist = sample_rate / 2
-    normalized_cutoff = cutoff / nyquist
+    nyquist: float = sample_rate / 2
+    normalized_cutoff: float = cutoff / nyquist
+    b: np.ndarray
+    a: np.ndarray
     b, a = scipy.signal.butter(4, normalized_cutoff, btype='low')
     return scipy.signal.filtfilt(b, a, wave)
 
 
 def normalize_to_dbfs(wave: np.ndarray, target_db: float = -12) -> np.ndarray:
     """Normalize audio wave to target dBFS."""
-    target_amplitude = 10 ** (target_db / 20)
+    target_amplitude: float = 10 ** (target_db / 20)
     return wave / np.max(np.abs(wave)) * target_amplitude
 
 
@@ -73,6 +75,10 @@ def quantize_audio(wave: np.ndarray, bit_depth: int, channels: int) -> np.ndarra
         raise ValueError(f"Bit depth must be between 1 and 32, got {bit_depth}")
 
     # Determine container format
+    container_bits: int
+    dtype: Any
+    is_unsigned: bool
+
     if bit_depth <= 8:
         container_bits, dtype, is_unsigned = 8, np.uint8, True
     elif bit_depth <= 16:
@@ -83,10 +89,11 @@ def quantize_audio(wave: np.ndarray, bit_depth: int, channels: int) -> np.ndarra
         container_bits, dtype, is_unsigned = 32, np.int32, False
 
     # Quantize
+    quantized: np.ndarray
     if is_unsigned:
-        offset = 2 ** (container_bits - 1)
-        max_value = offset - 1
-        quant_max = (2 ** bit_depth) // 2 - 1
+        offset: int = 2 ** (container_bits - 1)
+        max_value: int = offset - 1
+        quant_max: int = (2 ** bit_depth) // 2 - 1
         quantized = np.clip(wave * quant_max, -quant_max, quant_max)
         quantized = (quantized + offset).astype(dtype)
     else:
@@ -110,13 +117,13 @@ def generate_audio_data(config: AudioConfig) -> Tuple[np.ndarray, float]:
     Returns (audio_data, actual_sample_rate) tuple.
     """
     # Generate and process wave
-    wave = generate_triangle_wave(config.frequency, config.sample_rate, config.duration)
-    cutoff = min(config.frequency * 2, config.max_freq)
+    wave: np.ndarray = generate_triangle_wave(config.frequency, config.sample_rate, config.duration)
+    cutoff: float = min(config.frequency * 2, config.max_freq)
     wave = apply_lowpass_filter(wave, cutoff, config.sample_rate)
     wave = normalize_to_dbfs(wave, -12)
 
     # Quantize
-    audio_data = quantize_audio(wave, config.bit_depth, config.channels)
+    audio_data: np.ndarray = quantize_audio(wave, config.bit_depth, config.channels)
 
     return audio_data, config.sample_rate
 
@@ -127,23 +134,28 @@ def generate_audio_data(config: AudioConfig) -> Tuple[np.ndarray, float]:
 
 def write_wav(output: MediaOutput, config: AudioConfig) -> None:
     """Write audio data to WAV file."""
+    audio_data: np.ndarray
+    sample_rate: float
     audio_data, sample_rate = generate_audio_data(config)
     wavfile.write(str(output.path), int(sample_rate), audio_data)
 
 
 def write_compressed_audio(output: MediaOutput, config: AudioConfig,
-                          codec: str, codec_args: list) -> None:
+                          codec: str, codec_args: List[str]) -> None:
     """Write compressed audio via ffmpeg (OGG, MP3, AAC, FLAC)."""
+    audio_data: np.ndarray
+    sample_rate: float
     audio_data, sample_rate = generate_audio_data(config)
 
     # Create temporary WAV
+    tmp_wav_path: str
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_wav:
         tmp_wav_path = tmp_wav.name
         wavfile.write(tmp_wav_path, int(sample_rate), audio_data)
 
     try:
         # Convert via ffmpeg
-        result = subprocess.run([
+        result: subprocess.CompletedProcess[str] = subprocess.run([
             FFMPEG_PATH, '-y', '-i', tmp_wav_path,
             *codec_args,
             '-t', str(config.duration),
@@ -158,9 +170,9 @@ def write_compressed_audio(output: MediaOutput, config: AudioConfig,
             os.remove(tmp_wav_path)
 
 
-def get_codec_args(format: str, bitrate: str = '192k') -> list:
+def get_codec_args(format: str, bitrate: str = '192k') -> List[str]:
     """Get ffmpeg codec arguments for audio format."""
-    codec_map = {
+    codec_map: dict[str, List[str]] = {
         'ogg': ['-c:a', 'libvorbis', '-q:a', '5'],
         'mp3': ['-c:a', 'libmp3lame', '-b:a', bitrate],
         'aac': ['-c:a', 'aac', '-b:a', bitrate],
@@ -177,14 +189,14 @@ def write_audio_file(output: MediaOutput, config: AudioConfig) -> str:
     """
     if output.format == 'wav':
         write_wav(output, config)
-        container_bits = 8 if config.bit_depth <= 8 else (16 if config.bit_depth <= 16 else (24 if config.bit_depth <= 24 else 32))
-        ch_desc = "mono" if config.channels == 1 else ("stereo" if config.channels == 2 else f"{config.channels}-channel")
+        container_bits: int = 8 if config.bit_depth <= 8 else (16 if config.bit_depth <= 16 else (24 if config.bit_depth <= 24 else 32))
+        ch_desc: str = "mono" if config.channels == 1 else ("stereo" if config.channels == 2 else f"{config.channels}-channel")
         return f"{ch_desc}, {container_bits}-bit, {config.frequency:.1f}Hz, -12dBFS"
     else:
-        codec_args = get_codec_args(output.format, config.bitrate)
+        codec_args: List[str] = get_codec_args(output.format, config.bitrate)
         write_compressed_audio(output, config, output.format, codec_args)
-        ch_desc = "mono" if config.channels == 1 else ("stereo" if config.channels == 2 else f"{config.channels}-channel")
-        ext = output.format.upper()
+        ch_desc: str = "mono" if config.channels == 1 else ("stereo" if config.channels == 2 else f"{config.channels}-channel")
+        ext: str = output.format.upper()
 
         if output.format in ['ogg']:
             return f"{ch_desc}, {ext} Vorbis, {config.frequency:.1f}Hz, -12dBFS"
