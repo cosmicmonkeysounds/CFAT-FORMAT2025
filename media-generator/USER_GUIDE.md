@@ -1,324 +1,195 @@
-# Media Generator - User Guide for Non-Technical Users
+# User Guide - For Non-Technical Users
 
-**Simple guide for gallery staff and non-programmers**
+**Simple guide for gallery staff and artists using interactive mode**
 
-This software creates test video files, images, and audio files. You can use it to generate media files for testing your systems.
+This tool creates test video, image, and audio files. No programming knowledge required!
 
----
+## First Time Setup
 
-## Quick Start (Easiest Method)
+### Step 1: Run the Script
 
-### If You Have the Executable File
-
-If someone gave you a file called `media-generator` or `media-generator.exe`, you can skip all the installation steps!
-
-**On Windows:**
-1. Double-click `media-generator.exe`, or
-2. Open Command Prompt (search for "cmd" in Start menu)
-3. Drag the `media-generator.exe` file into the window
-4. Add your command, like: ` 10 -t mp4`
-5. Press Enter
-
-**On Mac:**
-1. Open Terminal (search for "Terminal" in Spotlight)
-2. Type: `cd ` (note the space after cd)
-3. Drag the folder containing `media-generator` into the Terminal window
-4. Press Enter
-5. Type: `./media-generator 10 -t mp4`
-6. Press Enter
-
-If Mac says it's from an "unidentified developer":
-- Go to System Preferences → Security & Privacy
-- Click "Open Anyway"
-
-**On Linux:**
-1. Open Terminal
-2. Navigate to the folder: `cd /path/to/folder`
-3. Make it executable: `chmod +x media-generator`
-4. Run it: `./media-generator 10 -t mp4`
-
----
-
-## Installation (If You Don't Have the Executable)
-
-### Step 1: Install Python
-
-**On Windows:**
-1. Go to https://www.python.org/downloads/
-2. Click the big yellow button "Download Python"
-3. Run the installer
-4. ⚠️ **IMPORTANT**: Check the box "Add Python to PATH"
-5. Click "Install Now"
-
-**On Mac:**
-1. Go to https://www.python.org/downloads/
-2. Download the macOS installer
-3. Open the .pkg file and follow the instructions
-
-**On Linux (Ubuntu/Debian):**
-Open Terminal and type:
+**macOS/Linux:** Open Terminal, navigate to the media-generator folder, then run:
 ```bash
-sudo apt update
-sudo apt install python3 python3-pip
+./run-macos-linux.sh
 ```
 
-### Step 2: Download This Software
-
-**Option A: Download as ZIP**
-1. Click the green "Code" button on the GitHub page
-2. Click "Download ZIP"
-3. Unzip the file to a folder on your computer
-
-**Option B: Using Git (if you have it)**
-Open Terminal/Command Prompt and type:
-```bash
-git clone https://github.com/yourusername/media-generator.git
-cd media-generator
+**Windows:** Double-click `run-windows.bat` in File Explorer, or open Command Prompt and run:
+```cmd
+run-windows.bat
 ```
 
-### Step 3: Install the Software
+### Step 2: Wait for Setup (First Time Only)
 
-Open Terminal (Mac/Linux) or Command Prompt (Windows):
+The first time takes about 30 seconds. You'll see:
+```
+═══════════════════════════════════════════════
+  Media Generator Setup
+═══════════════════════════════════════════════
 
-1. Navigate to the folder where you downloaded the software:
-   ```bash
-   cd /path/to/media-generator
-   ```
-
-2. Install it:
-   ```bash
-   pip3 install -e .
-   ```
-
-   Or if that doesn't work:
-   ```bash
-   pip install -e .
-   ```
-
-Wait for it to download and install (this may take a few minutes).
-
----
-
-## How to Use It
-
-After installation, you can run the software from anywhere on your computer.
-
-### Basic Commands
-
-Open Terminal or Command Prompt and type these commands:
-
-**Generate 10 test videos:**
-```bash
-media-generator 10 -t mp4
+✓ Python found
+✓ Creating virtual environment...
+✓ Installing dependencies...
 ```
 
-**Generate 10 images:**
+After this first setup, it starts instantly!
+
+### Step 3: Follow the Prompts
+
+The interactive mode will guide you through:
+1. How many files to create
+2. What type (Video, Image, Audio, Animation)
+3. Format and quality options
+4. Where to save the files
+
+Just answer each question and press Enter.
+
+## Common Tasks
+
+### Generate Test Videos
+
+**Interactive mode (easiest):**
 ```bash
-media-generator 10 -t jpg
+./run-macos-linux.sh
+```
+Then choose:
+- Media type: `1` (Video)
+- Number of files: `10`
+- Format: `1` (MP4)
+- Add audio: `y` (yes)
+
+**Quick command:**
+```bash
+# macOS/Linux
+./run-macos-linux.sh 10 -t mp4 --embed-audio
+
+# Windows
+run-windows.bat 10 -t mp4 --embed-audio
 ```
 
-**Generate 10 audio files:**
+### Generate Test Images
+
+**Quick command:**
 ```bash
-media-generator 10 -t wav
+# 10 JPG images
+./run-macos-linux.sh 10 -t jpg
+
+# 10 high-resolution PNG images
+./run-macos-linux.sh 10 -t png -w 1920 -H 1080
 ```
 
-**Save to a specific folder:**
+### Generate Audio Files
+
+**Quick command:**
 ```bash
-media-generator 10 -t mp4 -o /path/to/my/folder
+# 10 WAV files
+./run-macos-linux.sh 10 -t wav
+
+# 10 stereo audio files
+./run-macos-linux.sh 10 -t wav --channels 2
 ```
-
-**Give files a custom name:**
-```bash
-media-generator 10 -t mp4 --name my_test_video
-```
-This creates: `my_test_video_1.mp4`, `my_test_video_2.mp4`, etc.
-
-### Common Examples
-
-**Generate 20 HD videos:**
-```bash
-media-generator 20 -t mp4 -w 1920 -H 1080
-```
-
-**Generate 5 small images:**
-```bash
-media-generator 5 -t jpg -w 640 -H 480
-```
-
-**Generate 10 short videos (2 seconds each):**
-```bash
-media-generator 10 -t mp4 -d 2
-```
-
-**Generate audio test tones:**
-```bash
-media-generator 10 -t wav
-```
-
-**Generate stereo audio files:**
-```bash
-media-generator 10 -t wav --channels 2
-```
-
----
-
-## Understanding the Options
-
-### Media Types (`-t` or `--type`)
-- `mp4` - Video files
-- `jpg` - JPEG images
-- `png` - PNG images
-- `gif` - Animated GIFs
-- `wav` - Audio files
-
-### Common Options
-
-| Option | What it does | Example |
-|--------|-------------|---------|
-| First number | How many files to create | `10` creates 10 files |
-| `-t` or `--type` | Type of file (mp4, jpg, png, gif, wav) | `-t mp4` |
-| `-o` or `--output-dir` | Where to save files | `-o my_videos` |
-| `--name` | Base name for files | `--name test_video` |
-| `-w` or `--width` | Width in pixels (video/image) | `-w 1920` |
-| `-H` or `--height` | Height in pixels (video/image) | `-H 1080` |
-| `-d` or `--duration` | Length in seconds (video/audio) | `-d 5` |
-
-### Audio-Specific Options
-
-| Option | What it does | Example |
-|--------|-------------|---------|
-| `--channels` | Number of audio channels (1=mono, 2=stereo) | `--channels 2` |
-| `--bit-depth` | Audio quality (8, 16, 24, or 32) | `--bit-depth 16` |
-| `--sample-rate` | Sample rate in Hz | `--sample-rate 44100` |
-| `--min-freq` | Lowest tone frequency | `--min-freq 100` |
-| `--max-freq` | Highest tone frequency | `--max-freq 1000` |
-
----
 
 ## Where Are My Files?
 
-By default, files are saved in a folder called `test_media` in the same location where you ran the command.
+By default, files go into a `test_media` folder where you ran the script.
 
-To save files somewhere else, use `-o`:
+To save somewhere else, add `-o` with the folder path:
+
 ```bash
-media-generator 10 -t mp4 -o /Users/yourname/Desktop/my_videos
+# macOS/Linux - save to Desktop
+./run-macos-linux.sh 10 -t mp4 -o ~/Desktop/my_videos
+
+# Windows - save to Desktop
+run-windows.bat 10 -t mp4 -o C:\Users\YourName\Desktop\my_videos
 ```
 
----
+## What Files Can It Create?
+
+**Videos:** MP4 files (H.264, H.265, and other formats)
+**Images:** JPG, PNG, WebP, BMP, TIFF, SVG
+**Audio:** WAV, MP3, OGG, AAC, FLAC
+**Animations:** GIF
+
+Each file has unique random colors, effects, and audio.
 
 ## Troubleshooting
 
-### "Command not found" or "media-generator is not recognized"
+### "Permission denied" (macOS/Linux)
 
-**Solution 1:** Try using the full Python module command:
+Run this once:
 ```bash
-python3 -m media_generator 10 -t mp4
-```
-or
-```bash
-python -m media_generator 10 -t mp4
+chmod +x run-macos-linux.sh
 ```
 
-**Solution 2:** Make sure Python is in your PATH (Windows: reinstall Python with "Add to PATH" checked)
+### Something Went Wrong - Start Fresh
 
-### "Permission denied" (Mac/Linux)
+Delete the setup and try again:
 
-Try adding `sudo` before the install command:
+**macOS/Linux:**
 ```bash
-sudo pip3 install -e .
+rm -rf venv/
+./run-macos-linux.sh
 ```
 
-### "No module named cv2" or similar errors
-
-Make sure you installed from the correct folder:
-```bash
-cd /path/to/media-generator
-pip3 install -r requirements.txt
+**Windows:**
+```cmd
+rmdir /s /q venv
+run-windows.bat
 ```
 
-### Files are being saved to the wrong place
+### Can't Find My Files
 
-Use the full path with `-o`:
+Use the full path to the folder:
 ```bash
-media-generator 10 -t mp4 -o "/full/path/to/folder"
+./run-macos-linux.sh 10 -t mp4 -o "/full/path/to/folder"
 ```
 
-### The program is too slow
+## Example: Gallery Testing Workflow
 
-- Reduce the video resolution: `-w 1280 -H 720`
-- Create fewer files at a time
-- Use shorter durations: `-d 1`
+**You need 50 test videos for the gallery playback system:**
 
----
-
-## Getting Help
-
-To see all available options:
-```bash
-media-generator --help
-```
-
-For technical documentation, see `README.md` in the software folder.
-
----
-
-## Example Gallery Workflow
-
-**Scenario:** You need 50 test videos for your video playback system
-
-1. Open Terminal/Command Prompt
-
-2. Create a folder on your Desktop:
+1. Open Terminal (macOS/Linux) or Command Prompt (Windows)
+2. Navigate to the media-generator folder
+3. Run:
    ```bash
-   mkdir ~/Desktop/gallery_test_videos
+   # macOS/Linux
+   ./run-macos-linux.sh 50 -t mp4 --embed-audio -o ~/Desktop/gallery_videos
+
+   # Windows
+   run-windows.bat 50 -t mp4 --embed-audio -o C:\Users\YourName\Desktop\gallery_videos
    ```
+4. Wait ~2 minutes
+5. Find 50 unique videos on your Desktop in the `gallery_videos` folder
 
-3. Generate the videos:
-   ```bash
-   media-generator 50 -t mp4 -o ~/Desktop/gallery_test_videos --name gallery_test
-   ```
+Each video has different colors and a unique audio tone - perfect for testing!
 
-4. This creates 50 files:
-   - `gallery_test_1.mp4`
-   - `gallery_test_2.mp4`
-   - ...
-   - `gallery_test_50.mp4`
+## Quick Reference
 
-5. Each video is different (different colors and effects)
-
-6. Use these files to test your playback system!
-
----
-
-## Quick Reference Card
-
-**Print this out and keep near your computer!**
+Print this out and keep it handy:
 
 ```
-Generate 10 videos:
-  media-generator 10 -t mp4
+INTERACTIVE MODE (Easiest):
+  ./run-macos-linux.sh          (macOS/Linux)
+  run-windows.bat               (Windows)
 
-Generate 10 images:
-  media-generator 10 -t jpg
+QUICK COMMANDS:
+  10 videos:   ./run-macos-linux.sh 10 -t mp4 --embed-audio
+  10 images:   ./run-macos-linux.sh 10 -t jpg
+  10 audio:    ./run-macos-linux.sh 10 -t wav
 
-Generate 10 audio files:
-  media-generator 10 -t wav
+SAVE TO SPECIFIC FOLDER:
+  Add: -o /path/to/folder
 
-Save to Desktop (Mac):
-  media-generator 10 -t mp4 -o ~/Desktop/test_files
+CUSTOM NAME:
+  Add: --name my_video
 
-Save to Desktop (Windows):
-  media-generator 10 -t mp4 -o C:\Users\YourName\Desktop\test_files
-
-Custom name:
-  media-generator 10 -t mp4 --name my_video
-
-Get help:
-  media-generator --help
+GET HELP:
+  ./run-macos-linux.sh --help
 ```
 
----
+## Need Advanced Options?
 
-## Contact
-
-For technical support, see the README.md file or contact your IT department.
+See [TECHNICAL_GUIDE.md](TECHNICAL_GUIDE.md) for:
+- All command line options
+- Advanced codecs and formats
+- Custom resolutions and frame rates
+- Development and building

@@ -11,17 +11,9 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, List, Tuple
 
-from media_generator.core import (
-    AudioConfig,
-    VideoConfig,
-    MediaOutput,
-    write_audio_file,
-    write_video_file,
-    write_image_file,
-    write_svg_file,
-    write_gif_file,
-    embed_audio_in_video,
-)
+from media_generator.audio import AudioConfig, MediaOutput, write_audio_file
+from media_generator.video import VideoConfig, write_video_file, embed_audio_in_video
+from media_generator.image import write_image_file, write_svg_file, write_gif_file
 
 
 # =============================================================================
@@ -76,115 +68,142 @@ def generate_frequencies(n: int, min_freq: float, max_freq: float) -> List[float
 # Interactive Mode
 # =============================================================================
 
+def padded_input(prompt: str, padding_lines: int = 4) -> str:
+    """Get input with visual padding for better readability."""
+    print("\n" * (padding_lines - 1))
+    return input(f"  → {prompt} ").strip()
+
+
+def section_header(title: str) -> None:
+    """Print a pretty section header."""
+    print("\n" + "─" * 70)
+    print(f"  {title}")
+    print("─" * 70)
+
+
 def interactive_mode() -> Optional[List[str]]:
     """Guide user through media generation options. Returns argument list or None if cancelled."""
-    print("\n" + "=" * 70)
-    print("  Media Generator - Interactive Mode")
-    print("=" * 70)
-    print("\nWelcome! I'll guide you through creating media files.\n")
+    print("\n" + "═" * 70)
+    print("  🎨 Media Generator - Interactive Mode")
+    print("═" * 70)
+    print("\n  Welcome! I'll guide you through creating media files.")
+    print("  Each prompt has space above it so you can easily see your options.\n")
 
-    # Media type
-    print("What type of media do you want to generate?")
-    print("  1) Video (MP4)")
-    print("  2) Image (JPG, PNG, WebP, BMP, TIFF, SVG)")
-    print("  3) Animation (GIF)")
-    print("  4) Audio (WAV, OGG, MP3)")
-    choice = input("\nEnter choice (1-4): ").strip()
+    section_header("Step 1: Choose Media Type")
+
+    print("\n  What type of media do you want to generate?\n")
+    print("    1️⃣  Video (MP4)")
+    print("    2️⃣  Image (JPG, PNG, WebP, BMP, TIFF, SVG)")
+    print("    3️⃣  Animation (GIF)")
+    print("    4️⃣  Audio (WAV, OGG, MP3, AAC, FLAC)")
+
+    choice = padded_input("Enter choice (1-4):")
 
     if choice not in ['1', '2', '3', '4']:
-        print("Invalid choice. Exiting.")
+        print("\n  ❌ Invalid choice. Exiting.\n")
         return None
 
-    # Number of files
-    n = input("How many files do you want to generate? ").strip()
+    section_header("Step 2: Number of Files")
+
+    n = padded_input("How many files do you want to generate?")
     args = [n]
 
     # Video
     if choice == '1':
-        print("\n--- Video Options ---")
+        section_header("Step 3: Video Configuration")
 
-        print("\nChoose video codec:")
-        print("  1) MPEG-4 (default, most compatible)")
-        print("  2) H.264 (high quality)")
-        print("  3) H.265 (best compression)")
-        codec_choice = input("Enter choice (1-3) [default: 1]: ").strip() or '1'
+        print("\n  Choose video codec:\n")
+        print("    1️⃣  MPEG-4 (default, most compatible)")
+        print("    2️⃣  H.264 (high quality)")
+        print("    3️⃣  H.265 (best compression)")
+
+        codec_choice = padded_input("Enter choice (1-3) [default: 1]:") or '1'
         codec_map = {'1': 'mpeg4', '2': 'h264', '3': 'h265'}
         args.extend(['--codec', codec_map.get(codec_choice, 'mpeg4')])
 
-        duration = input("\nDuration in seconds [default: 1]: ").strip() or '1'
+        duration = padded_input("Duration in seconds [default: 1]:") or '1'
         args.extend(['-d', duration])
 
-        print("\nChoose resolution:")
-        print("  1) 1920x1080 (Full HD)")
-        print("  2) 1280x720 (HD)")
-        print("  3) 640x480 (SD)")
-        print("  4) Custom")
-        res_choice = input("Enter choice (1-4) [default: 1]: ").strip() or '1'
+        print("\n  Choose resolution:\n")
+        print("    1️⃣  1920x1080 (Full HD)")
+        print("    2️⃣  1280x720 (HD)")
+        print("    3️⃣  640x480 (SD)")
+        print("    4️⃣  Custom")
+
+        res_choice = padded_input("Enter choice (1-4) [default: 1]:") or '1'
 
         if res_choice == '2':
             args.extend(['-w', '1280', '-H', '720'])
         elif res_choice == '3':
             args.extend(['-w', '640', '-H', '480'])
         elif res_choice == '4':
-            width = input("Width in pixels: ").strip()
-            height = input("Height in pixels: ").strip()
+            width = padded_input("Width in pixels:")
+            height = padded_input("Height in pixels:")
             args.extend(['-w', width, '-H', height])
         else:
             args.extend(['-w', '1920', '-H', '1080'])
 
-        fps = input("\nFrames per second (FPS) [default: 30]: ").strip() or '30'
+        fps = padded_input("Frames per second (FPS) [default: 30]:") or '30'
         args.extend(['-f', fps])
 
-        print("\nDo you want audio in your videos?")
-        print("  1) No audio")
-        print("  2) Embed audio in video")
-        print("  3) Separate audio file")
-        print("  4) Both embedded and separate")
-        audio_choice = input("Enter choice (1-4) [default: 1]: ").strip() or '1'
+        section_header("Step 4: Audio Options")
+
+        print("\n  Do you want audio in your videos?\n")
+        print("    1️⃣  No audio")
+        print("    2️⃣  Embed audio in video")
+        print("    3️⃣  Separate audio file")
+        print("    4️⃣  Both embedded and separate")
+
+        audio_choice = padded_input("Enter choice (1-4) [default: 1]:") or '1'
 
         if audio_choice in ['2', '4']:
             args.append('--embed-audio')
 
         if audio_choice in ['2', '3', '4']:
-            print("\n--- Audio Quality Settings ---")
+            section_header("Step 5: Audio Quality Settings")
 
-            print("\nSample rate:")
-            print("  1) 44100 Hz (CD quality, default)")
-            print("  2) 48000 Hz (professional)")
-            print("  3) 96000 Hz (high-res)")
-            print("  4) 22050 Hz (lower quality)")
-            print("  5) Custom (e.g., 43124.3123 Hz)")
-            sample_choice = input("Enter choice (1-5) [default: 1]: ").strip() or '1'
+            print("\n  Sample rate:\n")
+            print("    1️⃣  44100 Hz (CD quality, default)")
+            print("    2️⃣  48000 Hz (professional)")
+            print("    3️⃣  96000 Hz (high-res)")
+            print("    4️⃣  22050 Hz (lower quality)")
+            print("    5️⃣  Custom (e.g., 43124.3123 Hz)")
+
+            sample_choice = padded_input("Enter choice (1-5) [default: 1]:") or '1'
             if sample_choice == '5':
-                custom_rate = input("Enter custom sample rate (Hz): ").strip()
+                custom_rate = padded_input("Enter custom sample rate (Hz):")
                 args.extend(['--sample-rate', custom_rate])
             else:
                 sample_map = {'1': '44100', '2': '48000', '3': '96000', '4': '22050'}
                 args.extend(['--sample-rate', sample_map.get(sample_choice, '44100')])
 
-            print("\nNumber of channels:")
-            print("  1) Mono (1 channel)")
-            print("  2) Stereo (2 channels)")
-            channel_choice = input("Enter choice (1-2) [default: 1]: ").strip() or '1'
+            print("\n  Number of channels:\n")
+            print("    1️⃣  Mono (1 channel)")
+            print("    2️⃣  Stereo (2 channels)")
+
+            channel_choice = padded_input("Enter choice (1-2) [default: 1]:") or '1'
             channel_map = {'1': '1', '2': '2'}
             args.extend(['--channels', channel_map.get(channel_choice, '1')])
 
-            print("\nBit depth:")
-            print("  1) 16-bit (standard, default)")
-            print("  2) 24-bit (high quality)")
-            bit_choice = input("Enter choice (1-2) [default: 1]: ").strip() or '1'
+            print("\n  Bit depth:\n")
+            print("    1️⃣  16-bit (standard, default)")
+            print("    2️⃣  24-bit (high quality)")
+
+            bit_choice = padded_input("Enter choice (1-2) [default: 1]:") or '1'
             bit_map = {'1': '16', '2': '24'}
             args.extend(['--bit-depth', bit_map.get(bit_choice, '16')])
 
         if audio_choice in ['3', '4']:
             args.append('--audio-file')
-            print("\nAudio format for separate file:")
-            print("  1) WAV (uncompressed)")
-            print("  2) OGG (Vorbis, compressed)")
-            print("  3) MP3 (compressed)")
-            print("  4) AAC (M4A, compressed)")
-            print("  5) FLAC (lossless)")
-            audio_fmt = input("Enter choice (1-5) [default: 1]: ").strip() or '1'
+
+            print("\n  Audio format for separate file:\n")
+            print("    1️⃣  WAV (uncompressed)")
+            print("    2️⃣  OGG (Vorbis, compressed)")
+            print("    3️⃣  MP3 (compressed)")
+            print("    4️⃣  AAC (M4A, compressed)")
+            print("    5️⃣  FLAC (lossless)")
+
+            audio_fmt = padded_input("Enter choice (1-5) [default: 1]:") or '1'
             fmt_map = {'1': 'wav', '2': 'ogg', '3': 'mp3', '4': 'm4a', '5': 'flac'}
             args.extend(['--audio-format', fmt_map.get(audio_fmt, 'wav')])
 
@@ -192,137 +211,147 @@ def interactive_mode() -> Optional[List[str]]:
 
     # Image
     elif choice == '2':
-        print("\n--- Image Options ---")
+        section_header("Step 3: Image Configuration")
 
-        print("\nChoose image format:")
-        print("  1) JPG (photo quality)")
-        print("  2) PNG (lossless)")
-        print("  3) WebP (modern, efficient)")
-        print("  4) BMP (bitmap)")
-        print("  5) TIFF (high quality)")
-        print("  6) SVG (vector graphics)")
-        fmt_choice = input("Enter choice (1-6) [default: 1]: ").strip() or '1'
+        print("\n  Choose image format:\n")
+        print("    1️⃣  JPG (photo quality)")
+        print("    2️⃣  PNG (lossless)")
+        print("    3️⃣  WebP (modern, efficient)")
+        print("    4️⃣  BMP (bitmap)")
+        print("    5️⃣  TIFF (high quality)")
+        print("    6️⃣  SVG (vector graphics)")
+
+        fmt_choice = padded_input("Enter choice (1-6) [default: 1]:") or '1'
         fmt_map = {'1': 'jpg', '2': 'png', '3': 'webp', '4': 'bmp', '5': 'tiff', '6': 'svg'}
         args.extend(['-t', fmt_map.get(fmt_choice, 'jpg')])
 
-        print("\nChoose resolution:")
-        print("  1) 1920x1080 (Full HD)")
-        print("  2) 1280x720 (HD)")
-        print("  3) 800x600 (SVGA)")
-        print("  4) Custom")
-        res_choice = input("Enter choice (1-4) [default: 1]: ").strip() or '1'
+        print("\n  Choose resolution:\n")
+        print("    1️⃣  1920x1080 (Full HD)")
+        print("    2️⃣  1280x720 (HD)")
+        print("    3️⃣  800x600 (SVGA)")
+        print("    4️⃣  Custom")
+
+        res_choice = padded_input("Enter choice (1-4) [default: 1]:") or '1'
 
         if res_choice == '2':
             args.extend(['-w', '1280', '-H', '720'])
         elif res_choice == '3':
             args.extend(['-w', '800', '-H', '600'])
         elif res_choice == '4':
-            width = input("Width in pixels: ").strip()
-            height = input("Height in pixels: ").strip()
+            width = padded_input("Width in pixels:")
+            height = padded_input("Height in pixels:")
             args.extend(['-w', width, '-H', height])
         else:
             args.extend(['-w', '1920', '-H', '1080'])
 
     # GIF
     elif choice == '3':
+        section_header("Step 3: Animation Configuration")
+
         args.extend(['-t', 'gif'])
 
-        duration = input("\nDuration in seconds [default: 1]: ").strip() or '1'
+        duration = padded_input("Duration in seconds [default: 1]:") or '1'
         args.extend(['-d', duration])
 
-        fps = input("Frames per second (FPS) [default: 10]: ").strip() or '10'
+        fps = padded_input("Frames per second (FPS) [default: 10]:") or '10'
         args.extend(['-f', fps])
 
-        print("\nChoose resolution:")
-        print("  1) 1920x1080 (Full HD)")
-        print("  2) 800x600 (Standard)")
-        print("  3) 480x360 (Small)")
-        print("  4) Custom")
-        res_choice = input("Enter choice (1-4) [default: 2]: ").strip() or '2'
+        print("\n  Choose resolution:\n")
+        print("    1️⃣  1920x1080 (Full HD)")
+        print("    2️⃣  800x600 (Standard)")
+        print("    3️⃣  480x360 (Small)")
+        print("    4️⃣  Custom")
+
+        res_choice = padded_input("Enter choice (1-4) [default: 2]:") or '2'
 
         if res_choice == '1':
             args.extend(['-w', '1920', '-H', '1080'])
         elif res_choice == '3':
             args.extend(['-w', '480', '-H', '360'])
         elif res_choice == '4':
-            width = input("Width in pixels: ").strip()
-            height = input("Height in pixels: ").strip()
+            width = padded_input("Width in pixels:")
+            height = padded_input("Height in pixels:")
             args.extend(['-w', width, '-H', height])
         else:
             args.extend(['-w', '800', '-H', '600'])
 
     # Audio
     elif choice == '4':
-        print("\n--- Audio Options ---")
+        section_header("Step 3: Audio Configuration")
 
-        print("\nChoose audio format:")
-        print("  1) WAV (uncompressed, high quality)")
-        print("  2) OGG (Vorbis, compressed, open source)")
-        print("  3) MP3 (compressed, universal)")
-        print("  4) AAC/M4A (compressed, Apple)")
-        print("  5) FLAC (lossless, compressed)")
-        fmt_choice = input("Enter choice (1-5) [default: 1]: ").strip() or '1'
+        print("\n  Choose audio format:\n")
+        print("    1️⃣  WAV (uncompressed, high quality)")
+        print("    2️⃣  OGG (Vorbis, compressed, open source)")
+        print("    3️⃣  MP3 (compressed, universal)")
+        print("    4️⃣  AAC/M4A (compressed, Apple)")
+        print("    5️⃣  FLAC (lossless, compressed)")
+
+        fmt_choice = padded_input("Enter choice (1-5) [default: 1]:") or '1'
         fmt_map = {'1': 'wav', '2': 'ogg', '3': 'mp3', '4': 'm4a', '5': 'flac'}
         args.extend(['-t', fmt_map.get(fmt_choice, 'wav')])
 
-        duration = input("\nDuration in seconds [default: 1]: ").strip() or '1'
+        duration = padded_input("Duration in seconds [default: 1]:") or '1'
         args.extend(['-d', duration])
 
-        print("\nSample rate:")
-        print("  1) 44100 Hz (CD quality, default)")
-        print("  2) 48000 Hz (professional)")
-        print("  3) 96000 Hz (high-res)")
-        print("  4) 22050 Hz (lower quality)")
-        print("  5) Custom (e.g., 43124.3123 Hz or pi^2^2^2^2)")
-        sample_choice = input("Enter choice (1-5) [default: 1]: ").strip() or '1'
+        print("\n  Sample rate:\n")
+        print("    1️⃣  44100 Hz (CD quality, default)")
+        print("    2️⃣  48000 Hz (professional)")
+        print("    3️⃣  96000 Hz (high-res)")
+        print("    4️⃣  22050 Hz (lower quality)")
+        print("    5️⃣  Custom (e.g., 43124.3123 Hz or pi^10)")
+
+        sample_choice = padded_input("Enter choice (1-5) [default: 1]:") or '1'
         if sample_choice == '5':
-            custom_rate = input("Enter custom sample rate (Hz): ").strip()
+            custom_rate = padded_input("Enter custom sample rate (Hz):")
             args.extend(['--sample-rate', custom_rate])
         else:
             sample_map = {'1': '44100', '2': '48000', '3': '96000', '4': '22050'}
             args.extend(['--sample-rate', sample_map.get(sample_choice, '44100')])
 
-        print("\nAudio channels:")
-        print("  1) Mono (1 channel)")
-        print("  2) Stereo (2 channels)")
-        channels_choice = input("Enter choice (1-2) [default: 1]: ").strip() or '1'
+        print("\n  Number of channels:\n")
+        print("    1️⃣  Mono (1 channel)")
+        print("    2️⃣  Stereo (2 channels)")
+
+        channels_choice = padded_input("Enter choice (1-2) [default: 1]:") or '1'
         channel_map = {'1': '1', '2': '2'}
         args.extend(['--channels', channel_map.get(channels_choice, '1')])
 
-        print("\nBit depth:")
-        print("  1) 16-bit (standard, default)")
-        print("  2) 24-bit (high quality)")
-        bit_choice = input("Enter choice (1-2) [default: 1]: ").strip() or '1'
+        print("\n  Bit depth:\n")
+        print("    1️⃣  16-bit (standard, default)")
+        print("    2️⃣  24-bit (high quality)")
+
+        bit_choice = padded_input("Enter choice (1-2) [default: 1]:") or '1'
         bit_map = {'1': '16', '2': '24'}
         args.extend(['--bit-depth', bit_map.get(bit_choice, '16')])
 
-        use_custom_freq = input("\nUse custom frequency range? (y/n) [default: n]: ").strip().lower()
+        use_custom_freq = padded_input("Use custom frequency range? (y/n) [default: n]:").lower()
         if use_custom_freq == 'y':
-            min_freq = input("Minimum frequency (Hz) [default: 100]: ").strip() or '100'
-            max_freq = input("Maximum frequency (Hz) [default: 1000]: ").strip() or '1000'
+            min_freq = padded_input("Minimum frequency (Hz) [default: 100]:") or '100'
+            max_freq = padded_input("Maximum frequency (Hz) [default: 1000]:") or '1000'
             args.extend(['--min-freq', min_freq, '--max-freq', max_freq])
 
     # Output options
-    print("\n--- Output Options ---\n")
-    output_dir = input("Output directory [default: test_media]: ").strip() or 'test_media'
+    section_header("Step 4: Output Settings")
+
+    output_dir = padded_input("Output directory [default: test_media]:") or 'test_media'
     args.extend(['-o', output_dir])
 
-    base_name = input("Base filename [default: test_media]: ").strip() or 'test_media'
+    base_name = padded_input("Base filename [default: test_media]:") or 'test_media'
     args.extend(['-n', base_name])
 
     # Summary
-    print("\n" + "=" * 70)
-    print("  Summary")
-    print("=" * 70)
-    print(f"Will generate: {n} file(s)")
-    print(f"Output directory: {output_dir}")
-    print(f"Base filename: {base_name}")
-    print("=" * 70 + "\n")
+    print("\n" + "═" * 70)
+    print("  📋 Summary")
+    print("═" * 70)
+    print(f"\n  Files to generate: {n}")
+    print(f"  Output directory: {output_dir}/")
+    print(f"  Base filename: {base_name}")
+    print("\n" + "═" * 70)
 
-    confirm = input("Proceed with generation? (y/n) [default: y]: ").strip().lower() or 'y'
+    confirm = padded_input("Proceed with generation? (y/n) [default: y]:").lower() or 'y'
 
     if confirm != 'y':
-        print("Cancelled.")
+        print("\n  ❌ Cancelled.\n")
         return None
 
     return args

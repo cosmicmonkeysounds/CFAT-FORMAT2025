@@ -42,9 +42,6 @@ dev = [
     "black>=23.0",
     "flake8>=6.0",
 ]
-build = [
-    "pyinstaller>=5.13.0",
-]
 
 [project.urls]
 Homepage = "https://github.com/yourusername/media-generator"

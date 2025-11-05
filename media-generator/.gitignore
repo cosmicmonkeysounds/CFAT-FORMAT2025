@@ -25,10 +25,6 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
-*.manifest
-*.spec
-
 # Virtual environments
 venv/
 env/
@@ -68,7 +64,3 @@ test_binary_output/
 
 # Except example files
 !example_output/
-
-# Built executables
-dist/media-generator
-dist/media-generator.exe
