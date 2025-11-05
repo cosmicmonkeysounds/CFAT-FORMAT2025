@@ -588,8 +588,51 @@ class CarpetHotelLauncher:
 
         print("\nExiting interactive mode...")
 
+    def start(self):
+        """Start the system (non-blocking, for GUI mode)."""
+        print("\n" + "="*60)
+        print(f"  CARPET HOTEL LAUNCHER ({self.platform})")
+        print("="*60 + "\n")
+
+        if not self.check_dependencies():
+            return False
+
+        if not self.launch_supercollider():
+            return False
+
+        print("\nWaiting for audio engine to stabilize...")
+        time.sleep(3)
+
+        if not self.launch_processing():
+            self.cleanup()
+            return False
+
+        print("\n" + "="*60)
+        print("  ✓ SYSTEM RUNNING")
+        print("="*60)
+        print("\nBoth SuperCollider and Processing are running.")
+
+        # Setup OSC if Python terminal or external OSC is enabled
+        if self.enable_python_terminal or self.enable_osc_external:
+            print("\n" + "="*60)
+            print("  OSC MODE ENABLED")
+            print("="*60)
+            print(f"\nKeyboard control: {'✓' if self.enable_keyboard else '✗'}")
+            print(f"Python terminal: {'✓' if self.enable_python_terminal else '✗'}")
+            print(f"External OSC (Arduino): {'✓' if self.enable_osc_external else '✗'}")
+            print(f"\nLog output is being written to: {self.log_file}")
+            print("(Terminal output from SC/PROC is suppressed for clean interface)\n")
+            time.sleep(2)  # Give Processing time to start OSC
+            self.setup_osc()
+            time.sleep(1)
+
+        print("\n✓ Startup complete - GUI controls are active\n")
+        print(f"Check log for output: {self.log_file}\n")
+
+        return True
+
     def run(self, sc_only=False):
-        """Run the complete system."""
+        """Run the complete system (blocking, for CLI mode)."""
         print("\n" + "="*60)
         print(f"  CARPET HOTEL LAUNCHER ({self.platform})")
         print("="*60 + "\n")
@@ -1272,14 +1315,33 @@ def guided_setup_gui():
         try:
             launcher = launcher_instance[0]
             if launcher:
-                # Run the launcher (this blocks until stopped)
-                launcher.run()
+                # Start the launcher (non-blocking)
+                success = launcher.start()
+                if not success:
+                    def on_failure():
+                        status_label.config(text="Failed to start", foreground='red')
+                        is_running[0] = False
+                        enable_config_ui()
+                        update_button_state()
+                    root.after(0, on_failure)
+                else:
+                    # Monitor Processing in background
+                    while is_running[0]:
+                        if launcher.processing_process and launcher.processing_process.poll() is not None:
+                            print("\n⚠ Processing has exited - stopping...")
+                            root.after(0, on_stop)
+                            break
+                        time.sleep(0.5)
         except Exception as e:
             print(f"Error in launcher thread: {e}")
-            status_label.config(text=f"Error: {e}", foreground='red')
-            is_running[0] = False
-            enable_config_ui()
-            update_button_state()
+            import traceback
+            traceback.print_exc()
+            def on_error():
+                status_label.config(text=f"Error: {e}", foreground='red')
+                is_running[0] = False
+                enable_config_ui()
+                update_button_state()
+            root.after(0, on_error)
 
     def on_quit():
         """Quit the application."""
