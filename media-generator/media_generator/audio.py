@@ -4,6 +4,7 @@ Pure functional audio generation with immutable configurations.
 """
 
 import numpy as np
+from numpy.typing import NDArray
 import scipy.signal
 import scipy.io.wavfile as wavfile
 import tempfile
@@ -47,29 +48,29 @@ class MediaOutput:
 # Pure Audio Generation Functions
 # =============================================================================
 
-def generate_triangle_wave(frequency: float, sample_rate: float, duration: float) -> np.ndarray:
+def generate_triangle_wave(frequency: float, sample_rate: float, duration: float) -> NDArray[np.float64]:
     """Generate a triangle wave at the specified frequency."""
-    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+    t: NDArray[np.float64] = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
     return scipy.signal.sawtooth(2 * np.pi * frequency * t, width=0.5)
 
 
-def apply_lowpass_filter(wave: np.ndarray, cutoff: float, sample_rate: float) -> np.ndarray:
+def apply_lowpass_filter(wave: NDArray[np.float64], cutoff: float, sample_rate: float) -> NDArray[np.float64]:
     """Apply Butterworth low-pass filter to audio wave."""
     nyquist: float = sample_rate / 2
     normalized_cutoff: float = cutoff / nyquist
-    b: np.ndarray
-    a: np.ndarray
+    b: NDArray[np.float64]
+    a: NDArray[np.float64]
     b, a = scipy.signal.butter(4, normalized_cutoff, btype='low')
     return scipy.signal.filtfilt(b, a, wave)
 
 
-def normalize_to_dbfs(wave: np.ndarray, target_db: float = -12) -> np.ndarray:
+def normalize_to_dbfs(wave: NDArray[np.float64], target_db: float = -12) -> NDArray[np.float64]:
     """Normalize audio wave to target dBFS."""
     target_amplitude: float = 10 ** (target_db / 20)
     return wave / np.max(np.abs(wave)) * target_amplitude
 
 
-def quantize_audio(wave: np.ndarray, bit_depth: int, channels: int) -> np.ndarray:
+def quantize_audio(wave: NDArray[np.float64], bit_depth: int, channels: int) -> NDArray[Any]:
     """Quantize audio to specified bit depth and convert to appropriate dtype."""
     if bit_depth < 1 or bit_depth > 32:
         raise ValueError(f"Bit depth must be between 1 and 32, got {bit_depth}")
@@ -89,7 +90,7 @@ def quantize_audio(wave: np.ndarray, bit_depth: int, channels: int) -> np.ndarra
         container_bits, dtype, is_unsigned = 32, np.int32, False
 
     # Quantize
-    quantized: np.ndarray
+    quantized: NDArray[Any]
     if is_unsigned:
         offset: int = 2 ** (container_bits - 1)
         max_value: int = offset - 1
@@ -111,19 +112,19 @@ def quantize_audio(wave: np.ndarray, bit_depth: int, channels: int) -> np.ndarra
     return quantized
 
 
-def generate_audio_data(config: AudioConfig) -> Tuple[np.ndarray, float]:
+def generate_audio_data(config: AudioConfig) -> Tuple[NDArray[Any], float]:
     """
     Generate audio data from configuration.
     Returns (audio_data, actual_sample_rate) tuple.
     """
     # Generate and process wave
-    wave: np.ndarray = generate_triangle_wave(config.frequency, config.sample_rate, config.duration)
+    wave: NDArray[np.float64] = generate_triangle_wave(config.frequency, config.sample_rate, config.duration)
     cutoff: float = min(config.frequency * 2, config.max_freq)
     wave = apply_lowpass_filter(wave, cutoff, config.sample_rate)
     wave = normalize_to_dbfs(wave, -12)
 
     # Quantize
-    audio_data: np.ndarray = quantize_audio(wave, config.bit_depth, config.channels)
+    audio_data: NDArray[Any] = quantize_audio(wave, config.bit_depth, config.channels)
 
     return audio_data, config.sample_rate
 
@@ -134,7 +135,7 @@ def generate_audio_data(config: AudioConfig) -> Tuple[np.ndarray, float]:
 
 def write_wav(output: MediaOutput, config: AudioConfig) -> None:
     """Write audio data to WAV file."""
-    audio_data: np.ndarray
+    audio_data: NDArray[Any]
     sample_rate: float
     audio_data, sample_rate = generate_audio_data(config)
     wavfile.write(str(output.path), int(sample_rate), audio_data)
@@ -143,7 +144,7 @@ def write_wav(output: MediaOutput, config: AudioConfig) -> None:
 def write_compressed_audio(output: MediaOutput, config: AudioConfig,
                           codec: str, codec_args: List[str]) -> None:
     """Write compressed audio via ffmpeg (OGG, MP3, AAC, FLAC)."""
-    audio_data: np.ndarray
+    audio_data: NDArray[Any]
     sample_rate: float
     audio_data, sample_rate = generate_audio_data(config)
 

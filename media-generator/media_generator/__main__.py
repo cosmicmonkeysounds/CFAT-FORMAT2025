@@ -8,6 +8,7 @@ import argparse
 import sys
 import re
 import numpy as np
+from numpy.typing import NDArray
 from pathlib import Path
 from typing import Optional, List, Tuple
 
@@ -440,9 +441,11 @@ def generate_media_files(args: argparse.Namespace) -> None:
                 duration=args.duration,
                 codec=args.codec
             )
+            codec_desc: str
+            base_color: NDArray[np.uint8]
             codec_desc, base_color = write_video_file(output, video_config)
 
-            audio_info = ""
+            audio_info: str = ""
             if args.embed_audio or args.audio_file:
                 audio_config = AudioConfig(
                     frequency=frequencies[i],
@@ -468,23 +471,23 @@ def generate_media_files(args: argparse.Namespace) -> None:
 
         # Image files
         elif args.type in ['jpg', 'png', 'webp', 'bmp', 'tiff']:
-            base_color = write_image_file(output, args.width, args.height)
+            base_color: NDArray[np.uint8] = write_image_file(output, args.width, args.height)
             print(f"✓ Generated: {output_path.name} (Color: RGB{tuple(base_color)})")
 
         # SVG
         elif args.type == 'svg':
-            base_color = write_svg_file(output, args.width, args.height)
+            base_color: NDArray[np.uint8] = write_svg_file(output, args.width, args.height)
             print(f"✓ Generated: {output_path.name} (Color: RGB{tuple(base_color)})")
 
         # GIF
         elif args.type == 'gif':
-            gif_config = VideoConfig(
+            gif_config: VideoConfig = VideoConfig(
                 width=args.width,
                 height=args.height,
                 fps=args.fps,
                 duration=args.duration
             )
-            base_color = write_gif_file(output, gif_config)
+            base_color: NDArray[np.uint8] = write_gif_file(output, gif_config)
             total_frames = int(args.fps * args.duration)
             print(f"✓ Generated: {output_path.name} (Color: RGB{tuple(base_color)}, {total_frames} frames)")
 

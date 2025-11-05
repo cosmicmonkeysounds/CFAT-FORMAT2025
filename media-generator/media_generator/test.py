@@ -10,7 +10,9 @@ Run from project root:
 import sys
 import shutil
 from pathlib import Path
+from typing import Callable
 import numpy as np
+from numpy.typing import NDArray
 
 # Import from the package
 from media_generator.audio import AudioConfig, MediaOutput, write_audio_file
@@ -21,28 +23,28 @@ from media_generator.image import write_image_file, write_svg_file, write_gif_fi
 class TestRunner:
     """Test runner for media generator."""
 
-    def __init__(self):
-        self.passed = 0
-        self.failed = 0
-        self.test_dir = Path("test_output")
+    def __init__(self) -> None:
+        self.passed: int = 0
+        self.failed: int = 0
+        self.test_dir: Path = Path("test_output")
 
-    def setup(self):
+    def setup(self) -> None:
         """Setup test environment."""
         if self.test_dir.exists():
             shutil.rmtree(self.test_dir)
         self.test_dir.mkdir()
 
-    def teardown(self):
+    def teardown(self) -> None:
         """Cleanup test environment."""
         if self.test_dir.exists():
             shutil.rmtree(self.test_dir)
 
-    def verify_file_exists(self, filepath):
+    def verify_file_exists(self, filepath: Path) -> bool:
         """Check if file exists and has non-zero size."""
-        path = Path(filepath)
+        path: Path = Path(filepath)
         return path.exists() and path.stat().st_size > 0
 
-    def test(self, name: str, test_func):
+    def test(self, name: str, test_func: Callable[[], None]) -> None:
         """Run a single test."""
         print(f"\n{'='*70}")
         print(f"TEST: {name}")
@@ -61,64 +63,64 @@ class TestRunner:
     # Audio Tests
     # =============================================================================
 
-    def test_audio_wav_mono_16bit(self):
+    def test_audio_wav_mono_16bit(self) -> None:
         """Test WAV generation - mono, 16-bit."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test_mono_16bit.wav",
             format="wav"
         )
-        config = AudioConfig(
+        config: AudioConfig = AudioConfig(
             frequency=440.0,
             duration=1.0,
             sample_rate=44100,
             channels=1,
             bit_depth=16
         )
-        desc = write_audio_file(output, config)
+        desc: str = write_audio_file(output, config)
         assert self.verify_file_exists(output.path), "WAV file not created"
         assert "mono" in desc and "16-bit" in desc, "Description incorrect"
 
-    def test_audio_wav_stereo_24bit(self):
+    def test_audio_wav_stereo_24bit(self) -> None:
         """Test WAV generation - stereo, 24-bit."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test_stereo_24bit.wav",
             format="wav"
         )
-        config = AudioConfig(
+        config: AudioConfig = AudioConfig(
             frequency=880.0,
             duration=1.0,
             sample_rate=48000,
             channels=2,
             bit_depth=24
         )
-        desc = write_audio_file(output, config)
+        desc: str = write_audio_file(output, config)
         assert self.verify_file_exists(output.path), "WAV file not created"
         assert "stereo" in desc and "24-bit" in desc, "Description incorrect"
 
-    def test_audio_ogg(self):
+    def test_audio_ogg(self) -> None:
         """Test OGG Vorbis generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.ogg",
             format="ogg"
         )
-        config = AudioConfig(
+        config: AudioConfig = AudioConfig(
             frequency=220.0,
             duration=1.0,
             sample_rate=44100,
             channels=1,
             bit_depth=16
         )
-        desc = write_audio_file(output, config)
+        desc: str = write_audio_file(output, config)
         assert self.verify_file_exists(output.path), "OGG file not created"
         assert "Vorbis" in desc, "Description incorrect"
 
-    def test_audio_mp3(self):
+    def test_audio_mp3(self) -> None:
         """Test MP3 generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.mp3",
             format="mp3"
         )
-        config = AudioConfig(
+        config: AudioConfig = AudioConfig(
             frequency=440.0,
             duration=1.0,
             sample_rate=44100,
@@ -126,17 +128,17 @@ class TestRunner:
             bit_depth=16,
             bitrate='192k'
         )
-        desc = write_audio_file(output, config)
+        desc: str = write_audio_file(output, config)
         assert self.verify_file_exists(output.path), "MP3 file not created"
         assert "192k" in desc, "Description incorrect"
 
-    def test_audio_m4a(self):
+    def test_audio_m4a(self) -> None:
         """Test M4A/AAC generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.m4a",
             format="m4a"
         )
-        config = AudioConfig(
+        config: AudioConfig = AudioConfig(
             frequency=440.0,
             duration=1.0,
             sample_rate=44100,
@@ -144,139 +146,149 @@ class TestRunner:
             bit_depth=16,
             bitrate='128k'
         )
-        desc = write_audio_file(output, config)
+        desc: str = write_audio_file(output, config)
         assert self.verify_file_exists(output.path), "M4A file not created"
 
-    def test_audio_flac(self):
+    def test_audio_flac(self) -> None:
         """Test FLAC generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.flac",
             format="flac"
         )
-        config = AudioConfig(
+        config: AudioConfig = AudioConfig(
             frequency=440.0,
             duration=1.0,
             sample_rate=44100,
             channels=2,
             bit_depth=16
         )
-        desc = write_audio_file(output, config)
+        desc: str = write_audio_file(output, config)
         assert self.verify_file_exists(output.path), "FLAC file not created"
         assert "lossless" in desc, "Description incorrect"
 
-    def test_audio_custom_sample_rate(self):
+    def test_audio_custom_sample_rate(self) -> None:
         """Test audio with custom (decimal) sample rate."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test_custom_rate.wav",
             format="wav"
         )
-        config = AudioConfig(
+        config: AudioConfig = AudioConfig(
             frequency=440.0,
             duration=1.0,
             sample_rate=43124.3123,
             channels=1,
             bit_depth=16
         )
-        desc = write_audio_file(output, config)
+        desc: str = write_audio_file(output, config)
         assert self.verify_file_exists(output.path), "WAV file not created"
 
     # =============================================================================
     # Video Tests
     # =============================================================================
 
-    def test_video_mpeg4(self):
+    def test_video_mpeg4(self) -> None:
         """Test MP4 video with MPEG-4 codec."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test_mpeg4.mp4",
             format="mp4"
         )
-        config = VideoConfig(
+        config: VideoConfig = VideoConfig(
             width=640,
             height=480,
             fps=30,
             duration=1,
             codec='mpeg4'
         )
+        codec_desc: str
+        base_color: NDArray[np.uint8]
         codec_desc, base_color = write_video_file(output, config)
         assert self.verify_file_exists(output.path), "MP4 file not created"
-        assert codec_desc == "MPEG-4", "Codec description incorrect"
-        assert len(base_color) == 3, "Base color invalid"
+        assert codec_desc == "MPEG-4", f"Codec description incorrect: {codec_desc}"
+        assert len(base_color) == 3, f"Base color invalid: {base_color}"
 
-    def test_video_h264(self):
+    def test_video_h264(self) -> None:
         """Test MP4 video with H.264 codec."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test_h264.mp4",
             format="mp4"
         )
-        config = VideoConfig(
+        config: VideoConfig = VideoConfig(
             width=1280,
             height=720,
             fps=30,
             duration=1,
             codec='h264'
         )
+        codec_desc: str
+        base_color: NDArray[np.uint8]
         codec_desc, base_color = write_video_file(output, config)
         assert self.verify_file_exists(output.path), "MP4 file not created"
         assert codec_desc == "H.264", "Codec description incorrect"
 
-    def test_video_decimal_fps(self):
+    def test_video_decimal_fps(self) -> None:
         """Test video with decimal frame rate."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test_decimal_fps.mp4",
             format="mp4"
         )
-        config = VideoConfig(
+        config: VideoConfig = VideoConfig(
             width=640,
             height=480,
             fps=23.976,
             duration=1,
             codec='mpeg4'
         )
+        codec_desc: str
+        base_color: NDArray[np.uint8]
         codec_desc, base_color = write_video_file(output, config)
         assert self.verify_file_exists(output.path), "MP4 file not created"
 
-    def test_video_custom_resolution(self):
+    def test_video_custom_resolution(self) -> None:
         """Test video with custom resolution."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test_custom_res.mp4",
             format="mp4"
         )
-        config = VideoConfig(
+        config: VideoConfig = VideoConfig(
             width=800,
             height=600,
             fps=60,
             duration=2,
             codec='mpeg4'
         )
+        codec_desc: str
+        base_color: NDArray[np.uint8]
         codec_desc, base_color = write_video_file(output, config)
         assert self.verify_file_exists(output.path), "MP4 file not created"
 
-    def test_video_with_embedded_audio(self):
+    def test_video_with_embedded_audio(self) -> None:
         """Test video with embedded audio."""
         # First create video
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test_with_audio.mp4",
             format="mp4"
         )
-        video_config = VideoConfig(
+        video_config: VideoConfig = VideoConfig(
             width=640,
             height=480,
             fps=30,
             duration=1,
             codec='mpeg4'
         )
+        codec_desc: str
+        base_color: NDArray[np.uint8]
         codec_desc, base_color = write_video_file(output, video_config)
         assert self.verify_file_exists(output.path), "MP4 file not created"
 
         # Embed audio
-        audio_config = AudioConfig(
+        audio_config: AudioConfig = AudioConfig(
             frequency=440.0,
             duration=1.0,
             sample_rate=44100,
             channels=2,
             bit_depth=16
         )
-        success = embed_audio_in_video(output.path, audio_config, 1.0)
+        success: bool = embed_audio_in_video(output.path, audio_config, 1.0)
         assert success, "Audio embedding failed"
         assert self.verify_file_exists(output.path), "MP4 file missing after audio embed"
 
@@ -284,64 +296,64 @@ class TestRunner:
     # Image Tests
     # =============================================================================
 
-    def test_image_jpg(self):
+    def test_image_jpg(self) -> None:
         """Test JPG image generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.jpg",
             format="jpg"
         )
-        base_color = write_image_file(output, 1920, 1080)
+        base_color: NDArray[np.uint8] = write_image_file(output, 1920, 1080)
         assert self.verify_file_exists(output.path), "JPG file not created"
         assert len(base_color) == 3, "Base color invalid"
 
-    def test_image_png(self):
+    def test_image_png(self) -> None:
         """Test PNG image generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.png",
             format="png"
         )
-        base_color = write_image_file(output, 800, 600)
+        base_color: NDArray[np.uint8] = write_image_file(output, 800, 600)
         assert self.verify_file_exists(output.path), "PNG file not created"
 
-    def test_image_webp(self):
+    def test_image_webp(self) -> None:
         """Test WebP image generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.webp",
             format="webp"
         )
-        base_color = write_image_file(output, 640, 480)
+        base_color: NDArray[np.uint8] = write_image_file(output, 640, 480)
         assert self.verify_file_exists(output.path), "WebP file not created"
 
-    def test_image_bmp(self):
+    def test_image_bmp(self) -> None:
         """Test BMP image generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.bmp",
             format="bmp"
         )
-        base_color = write_image_file(output, 800, 600)
+        base_color: NDArray[np.uint8] = write_image_file(output, 800, 600)
         assert self.verify_file_exists(output.path), "BMP file not created"
 
-    def test_image_tiff(self):
+    def test_image_tiff(self) -> None:
         """Test TIFF image generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.tiff",
             format="tiff"
         )
-        base_color = write_image_file(output, 1024, 768)
+        base_color: NDArray[np.uint8] = write_image_file(output, 1024, 768)
         assert self.verify_file_exists(output.path), "TIFF file not created"
 
-    def test_image_svg(self):
+    def test_image_svg(self) -> None:
         """Test SVG vector graphics generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.svg",
             format="svg"
         )
-        base_color = write_svg_file(output, 800, 600)
+        base_color: NDArray[np.uint8] = write_svg_file(output, 800, 600)
         assert self.verify_file_exists(output.path), "SVG file not created"
         assert len(base_color) == 3, "Base color invalid"
 
         # Verify SVG content
-        svg_content = output.path.read_text()
+        svg_content: str = output.path.read_text()
         assert '<?xml' in svg_content, "SVG header missing"
         assert '<svg' in svg_content, "SVG tag missing"
 
@@ -349,42 +361,42 @@ class TestRunner:
     # GIF Animation Tests
     # =============================================================================
 
-    def test_gif_animation(self):
+    def test_gif_animation(self) -> None:
         """Test GIF animation generation."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test.gif",
             format="gif"
         )
-        config = VideoConfig(
+        config: VideoConfig = VideoConfig(
             width=480,
             height=360,
             fps=10,
             duration=1
         )
-        base_color = write_gif_file(output, config)
+        base_color: NDArray[np.uint8] = write_gif_file(output, config)
         assert self.verify_file_exists(output.path), "GIF file not created"
         assert len(base_color) == 3, "Base color invalid"
 
-    def test_gif_custom_params(self):
+    def test_gif_custom_params(self) -> None:
         """Test GIF with custom parameters."""
-        output = MediaOutput(
+        output: MediaOutput = MediaOutput(
             path=self.test_dir / "test_custom.gif",
             format="gif"
         )
-        config = VideoConfig(
+        config: VideoConfig = VideoConfig(
             width=640,
             height=480,
             fps=15,
             duration=2
         )
-        base_color = write_gif_file(output, config)
+        base_color: NDArray[np.uint8] = write_gif_file(output, config)
         assert self.verify_file_exists(output.path), "GIF file not created"
 
     # =============================================================================
     # Run All Tests
     # =============================================================================
 
-    def run_all_tests(self):
+    def run_all_tests(self) -> bool:
         """Run all test cases."""
         self.setup()
 
@@ -438,7 +450,7 @@ class TestRunner:
 
         return self.failed == 0
 
-    def print_summary(self):
+    def print_summary(self) -> None:
         """Print test summary."""
         print("\n\n" + "="*70)
         print("TEST SUMMARY")
@@ -454,7 +466,7 @@ class TestRunner:
             print(f"\n⚠️  {self.failed} test(s) failed")
 
 
-def main():
+def main() -> None:
     """Main test entry point."""
     runner = TestRunner()
     success = runner.run_all_tests()

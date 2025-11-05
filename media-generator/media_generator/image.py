@@ -5,6 +5,7 @@ Handles static images (JPG, PNG, WebP, BMP, TIFF, SVG) and animated GIFs.
 
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 from PIL import Image
 from pathlib import Path
 from typing import Tuple, List, Any
@@ -17,28 +18,30 @@ from media_generator.video import VideoConfig, apply_random_effects, generate_vi
 # Image Generation Functions
 # =============================================================================
 
-def generate_image_data(width: int, height: int, seed: int) -> Tuple[np.ndarray, np.ndarray]:
+def generate_image_data(width: int, height: int, seed: int) -> Tuple[NDArray[np.uint8], NDArray[np.uint8]]:
     """Generate random image data with effects. Returns (frame, base_color)."""
     np.random.seed(seed)
-    base_color: np.ndarray = np.random.randint(0, 256, 3, dtype=np.uint8)
+    base_color: NDArray[np.uint8] = np.random.randint(0, 256, 3, dtype=np.uint8)
     color_variance: int = np.random.randint(5, 30)
 
-    color: np.ndarray = base_color + np.random.randint(-color_variance, color_variance, 3, dtype=np.int16)
-    color = np.clip(color, 0, 255).astype(np.uint8)
-    frame: np.ndarray = np.full((height, width, 3), color[::-1], dtype=np.uint8)
+    color: NDArray[np.uint8] = np.clip(
+        base_color.astype(np.int16) + np.random.randint(-color_variance, color_variance, 3, dtype=np.int16),
+        0, 255
+    ).astype(np.uint8)
+    frame: NDArray[np.uint8] = np.full((height, width, 3), color[::-1], dtype=np.uint8)
     frame = apply_random_effects(frame, effect_intensity=0.4)
 
     return frame, base_color
 
 
-def write_image_file(output: MediaOutput, width: int, height: int) -> np.ndarray:
+def write_image_file(output: MediaOutput, width: int, height: int) -> NDArray[np.uint8]:
     """Write image file (JPG, PNG, WebP, BMP, TIFF). Returns base_color."""
     seed: int = np.random.randint(0, 1000000)
-    frame: np.ndarray
-    base_color: np.ndarray
+    frame: NDArray[np.uint8]
+    base_color: NDArray[np.uint8]
     frame, base_color = generate_image_data(width, height, seed)
 
-    frame_rgb: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_rgb: NDArray[np.uint8] = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     img: Image.Image = Image.fromarray(frame_rgb)
 
     save_kwargs: dict[str, Any] = {}
@@ -56,7 +59,7 @@ def write_image_file(output: MediaOutput, width: int, height: int) -> np.ndarray
 # SVG Generation Functions
 # =============================================================================
 
-def generate_svg_content(width: int, height: int, base_color: np.ndarray) -> str:
+def generate_svg_content(width: int, height: int, base_color: NDArray[np.uint8]) -> str:
     """Generate SVG content with random geometric shapes."""
     svg = f'''<?xml version="1.0" encoding="UTF-8"?>
 <svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg">
@@ -92,11 +95,11 @@ def generate_svg_content(width: int, height: int, base_color: np.ndarray) -> str
     return svg
 
 
-def write_svg_file(output: MediaOutput, width: int, height: int) -> np.ndarray:
+def write_svg_file(output: MediaOutput, width: int, height: int) -> NDArray[np.uint8]:
     """Write SVG file. Returns base_color."""
     seed: int = np.random.randint(0, 1000000)
     np.random.seed(seed)
-    base_color: np.ndarray = np.random.randint(0, 256, 3, dtype=np.uint8)
+    base_color: NDArray[np.uint8] = np.random.randint(0, 256, 3, dtype=np.uint8)
 
     svg_content: str = generate_svg_content(width, height, base_color)
     output.path.write_text(svg_content)
@@ -107,11 +110,11 @@ def write_svg_file(output: MediaOutput, width: int, height: int) -> np.ndarray:
 # GIF Animation Functions
 # =============================================================================
 
-def write_gif_file(output: MediaOutput, config: VideoConfig) -> np.ndarray:
+def write_gif_file(output: MediaOutput, config: VideoConfig) -> NDArray[np.uint8]:
     """Write animated GIF. Returns base_color."""
     seed: int = np.random.randint(0, 1000000)
-    frames: List[np.ndarray]
-    base_color: np.ndarray
+    frames: List[NDArray[np.uint8]]
+    base_color: NDArray[np.uint8]
     frames, base_color = generate_video_frames(config, seed)
 
     pil_frames: List[Image.Image] = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames]
