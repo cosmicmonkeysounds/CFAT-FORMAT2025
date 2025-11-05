@@ -154,8 +154,12 @@ print_success "Virtual environment activated"
 # 8. Install Python dependencies
 print_status "Installing Python dependencies..."
 pip3 install --upgrade pip > /dev/null 2>&1
-pip3 install pyautogui > /dev/null 2>&1
-print_success "Dependencies installed (pyautogui)"
+if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+    pip3 install -r "$SCRIPT_DIR/requirements.txt" > /dev/null 2>&1
+    print_success "Dependencies installed from requirements.txt"
+else
+    print_warning "requirements.txt not found, skipping dependency installation"
+fi
 
 # 9. Check for oscP5 library in Processing
 print_status "Checking Processing libraries..."

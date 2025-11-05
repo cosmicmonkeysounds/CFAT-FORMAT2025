@@ -27,6 +27,8 @@ import argparse
 import platform
 import threading
 from pathlib import Path
+import tkinter as tk
+from tkinter import ttk, messagebox
 
 try:
     from pythonosc import osc_message_builder
@@ -40,14 +42,18 @@ except ImportError:
     print("  Install with: pip install python-osc")
 
 class CarpetHotelLauncher:
-    def __init__(self, audio_device=None, test_mode=False, osc_control=False, displays=None):
+    def __init__(self, audio_device=None, enable_keyboard=True, enable_python_terminal=True,
+                 enable_osc_external=True, displays=None):
         self.sc_process = None
         self.processing_process = None
         self.script_dir = Path(__file__).parent.absolute()
         self.platform = platform.system()  # 'Darwin' (macOS), 'Windows', 'Linux'
         self.audio_device = audio_device
-        self.test_mode = test_mode
-        self.osc_control = osc_control
+
+        # Input modes
+        self.enable_keyboard = enable_keyboard          # Keyboard control in Processing
+        self.enable_python_terminal = enable_python_terminal  # Python terminal interface
+        self.enable_osc_external = enable_osc_external  # Arduino/external OSC control
         self.displays = displays or [1, 2]
 
         # OSC configuration
@@ -168,18 +174,22 @@ class CarpetHotelLauncher:
         return True
 
     def stream_output(self, process, prefix, log_file):
-        """Stream process output to both console and log file."""
+        """Stream process output to log file only (not console)."""
         try:
             for line in iter(process.stdout.readline, ''):
                 if not line:
                     break
                 line = line.rstrip()
                 message = f"[{prefix}] {line}"
-                print(message)
+
+                # Write to log file only (not console)
+                # This keeps the terminal clean for user interaction
                 with open(log_file, 'a') as f:
                     f.write(message + "\n")
         except Exception as e:
-            print(f"[{prefix}] Stream error: {e}")
+            # Only log errors to file
+            with open(log_file, 'a') as f:
+                f.write(f"[{prefix}] Stream error: {e}\n")
 
     def kill_all_supercollider(self):
         """Kill all SuperCollider processes."""
@@ -318,18 +328,24 @@ class CarpetHotelLauncher:
         self.log(f"\n=== Launching Processing ({self.platform}) ===")
         self.log(f"Sketch: {self.processing_sketch}")
         self.log(f"Displays: {self.displays}")
-        self.log(f"Test mode: {self.test_mode}")
-        self.log(f"OSC control: {self.osc_control}")
+        self.log(f"Keyboard control: {self.enable_keyboard}")
+        self.log(f"Python terminal: {self.enable_python_terminal}")
+        self.log(f"External OSC: {self.enable_osc_external}")
 
         try:
             # Build command with arguments
             cmd = [self.processing_java, '--sketch=' + str(self.script_dir), '--run']
 
             # Add Processing command line arguments
-            if self.test_mode:
+            # Enable keyboard control in Processing if requested
+            if self.enable_keyboard:
                 cmd.append('--test-mode')
-            if self.osc_control:
+
+            # Enable OSC control if either Python terminal or external OSC is enabled
+            if self.enable_python_terminal or self.enable_osc_external:
                 cmd.append('--osc-control')
+
+            # Display configuration
             if self.displays:
                 displays_str = ','.join(map(str, self.displays))
                 cmd.append(f'--displays={displays_str}')
@@ -421,7 +437,10 @@ class CarpetHotelLauncher:
 
     def setup_osc(self):
         """Setup OSC communication with Processing."""
-        if not OSC_AVAILABLE or not self.osc_control:
+        if not OSC_AVAILABLE:
+            return
+
+        if not (self.enable_python_terminal or self.enable_osc_external):
             return
 
         self.log("\n=== Setting up OSC control ===")
@@ -486,8 +505,26 @@ class CarpetHotelLauncher:
         print("  help      - Show this help")
         print()
 
+        # Start background thread to monitor Processing
+        def monitor_proc():
+            while True:
+                if self.processing_process and self.processing_process.poll() is not None:
+                    print("\n\n⚠ Processing has exited - shutting down...")
+                    # Trigger exit by simulating EOF
+                    os.kill(os.getpid(), signal.SIGINT)
+                    break
+                time.sleep(0.5)
+
+        monitor_thread = threading.Thread(target=monitor_proc, daemon=True)
+        monitor_thread.start()
+
         while True:
             try:
+                # Check if Processing has exited
+                if self.processing_process and self.processing_process.poll() is not None:
+                    print("\n\n⚠ Processing has exited - shutting down...")
+                    break
+
                 cmd = input("Scene > ").strip().lower()
 
                 if not cmd:
@@ -546,20 +583,29 @@ class CarpetHotelLauncher:
         print("="*60)
         print("\nBoth SuperCollider and Processing are running.")
 
-        # Setup OSC if enabled
-        if self.osc_control:
+        # Setup OSC if Python terminal or external OSC is enabled
+        if self.enable_python_terminal or self.enable_osc_external:
+            print("\n" + "="*60)
+            print("  OSC MODE ENABLED")
+            print("="*60)
+            print(f"\nKeyboard control: {'✓' if self.enable_keyboard else '✗'}")
+            print(f"Python terminal: {'✓' if self.enable_python_terminal else '✗'}")
+            print(f"External OSC (Arduino): {'✓' if self.enable_osc_external else '✗'}")
+            print(f"\nLog output is being written to: {self.log_file}")
+            print("(Terminal output from SC/PROC is suppressed for clean interface)\n")
             time.sleep(2)  # Give Processing time to start OSC
             self.setup_osc()
             time.sleep(1)
 
-        # Enter interactive mode if OSC control is enabled
-        if self.osc_control:
+        # Enter interactive mode if Python terminal is enabled
+        if self.enable_python_terminal:
             try:
                 self.interactive_control()
             except KeyboardInterrupt:
                 print("\n\nShutting down...")
         else:
             print("Press Ctrl+C to stop both processes.\n")
+            print(f"Check log for output: {self.log_file}\n")
             try:
                 self.monitor_processing()
             except KeyboardInterrupt:
@@ -572,7 +618,7 @@ class CarpetHotelLauncher:
         """Monitor Processing process."""
         while True:
             if self.processing_process and self.processing_process.poll() is not None:
-                print("\n⚠ Processing exited")
+                print("\n\n⚠ Processing has exited - shutting down...")
                 break
             time.sleep(0.5)
 
@@ -627,6 +673,428 @@ class CarpetHotelLauncher:
                 print(f"  Warning: {e}")
 
         print("\n✓ Shutdown complete\n")
+
+def detect_screens():
+    """Detect available screens using tkinter."""
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+
+    screens = []
+    try:
+        # Try to detect screens by checking screen geometry
+        # This is a simple heuristic - we'll detect up to 6 screens
+        for i in range(6):
+            try:
+                # Try to get screen width at different positions
+                # If successful, we have that many screens
+                width = root.winfo_screenwidth()
+                height = root.winfo_screenheight()
+                if width > 0 and height > 0:
+                    screens.append({
+                        'index': i + 1,
+                        'width': width,
+                        'height': height,
+                        'x': i * width  # Approximate position
+                    })
+            except:
+                break
+
+        # If we couldn't detect any, assume at least one screen
+        if not screens:
+            width = root.winfo_screenwidth()
+            height = root.winfo_screenheight()
+            screens = [{'index': 1, 'width': width, 'height': height, 'x': 0}]
+    finally:
+        root.destroy()
+
+    # For simplicity, assume we have at least 1 screen and up to 4 screens available
+    # (Most installations won't have more than 4)
+    if len(screens) == 1:
+        # Can't reliably detect multiple screens with basic tkinter
+        # Default to showing options for 1-4 screens
+        screens = [
+            {'index': 1, 'name': 'Display 1 (Primary)'},
+            {'index': 2, 'name': 'Display 2'},
+            {'index': 3, 'name': 'Display 3'},
+            {'index': 4, 'name': 'Display 4'}
+        ]
+
+    return screens
+
+def guided_setup_gui():
+    """GUI wizard for configuration."""
+    result = {'cancelled': True}
+
+    root = tk.Tk()
+    root.title("Carpet Hotel - Setup Wizard")
+    root.geometry("700x550")
+    root.resizable(False, False)
+
+    # Configuration storage
+    config = {
+        'audio_device': None,
+        'test_mode': False,
+        'osc_control': False,
+        'displays': [1, 2]
+    }
+
+    current_page = [0]  # Use list to allow modification in nested functions
+    preview_windows = {}  # Store preview windows for cleanup
+
+    # Create notebook for wizard pages
+    notebook = ttk.Notebook(root)
+    notebook.pack(fill='both', expand=True, padx=10, pady=10)
+
+    # ===== PAGE 1: Audio Device =====
+    page1 = ttk.Frame(notebook)
+    notebook.add(page1, text="1. Audio")
+
+    ttk.Label(page1, text="Audio Output Device", font=('Arial', 14, 'bold')).pack(pady=10)
+    ttk.Label(page1, text="Choose where you want the audio to play from:").pack(pady=5)
+
+    audio_var = tk.StringVar(value="default")
+    audio_custom = tk.StringVar()
+
+    ttk.Radiobutton(page1, text="MacBook Pro Speakers (recommended)",
+                    variable=audio_var, value="MacBook Pro Speakers").pack(anchor='w', padx=40, pady=5)
+    ttk.Radiobutton(page1, text="Built-in Output",
+                    variable=audio_var, value="Built-in Output").pack(anchor='w', padx=40, pady=5)
+    ttk.Radiobutton(page1, text="Multi-Output Device",
+                    variable=audio_var, value="Multi-Output Device").pack(anchor='w', padx=40, pady=5)
+
+    custom_frame = ttk.Frame(page1)
+    custom_frame.pack(anchor='w', padx=40, pady=5)
+    ttk.Radiobutton(custom_frame, text="Custom:",
+                    variable=audio_var, value="custom").pack(side='left')
+    ttk.Entry(custom_frame, textvariable=audio_custom, width=25).pack(side='left', padx=5)
+
+    ttk.Radiobutton(page1, text="Automatic (let SuperCollider choose)",
+                    variable=audio_var, value="default").pack(anchor='w', padx=40, pady=5)
+
+    # ===== PAGE 2: Displays =====
+    page2 = ttk.Frame(notebook)
+    notebook.add(page2, text="2. Displays")
+
+    ttk.Label(page2, text="Display Configuration", font=('Arial', 14, 'bold')).pack(pady=10)
+    ttk.Label(page2, text="Select which displays to use (order matters!)").pack(pady=5)
+
+    # Detect available screens
+    available_screens = detect_screens()
+
+    # Create two-column layout for lists
+    lists_frame = ttk.Frame(page2)
+    lists_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+    # Left side: Available displays
+    left_frame = ttk.Frame(lists_frame)
+    left_frame.pack(side='left', fill='both', expand=True, padx=5)
+
+    ttk.Label(left_frame, text="Available Displays:", font=('Arial', 10, 'bold')).pack()
+    ttk.Label(left_frame, text="(hover to preview)", foreground='gray', font=('Arial', 8)).pack()
+
+    available_listbox = tk.Listbox(left_frame, height=8, selectmode=tk.SINGLE, font=('Arial', 10))
+    available_listbox.pack(fill='both', expand=True, pady=5)
+
+    # Populate available displays (initially all displays except 1 and 2 which are pre-selected)
+    for screen in available_screens:
+        screen_name = screen.get('name', f"Display {screen['index']}")
+        if screen['index'] not in [1, 2]:  # Don't show pre-selected displays
+            available_listbox.insert(tk.END, screen_name)
+
+    # Right side: Selected displays
+    right_frame = ttk.Frame(lists_frame)
+    right_frame.pack(side='left', fill='both', expand=True, padx=5)
+
+    ttk.Label(right_frame, text="Selected Displays:", font=('Arial', 10, 'bold')).pack()
+    ttk.Label(right_frame, text="(in order)", foreground='gray', font=('Arial', 8)).pack()
+
+    selected_listbox = tk.Listbox(right_frame, height=8, selectmode=tk.SINGLE, font=('Arial', 10))
+    selected_listbox.pack(fill='both', expand=True, pady=5)
+
+    # Pre-populate with displays 1 and 2
+    selected_listbox.insert(tk.END, "Display 1 (Primary)")
+    selected_listbox.insert(tk.END, "Display 2")
+
+    # Helper function to get display number from name
+    def get_display_number(display_name):
+        for screen in available_screens:
+            if screen.get('name', f"Display {screen['index']}") == display_name:
+                return screen['index']
+        # Fallback: extract number from name
+        import re
+        match = re.search(r'\d+', display_name)
+        return int(match.group()) if match else 1
+
+    # Helper function to show preview window
+    def show_preview(display_name):
+        display_num = get_display_number(display_name)
+
+        # Don't create duplicate previews
+        if display_num in preview_windows:
+            return
+
+        # Create a preview window
+        preview = tk.Toplevel(root)
+        preview.title(f"Display {display_num}")
+        preview.attributes('-alpha', 0.7)  # Semi-transparent
+        preview.attributes('-topmost', True)  # Always on top
+
+        # Create colored label
+        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F']
+        color = colors[(display_num - 1) % len(colors)]
+
+        label = tk.Label(preview, text=f"DISPLAY {display_num}", font=('Arial', 48, 'bold'),
+                        bg=color, fg='white', width=20, height=10)
+        label.pack(fill='both', expand=True)
+
+        # Try to position on the correct screen
+        # This is approximate - tkinter has limited multi-screen support
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+
+        # Place at approximate position for screen
+        x_offset = (display_num - 1) * screen_width
+        preview.geometry(f"400x300+{x_offset + 100}+100")
+
+        preview_windows[display_num] = preview
+
+    # Helper function to hide preview window
+    def hide_preview(display_name):
+        display_num = get_display_number(display_name)
+        if display_num in preview_windows:
+            preview_windows[display_num].destroy()
+            del preview_windows[display_num]
+
+    # Helper function to cleanup all previews
+    def cleanup_previews():
+        for preview in list(preview_windows.values()):
+            preview.destroy()
+        preview_windows.clear()
+
+    # Hover handlers for available list
+    def on_available_hover(event):
+        index = available_listbox.nearest(event.y)
+        if index >= 0 and index < available_listbox.size():
+            display_name = available_listbox.get(index)
+            show_preview(display_name)
+
+    def on_available_leave(event):
+        cleanup_previews()
+
+    # Hover handlers for selected list
+    def on_selected_hover(event):
+        index = selected_listbox.nearest(event.y)
+        if index >= 0 and index < selected_listbox.size():
+            display_name = selected_listbox.get(index)
+            show_preview(display_name)
+
+    def on_selected_leave(event):
+        cleanup_previews()
+
+    # Bind hover events
+    available_listbox.bind('<Motion>', on_available_hover)
+    available_listbox.bind('<Leave>', on_available_leave)
+    selected_listbox.bind('<Motion>', on_selected_hover)
+    selected_listbox.bind('<Leave>', on_selected_leave)
+
+    # Double-click to move from available to selected
+    def move_to_selected(event):
+        cleanup_previews()
+        selection = available_listbox.curselection()
+        if selection:
+            index = selection[0]
+            display_name = available_listbox.get(index)
+            selected_listbox.insert(tk.END, display_name)
+            available_listbox.delete(index)
+
+    # Double-click to move from selected to available
+    def move_to_available(event):
+        cleanup_previews()
+        selection = selected_listbox.curselection()
+        if selection:
+            index = selection[0]
+            display_name = selected_listbox.get(index)
+            available_listbox.insert(tk.END, display_name)
+            selected_listbox.delete(index)
+
+    available_listbox.bind('<Double-Button-1>', move_to_selected)
+    selected_listbox.bind('<Double-Button-1>', move_to_available)
+
+    ttk.Label(page2, text="Double-click to move displays between lists\nOrder in 'Selected' determines floor assignment",
+              foreground='gray', justify='center').pack(pady=5)
+
+    # ===== PAGE 3: Controls =====
+    page3 = ttk.Frame(notebook)
+    notebook.add(page3, text="3. Controls")
+
+    ttk.Label(page3, text="Input Methods", font=('Arial', 14, 'bold')).pack(pady=10)
+    ttk.Label(page3, text="Select which control methods to enable (at least one):").pack(pady=5)
+    ttk.Label(page3, text="Mouse wheel volume control is always available.", foreground='gray', font=('Arial', 9)).pack(pady=(0, 10))
+
+    # Checkbox variables (all enabled by default)
+    keyboard_var = tk.BooleanVar(value=True)
+    python_terminal_var = tk.BooleanVar(value=True)
+    external_osc_var = tk.BooleanVar(value=True)
+
+    # Keyboard control checkbox
+    ttk.Checkbutton(page3, text="Keyboard Control (in Processing)",
+                    variable=keyboard_var).pack(anchor='w', padx=40, pady=5)
+    ttk.Label(page3, text="    • Press 1-9 to jump to scenes\n    • Up/Down arrows for next/previous scene",
+              foreground='gray', justify='left').pack(anchor='w', padx=60)
+
+    # Python terminal checkbox
+    ttk.Checkbutton(page3, text="Python Terminal",
+                    variable=python_terminal_var).pack(anchor='w', padx=40, pady=(10, 5))
+    ttk.Label(page3, text="    • Type scene numbers in terminal\n    • For manual control during testing",
+              foreground='gray', justify='left').pack(anchor='w', padx=60)
+
+    # External OSC checkbox (Arduino)
+    ttk.Checkbutton(page3, text="External OSC (Arduino Elevator Controller)",
+                    variable=external_osc_var).pack(anchor='w', padx=40, pady=(10, 5))
+    ttk.Label(page3, text="    • Receive OSC messages from Arduino\n    • Python script brokers messages to/from Processing",
+              foreground='gray', justify='left').pack(anchor='w', padx=60)
+
+    if not OSC_AVAILABLE:
+        ttk.Label(page3, text="\n⚠ Python terminal and external OSC require 'python-osc'\nInstall with: pip install python-osc",
+                  foreground='orange').pack(pady=10)
+
+    # ===== PAGE 4: Summary =====
+    page4 = ttk.Frame(notebook)
+    notebook.add(page4, text="4. Review")
+
+    ttk.Label(page4, text="Configuration Summary", font=('Arial', 14, 'bold')).pack(pady=10)
+    summary_text = tk.Text(page4, height=15, width=60, wrap='word', font=('Courier', 10))
+    summary_text.pack(pady=10, padx=20)
+
+    def update_summary():
+        summary_text.delete('1.0', 'end')
+        summary_text.config(state='normal')
+
+        # Audio
+        audio = audio_var.get()
+        if audio == "custom":
+            audio = audio_custom.get() or "Default"
+        elif audio == "default":
+            audio = "Automatic"
+        summary_text.insert('end', f"Audio Output:\n  {audio}\n\n")
+
+        # Displays - read from selected listbox
+        selected_displays = []
+        for i in range(selected_listbox.size()):
+            display_name = selected_listbox.get(i)
+            display_num = get_display_number(display_name)
+            selected_displays.append(display_num)
+
+        if selected_displays:
+            disp_list = ", ".join(str(d) for d in selected_displays)
+            summary_text.insert('end', f"Display(s):\n  {disp_list}\n")
+            summary_text.insert('end', f"  ({len(selected_displays)} display{'s' if len(selected_displays) != 1 else ''})\n\n")
+        else:
+            summary_text.insert('end', f"Display(s):\n  None selected!\n\n")
+
+        # Control methods (checkboxes)
+        control_methods = []
+        if keyboard_var.get():
+            control_methods.append("Keyboard (Processing)")
+        if python_terminal_var.get():
+            control_methods.append("Python Terminal")
+        if external_osc_var.get():
+            control_methods.append("External OSC (Arduino)")
+
+        if control_methods:
+            control_desc = "\n  ".join(control_methods)
+            summary_text.insert('end', f"Input Methods:\n  {control_desc}\n")
+            summary_text.insert('end', f"  + Mouse wheel (volume, always on)\n\n")
+        else:
+            summary_text.insert('end', f"Input Methods:\n  NONE SELECTED!\n\n")
+
+        summary_text.insert('end', "═" * 50 + "\n\n")
+        summary_text.insert('end', "Click 'Start' to launch Carpet Hotel\nwith these settings.")
+        summary_text.config(state='disabled')
+
+    def on_page_changed(event):
+        if notebook.index(notebook.select()) == 3:  # Summary page
+            update_summary()
+
+    notebook.bind('<<NotebookTabChanged>>', on_page_changed)
+
+    # ===== Bottom Buttons =====
+    button_frame = ttk.Frame(root)
+    button_frame.pack(fill='x', padx=10, pady=10)
+
+    def on_cancel():
+        if messagebox.askokcancel("Cancel Setup", "Are you sure you want to cancel?"):
+            cleanup_previews()
+            result['cancelled'] = True
+            root.destroy()
+
+    def on_start():
+        # Cleanup preview windows
+        cleanup_previews()
+
+        # Validate and save configuration
+
+        # Audio
+        audio = audio_var.get()
+        if audio == "custom":
+            config['audio_device'] = audio_custom.get().strip() or None
+        elif audio == "default":
+            config['audio_device'] = None
+        else:
+            config['audio_device'] = audio
+
+        # Displays - read from selected listbox
+        selected_displays = []
+        for i in range(selected_listbox.size()):
+            display_name = selected_listbox.get(i)
+            display_num = get_display_number(display_name)
+            selected_displays.append(display_num)
+
+        if not selected_displays:
+            messagebox.showerror("No Displays Selected", "Please select at least one display.")
+            return
+
+        config['displays'] = selected_displays
+
+        # Input methods (checkboxes)
+        config['enable_keyboard'] = keyboard_var.get()
+        config['enable_python_terminal'] = python_terminal_var.get()
+        config['enable_osc_external'] = external_osc_var.get()
+
+        # Validate: at least one control method must be enabled
+        if not (config['enable_keyboard'] or config['enable_python_terminal'] or config['enable_osc_external']):
+            messagebox.showerror("No Control Methods", "Please enable at least one input method.")
+            return
+
+        # Check if OSC is needed but not available
+        needs_osc = config['enable_python_terminal'] or config['enable_osc_external']
+        if needs_osc and not OSC_AVAILABLE:
+            if not messagebox.askyesno("Missing Dependency",
+                                        "Python OSC library is not installed.\n\n"
+                                        "Python terminal and external OSC will not work.\n\n"
+                                        "Continue with keyboard control only?"):
+                return
+
+        result['cancelled'] = False
+        result['config'] = config
+        root.destroy()
+
+    ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side='left')
+    ttk.Button(button_frame, text="◀ Back", command=lambda: notebook.select(max(0, notebook.index(notebook.select()) - 1))).pack(side='left', padx=5)
+    ttk.Button(button_frame, text="Next ▶", command=lambda: notebook.select(min(3, notebook.index(notebook.select()) + 1))).pack(side='left')
+    ttk.Button(button_frame, text="Start", command=on_start, style='Accent.TButton').pack(side='right')
+
+    # Center window
+    root.update_idletasks()
+    x = (root.winfo_screenwidth() // 2) - (root.winfo_width() // 2)
+    y = (root.winfo_screenheight() // 2) - (root.winfo_height() // 2)
+    root.geometry(f"+{x}+{y}")
+
+    root.mainloop()
+
+    if result['cancelled']:
+        return None
+    return result['config']
 
 def guided_setup():
     """Interactive guided setup for all configuration options."""
@@ -853,24 +1321,31 @@ Environment Variables:
 
     # Guide mode - run interactive setup if no config args provided and not building
     if not has_config_args and not args.build and not args.sc_only:
-        config = guided_setup()
+        config = guided_setup_gui()
+        if config is None:
+            print("\nSetup cancelled by user.")
+            sys.exit(0)
         audio_device = config['audio_device']
-        test_mode = config['test_mode']
-        osc_control = config['osc_control']
+        enable_keyboard = config['enable_keyboard']
+        enable_python_terminal = config['enable_python_terminal']
+        enable_osc_external = config['enable_osc_external']
         displays = config['displays']
     else:
-        # Use command line arguments
+        # Use command line arguments (legacy support for old flags)
         audio_device = args.audio_device
-        test_mode = args.test_mode
-        osc_control = args.osc_control
+        # Map old flags to new structure
+        enable_keyboard = args.test_mode
+        enable_python_terminal = args.osc_control
+        enable_osc_external = args.osc_control  # External OSC shares the same flag
         displays = None
         if args.displays:
             displays = [int(d.strip()) for d in args.displays.split(',')]
 
     launcher = CarpetHotelLauncher(
         audio_device=audio_device,
-        test_mode=test_mode,
-        osc_control=osc_control,
+        enable_keyboard=enable_keyboard,
+        enable_python_terminal=enable_python_terminal,
+        enable_osc_external=enable_osc_external,
         displays=displays
     )
 

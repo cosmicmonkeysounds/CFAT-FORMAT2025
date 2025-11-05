@@ -206,8 +206,12 @@ REM 6. Install Python dependencies
 REM ============================================================================
 echo [*] Installing Python dependencies...
 python -m pip install --upgrade pip >nul 2>&1
-python -m pip install pyautogui >nul 2>&1
-echo [+] Dependencies installed (pyautogui)
+if exist "%SCRIPT_DIR%\requirements.txt" (
+    python -m pip install -r "%SCRIPT_DIR%\requirements.txt" >nul 2>&1
+    echo [+] Dependencies installed from requirements.txt
+) else (
+    echo [!] requirements.txt not found, skipping dependency installation
+)
 
 REM ============================================================================
 REM 7. Check for oscP5 library in Processing
