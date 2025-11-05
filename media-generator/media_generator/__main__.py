@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 import argparse
 import re
+import sys
 from pathlib import Path
 from PIL import Image
 import scipy.signal
@@ -178,7 +179,7 @@ def generate_video(output_path, width=1920, height=1080, fps=30, duration=1,
     # Setup video writer
     out = cv2.VideoWriter(str(video_path_to_write), fourcc, fps, (width, height))
 
-    total_frames = fps * duration
+    total_frames = int(fps * duration)
     video_seed = np.random.randint(0, 1000000)
 
     for frame_num in range(total_frames):
@@ -204,16 +205,17 @@ def generate_video(output_path, width=1920, height=1080, fps=30, duration=1,
         # Create temporary WAV file for ffmpeg
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_audio:
             tmp_audio_path = tmp_audio.name
-            wavfile.write(tmp_audio_path, sample_rate, audio_data)
+            wavfile.write(tmp_audio_path, int(sample_rate), audio_data)
 
         try:
             # Only embed audio if the flag was set (not just save_separate_audio)
             if embed_audio:
-                # Use bundled ffmpeg to combine video and audio
+                # Use bundled ffmpeg to combine video and audio with explicit duration
                 result = subprocess.run([
                     FFMPEG_PATH, '-y', '-i', str(video_path_to_write),
                     '-i', tmp_audio_path,
                     '-c:v', 'copy', '-c:a', 'aac', '-strict', 'experimental',
+                    '-t', str(duration),  # Set exact duration
                     '-shortest', str(final_output_path)
                 ], capture_output=True, text=True)
 
@@ -238,25 +240,51 @@ def generate_video(output_path, width=1920, height=1080, fps=30, duration=1,
                 audio_output_path = output_path.with_suffix(f'.{audio_format}')
 
                 if audio_format == 'wav':
-                    wavfile.write(str(audio_output_path), sample_rate, audio_data)
+                    wavfile.write(str(audio_output_path), int(sample_rate), audio_data)
                 elif audio_format == 'ogg':
-                    # Convert WAV to OGG using bundled ffmpeg
+                    # Convert WAV to OGG using bundled ffmpeg with explicit duration
                     conv_result = subprocess.run([
                         FFMPEG_PATH, '-y', '-i', tmp_audio_path,
                         '-c:a', 'libvorbis', '-q:a', '5',
+                        '-t', str(duration),  # Set exact duration
+                        '-metadata', f'duration={duration}',
                         str(audio_output_path)
                     ], capture_output=True, text=True)
                     if conv_result.returncode != 0:
                         print(f"  ⚠ Warning: Failed to create separate OGG audio file")
                 elif audio_format == 'mp3':
-                    # Convert WAV to MP3 using bundled ffmpeg
+                    # Convert WAV to MP3 using bundled ffmpeg with explicit duration
                     conv_result = subprocess.run([
                         FFMPEG_PATH, '-y', '-i', tmp_audio_path,
                         '-c:a', 'libmp3lame', '-b:a', '192k',
+                        '-t', str(duration),  # Set exact duration
+                        '-metadata', f'duration={duration}',
                         str(audio_output_path)
                     ], capture_output=True, text=True)
                     if conv_result.returncode != 0:
                         print(f"  ⚠ Warning: Failed to create separate MP3 audio file")
+                elif audio_format in ['aac', 'm4a']:
+                    # Convert WAV to AAC/M4A using bundled ffmpeg with explicit duration
+                    conv_result = subprocess.run([
+                        FFMPEG_PATH, '-y', '-i', tmp_audio_path,
+                        '-c:a', 'aac', '-b:a', '192k',
+                        '-t', str(duration),  # Set exact duration
+                        '-metadata', f'duration={duration}',
+                        str(audio_output_path)
+                    ], capture_output=True, text=True)
+                    if conv_result.returncode != 0:
+                        print(f"  ⚠ Warning: Failed to create separate AAC/M4A audio file")
+                elif audio_format == 'flac':
+                    # Convert WAV to FLAC using bundled ffmpeg with explicit duration
+                    conv_result = subprocess.run([
+                        FFMPEG_PATH, '-y', '-i', tmp_audio_path,
+                        '-c:a', 'flac',
+                        '-t', str(duration),  # Set exact duration
+                        '-metadata', f'duration={duration}',
+                        str(audio_output_path)
+                    ], capture_output=True, text=True)
+                    if conv_result.returncode != 0:
+                        print(f"  ⚠ Warning: Failed to create separate FLAC audio file")
 
                 if os.path.exists(audio_output_path):
                     print(f"  ↳ Audio: {audio_output_path.name}")
@@ -370,7 +398,7 @@ def generate_gif(output_path, width=1920, height=1080, fps=30, duration=1):
     base_color = np.random.randint(0, 256, 3, dtype=np.uint8)
     color_variance = np.random.randint(5, 30)
 
-    total_frames = fps * duration
+    total_frames = int(fps * duration)
     video_seed = np.random.randint(0, 1000000)
 
     frames = []
@@ -528,12 +556,12 @@ def generate_wav(output_path, frequency, duration=1, sample_rate=44100, channels
     Supports arbitrary bit depths (1-32 bits). Non-standard bit depths are quantized
     and stored in the next larger standard container (8, 16, 24, or 32-bit).
     """
-    audio_data, sample_rate = generate_audio_data(
+    audio_data, actual_sample_rate = generate_audio_data(
         frequency, duration, sample_rate, channels, bit_depth, max_freq
     )
 
-    # Write WAV file
-    wavfile.write(str(output_path), sample_rate, audio_data)
+    # Write WAV file (convert sample rate to int for WAV header)
+    wavfile.write(str(output_path), int(sample_rate), audio_data)
 
     # Determine container bits for display
     if bit_depth <= 8:
@@ -563,13 +591,15 @@ def generate_ogg(output_path, frequency, duration=1, sample_rate=44100, channels
     # Create temporary WAV file
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_wav:
         tmp_wav_path = tmp_wav.name
-        wavfile.write(tmp_wav_path, sample_rate, audio_data)
+        wavfile.write(tmp_wav_path, int(sample_rate), audio_data)
 
     try:
-        # Convert WAV to OGG using bundled ffmpeg
+        # Convert WAV to OGG using bundled ffmpeg with explicit duration metadata
         result = subprocess.run([
             FFMPEG_PATH, '-y', '-i', tmp_wav_path,
             '-c:a', 'libvorbis', '-q:a', '5',
+            '-t', str(duration),  # Set exact duration
+            '-metadata', f'duration={duration}',
             str(output_path)
         ], capture_output=True, text=True)
 
@@ -599,13 +629,15 @@ def generate_mp3(output_path, frequency, duration=1, sample_rate=44100, channels
     # Create temporary WAV file
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_wav:
         tmp_wav_path = tmp_wav.name
-        wavfile.write(tmp_wav_path, sample_rate, audio_data)
+        wavfile.write(tmp_wav_path, int(sample_rate), audio_data)
 
     try:
-        # Convert WAV to MP3 using bundled ffmpeg
+        # Convert WAV to MP3 using bundled ffmpeg with explicit duration metadata
         result = subprocess.run([
             FFMPEG_PATH, '-y', '-i', tmp_wav_path,
             '-c:a', 'libmp3lame', '-b:a', bitrate,
+            '-t', str(duration),  # Set exact duration
+            '-metadata', f'duration={duration}',
             str(output_path)
         ], capture_output=True, text=True)
 
@@ -622,6 +654,370 @@ def generate_mp3(output_path, frequency, duration=1, sample_rate=44100, channels
             os.remove(tmp_wav_path)
 
 
+def generate_aac(output_path, frequency, duration=1, sample_rate=44100, channels=1,
+                bit_depth=16, max_freq=1000, bitrate='192k'):
+    """
+    Generate an AAC/M4A file with low-pass filtered triangle wave tone at -12dBFS.
+    Uses bundled ffmpeg (no external installation needed).
+    """
+    audio_data, sample_rate = generate_audio_data(
+        frequency, duration, sample_rate, channels, bit_depth, max_freq
+    )
+
+    # Create temporary WAV file
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_wav:
+        tmp_wav_path = tmp_wav.name
+        wavfile.write(tmp_wav_path, int(sample_rate), audio_data)
+
+    try:
+        # Convert WAV to AAC/M4A using bundled ffmpeg with explicit duration metadata
+        result = subprocess.run([
+            FFMPEG_PATH, '-y', '-i', tmp_wav_path,
+            '-c:a', 'aac', '-b:a', bitrate,
+            '-t', str(duration),  # Set exact duration
+            '-metadata', f'duration={duration}',
+            str(output_path)
+        ], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"⚠ Error: Failed to generate AAC file (ffmpeg error).")
+            print(f"   Error: {result.stderr}")
+            return
+
+        ch_desc = f"{channels}-channel" if channels > 2 else ("stereo" if channels == 2 else "mono")
+        ext = output_path.suffix.upper()[1:]  # Get extension without dot
+        print(f"✓ Generated: {output_path.name} ({ch_desc}, {ext} AAC {bitrate}, {frequency:.1f}Hz, -12dBFS)")
+    finally:
+        # Clean up temp file
+        if os.path.exists(tmp_wav_path):
+            os.remove(tmp_wav_path)
+
+
+def generate_flac(output_path, frequency, duration=1, sample_rate=44100, channels=1,
+                 bit_depth=16, max_freq=1000):
+    """
+    Generate a FLAC file with low-pass filtered triangle wave tone at -12dBFS.
+    Uses bundled ffmpeg (no external installation needed).
+    """
+    audio_data, sample_rate = generate_audio_data(
+        frequency, duration, sample_rate, channels, bit_depth, max_freq
+    )
+
+    # Create temporary WAV file
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_wav:
+        tmp_wav_path = tmp_wav.name
+        wavfile.write(tmp_wav_path, int(sample_rate), audio_data)
+
+    try:
+        # Convert WAV to FLAC using bundled ffmpeg with explicit duration metadata
+        result = subprocess.run([
+            FFMPEG_PATH, '-y', '-i', tmp_wav_path,
+            '-c:a', 'flac',
+            '-t', str(duration),  # Set exact duration
+            '-metadata', f'duration={duration}',
+            str(output_path)
+        ], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"⚠ Error: Failed to generate FLAC file (ffmpeg error).")
+            print(f"   Error: {result.stderr}")
+            return
+
+        ch_desc = f"{channels}-channel" if channels > 2 else ("stereo" if channels == 2 else "mono")
+        print(f"✓ Generated: {output_path.name} ({ch_desc}, FLAC lossless, {frequency:.1f}Hz, -12dBFS)")
+    finally:
+        # Clean up temp file
+        if os.path.exists(tmp_wav_path):
+            os.remove(tmp_wav_path)
+
+
+def interactive_mode():
+    """
+    Interactive mode for users who don't want to use command-line arguments.
+    Guides the user through all options with prompts.
+    """
+    print("\n" + "="*70)
+    print("  Media Generator - Interactive Mode")
+    print("="*70)
+    print("\nWelcome! I'll guide you through creating media files.\n")
+
+    # Media type selection
+    print("What type of media do you want to generate?")
+    print("  1) Video (MP4)")
+    print("  2) Image (JPG, PNG, WebP, BMP, TIFF, SVG)")
+    print("  3) Animation (GIF)")
+    print("  4) Audio (WAV, OGG, MP3)")
+    print()
+
+    while True:
+        choice = input("Enter choice (1-4): ").strip()
+        if choice in ['1', '2', '3', '4']:
+            break
+        print("Invalid choice. Please enter 1, 2, 3, or 4.")
+
+    args = []
+
+    # Get number of files
+    while True:
+        try:
+            num_files = input("\nHow many files do you want to generate? ").strip()
+            num_files = int(num_files)
+            if num_files > 0:
+                args.append(str(num_files))
+                break
+            else:
+                print("Please enter a positive number.")
+        except ValueError:
+            print("Please enter a valid number.")
+
+    # Video
+    if choice == '1':
+        print("\n--- Video Options ---")
+
+        # Format
+        args.extend(['-t', 'mp4'])
+
+        # Codec
+        print("\nChoose video codec:")
+        print("  1) MPEG-4 (default, most compatible)")
+        print("  2) H.264 (high quality)")
+        print("  3) H.265 (best compression)")
+        codec_choice = input("Enter choice (1-3) [default: 1]: ").strip() or '1'
+        codec_map = {'1': 'mpeg4', '2': 'h264', '3': 'h265'}
+        args.extend(['--codec', codec_map.get(codec_choice, 'mpeg4')])
+
+        # Duration
+        duration = input("\nDuration in seconds [default: 1]: ").strip() or '1'
+        args.extend(['-d', duration])
+
+        # Resolution
+        print("\nChoose resolution:")
+        print("  1) 1920x1080 (Full HD)")
+        print("  2) 1280x720 (HD)")
+        print("  3) 640x480 (SD)")
+        print("  4) Custom")
+        res_choice = input("Enter choice (1-4) [default: 1]: ").strip() or '1'
+
+        if res_choice == '2':
+            args.extend(['-w', '1280', '-H', '720'])
+        elif res_choice == '3':
+            args.extend(['-w', '640', '-H', '480'])
+        elif res_choice == '4':
+            width = input("Width in pixels: ").strip()
+            height = input("Height in pixels: ").strip()
+            args.extend(['-w', width, '-H', height])
+
+        # FPS
+        fps = input("\nFrames per second (FPS) [default: 30]: ").strip() or '30'
+        args.extend(['-f', fps])
+
+        # Audio
+        print("\nDo you want audio in your videos?")
+        print("  1) No audio")
+        print("  2) Embed audio in video")
+        print("  3) Separate audio file")
+        print("  4) Both embedded and separate")
+        audio_choice = input("Enter choice (1-4) [default: 1]: ").strip() or '1'
+
+        if audio_choice in ['2', '4']:
+            args.append('--embed-audio')
+
+        if audio_choice in ['2', '3', '4']:
+            # Audio quality settings
+            print("\n--- Audio Quality Settings ---")
+
+            # Sample rate
+            print("\nSample rate:")
+            print("  1) 44100 Hz (CD quality, default)")
+            print("  2) 48000 Hz (professional)")
+            print("  3) 96000 Hz (high-res)")
+            print("  4) 22050 Hz (lower quality)")
+            print("  5) Custom (e.g., 43124.3123 Hz)")
+            sample_choice = input("Enter choice (1-5) [default: 1]: ").strip() or '1'
+            if sample_choice == '5':
+                custom_rate = input("Enter custom sample rate (Hz): ").strip()
+                args.extend(['--sample-rate', custom_rate])
+            else:
+                sample_map = {'1': '44100', '2': '48000', '3': '96000', '4': '22050'}
+                args.extend(['--sample-rate', sample_map.get(sample_choice, '44100')])
+
+            # Channels
+            print("\nNumber of channels:")
+            print("  1) Mono (1 channel)")
+            print("  2) Stereo (2 channels)")
+            channel_choice = input("Enter choice (1-2) [default: 1]: ").strip() or '1'
+            channel_map = {'1': '1', '2': '2'}
+            args.extend(['--channels', channel_map.get(channel_choice, '1')])
+
+            # Bit depth
+            print("\nBit depth:")
+            print("  1) 16-bit (standard, default)")
+            print("  2) 24-bit (high quality)")
+            bit_choice = input("Enter choice (1-2) [default: 1]: ").strip() or '1'
+            bit_map = {'1': '16', '2': '24'}
+            args.extend(['--bit-depth', bit_map.get(bit_choice, '16')])
+
+        if audio_choice in ['3', '4']:
+            args.append('--audio-file')
+            print("\nAudio format for separate file:")
+            print("  1) WAV (uncompressed)")
+            print("  2) OGG (Vorbis, compressed)")
+            print("  3) MP3 (compressed)")
+            print("  4) AAC (M4A, compressed)")
+            print("  5) FLAC (lossless)")
+            audio_fmt = input("Enter choice (1-5) [default: 1]: ").strip() or '1'
+            fmt_map = {'1': 'wav', '2': 'ogg', '3': 'mp3', '4': 'm4a', '5': 'flac'}
+            args.extend(['--audio-format', fmt_map.get(audio_fmt, 'wav')])
+
+    # Image
+    elif choice == '2':
+        print("\n--- Image Options ---")
+
+        # Format
+        print("\nChoose image format:")
+        print("  1) JPG (photo quality)")
+        print("  2) PNG (lossless)")
+        print("  3) WebP (modern, efficient)")
+        print("  4) BMP (bitmap)")
+        print("  5) TIFF (high quality)")
+        print("  6) SVG (vector graphics)")
+        fmt_choice = input("Enter choice (1-6) [default: 1]: ").strip() or '1'
+        fmt_map = {'1': 'jpg', '2': 'png', '3': 'webp', '4': 'bmp', '5': 'tiff', '6': 'svg'}
+        args.extend(['-t', fmt_map.get(fmt_choice, 'jpg')])
+
+        # Resolution
+        print("\nChoose resolution:")
+        print("  1) 1920x1080 (Full HD)")
+        print("  2) 1280x720 (HD)")
+        print("  3) 800x600 (SVGA)")
+        print("  4) Custom")
+        res_choice = input("Enter choice (1-4) [default: 1]: ").strip() or '1'
+
+        if res_choice == '2':
+            args.extend(['-w', '1280', '-H', '720'])
+        elif res_choice == '3':
+            args.extend(['-w', '800', '-H', '600'])
+        elif res_choice == '4':
+            width = input("Width in pixels: ").strip()
+            height = input("Height in pixels: ").strip()
+            args.extend(['-w', width, '-H', height])
+
+    # Animation
+    elif choice == '3':
+        print("\n--- Animation Options (GIF) ---")
+        args.extend(['-t', 'gif'])
+
+        # Duration
+        duration = input("\nDuration in seconds [default: 1]: ").strip() or '1'
+        args.extend(['-d', duration])
+
+        # FPS
+        fps = input("Frames per second (FPS) [default: 10]: ").strip() or '10'
+        args.extend(['-f', fps])
+
+        # Resolution
+        print("\nChoose resolution:")
+        print("  1) 1920x1080 (Full HD)")
+        print("  2) 800x600 (Standard)")
+        print("  3) 480x360 (Small)")
+        print("  4) Custom")
+        res_choice = input("Enter choice (1-4) [default: 2]: ").strip() or '2'
+
+        if res_choice == '1':
+            args.extend(['-w', '1920', '-H', '1080'])
+        elif res_choice == '3':
+            args.extend(['-w', '480', '-H', '360'])
+        elif res_choice == '4':
+            width = input("Width in pixels: ").strip()
+            height = input("Height in pixels: ").strip()
+            args.extend(['-w', width, '-H', height])
+        else:
+            args.extend(['-w', '800', '-H', '600'])
+
+    # Audio
+    elif choice == '4':
+        print("\n--- Audio Options ---")
+
+        # Format
+        print("\nChoose audio format:")
+        print("  1) WAV (uncompressed, high quality)")
+        print("  2) OGG (Vorbis, compressed, open source)")
+        print("  3) MP3 (compressed, universal)")
+        print("  4) AAC/M4A (compressed, Apple)")
+        print("  5) FLAC (lossless, compressed)")
+        fmt_choice = input("Enter choice (1-5) [default: 1]: ").strip() or '1'
+        fmt_map = {'1': 'wav', '2': 'ogg', '3': 'mp3', '4': 'm4a', '5': 'flac'}
+        args.extend(['-t', fmt_map.get(fmt_choice, 'wav')])
+
+        # Duration
+        duration = input("\nDuration in seconds [default: 1]: ").strip() or '1'
+        args.extend(['-d', duration])
+
+        # Sample rate
+        print("\nSample rate:")
+        print("  1) 44100 Hz (CD quality, default)")
+        print("  2) 48000 Hz (professional)")
+        print("  3) 96000 Hz (high-res)")
+        print("  4) 22050 Hz (lower quality)")
+        print("  5) Custom (e.g., 43124.3123 Hz or pi^2^2^2^2)")
+        sample_choice = input("Enter choice (1-5) [default: 1]: ").strip() or '1'
+        if sample_choice == '5':
+            custom_rate = input("Enter custom sample rate (Hz): ").strip()
+            args.extend(['--sample-rate', custom_rate])
+        else:
+            sample_map = {'1': '44100', '2': '48000', '3': '96000', '4': '22050'}
+            args.extend(['--sample-rate', sample_map.get(sample_choice, '44100')])
+
+        # Channels
+        print("\nAudio channels:")
+        print("  1) Mono (1 channel)")
+        print("  2) Stereo (2 channels)")
+        channels_choice = input("Enter choice (1-2) [default: 1]: ").strip() or '1'
+        channel_map = {'1': '1', '2': '2'}
+        args.extend(['--channels', channel_map.get(channels_choice, '1')])
+
+        # Bit depth
+        print("\nBit depth:")
+        print("  1) 16-bit (standard, default)")
+        print("  2) 24-bit (high quality)")
+        bit_choice = input("Enter choice (1-2) [default: 1]: ").strip() or '1'
+        bit_map = {'1': '16', '2': '24'}
+        args.extend(['--bit-depth', bit_map.get(bit_choice, '16')])
+
+        # Frequency range
+        use_custom_freq = input("\nUse custom frequency range? (y/n) [default: n]: ").strip().lower()
+        if use_custom_freq == 'y':
+            min_freq = input("Minimum frequency (Hz) [default: 100]: ").strip() or '100'
+            max_freq = input("Maximum frequency (Hz) [default: 1000]: ").strip() or '1000'
+            args.extend(['--min-freq', min_freq, '--max-freq', max_freq])
+
+    # Output directory
+    print("\n--- Output Options ---")
+    output_dir = input("\nOutput directory [default: test_media]: ").strip() or 'test_media'
+    args.extend(['-o', output_dir])
+
+    # File naming
+    base_name = input("Base filename [default: test_media]: ").strip() or 'test_media'
+    args.extend(['-n', base_name])
+
+    # Summary
+    print("\n" + "="*70)
+    print("  Summary")
+    print("="*70)
+    print(f"Will generate: {num_files} file(s)")
+    print(f"Output directory: {output_dir}")
+    print(f"Base filename: {base_name}")
+    print("="*70)
+    print()
+
+    confirm = input("Proceed with generation? (y/n) [default: y]: ").strip().lower() or 'y'
+    if confirm != 'y':
+        print("\nCancelled.")
+        return None
+
+    return args
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Generate unique test media files with random characteristics'
@@ -629,12 +1025,13 @@ def main():
     parser.add_argument(
         'n',
         type=int,
+        nargs='?',  # Make optional
         help='Number of files to generate'
     )
     parser.add_argument(
         '-t', '--type',
         type=str,
-        choices=['mp4', 'jpg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg', 'wav', 'ogg', 'mp3'],
+        choices=['mp4', 'jpg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg', 'wav', 'ogg', 'mp3', 'aac', 'm4a', 'flac'],
         default='mp4',
         help='Media type to generate (default: mp4)'
     )
@@ -666,9 +1063,9 @@ def main():
     )
     parser.add_argument(
         '-f', '--fps',
-        type=int,
+        type=float,
         default=30,
-        help='Frames per second for video/GIF (default: 30)'
+        help='Frames per second for video/GIF (default: 30, supports decimals like 23.98)'
     )
     parser.add_argument(
         '-d', '--duration',
@@ -698,9 +1095,9 @@ def main():
     )
     parser.add_argument(
         '--sample-rate',
-        type=int,
+        type=float,
         default=44100,
-        help='Sample rate for WAV files (default: 44100)'
+        help='Sample rate for audio files in Hz (default: 44100, supports decimals like 43124.3123)'
     )
     parser.add_argument(
         '--bit-depth',
@@ -732,7 +1129,7 @@ def main():
     parser.add_argument(
         '--audio-format',
         type=str,
-        choices=['wav', 'ogg', 'mp3'],
+        choices=['wav', 'ogg', 'mp3', 'aac', 'm4a', 'flac'],
         default='wav',
         help='Format for standalone audio files when using --audio-file (default: wav)'
     )
@@ -742,8 +1139,29 @@ def main():
         default='192k',
         help='Bitrate for MP3 files (default: 192k)'
     )
+    parser.add_argument(
+        '--aac-bitrate',
+        type=str,
+        default='192k',
+        help='Bitrate for AAC/M4A files (default: 192k)'
+    )
 
-    args = parser.parse_args()
+    # Check if running in interactive mode (no arguments provided)
+    if len(sys.argv) == 1:
+        # No arguments provided, use interactive mode
+        interactive_args = interactive_mode()
+        if interactive_args is None:
+            # User cancelled
+            return
+
+        # Re-parse with interactive args
+        args = parser.parse_args(interactive_args)
+    else:
+        args = parser.parse_args()
+
+    # Validate required argument
+    if args.n is None:
+        parser.error("the following arguments are required: n")
 
     # Create output directory
     output_dir = Path(args.output_dir)
@@ -782,7 +1200,10 @@ def main():
         'gif': f'GIF animations ({args.width}x{args.height}, {args.duration}s @ {args.fps}fps)',
         'wav': f'WAV audio ({args.channels}ch, {args.bit_depth}-bit, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)',
         'ogg': f'OGG audio ({args.channels}ch, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)',
-        'mp3': f'MP3 audio ({args.channels}ch, {args.mp3_bitrate}, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)'
+        'mp3': f'MP3 audio ({args.channels}ch, {args.mp3_bitrate}, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)',
+        'aac': f'AAC audio ({args.channels}ch, {args.aac_bitrate}, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)',
+        'm4a': f'M4A audio ({args.channels}ch, {args.aac_bitrate}, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)',
+        'flac': f'FLAC audio ({args.channels}ch, lossless, {args.sample_rate}Hz, {args.min_freq}-{args.max_freq}Hz, {args.duration}s)'
     }
 
     print(f"\n🎬 Generating {args.n} {args.type.upper()} files...")
@@ -790,7 +1211,7 @@ def main():
     print(f"   Output: {output_dir}/\n")
 
     # Pre-calculate frequencies for audio files and videos with audio (evenly spaced)
-    if args.type in ['wav', 'ogg', 'mp3'] or (args.type == 'mp4' and (args.embed_audio or args.audio_file)):
+    if args.type in ['wav', 'ogg', 'mp3', 'aac', 'm4a', 'flac'] or (args.type == 'mp4' and (args.embed_audio or args.audio_file)):
         if args.n == 1:
             # Single file uses min_freq
             frequencies = [args.min_freq]
@@ -876,6 +1297,27 @@ def main():
                 bit_depth=args.bit_depth,
                 max_freq=args.max_freq,
                 bitrate=args.mp3_bitrate
+            )
+        elif args.type in ['aac', 'm4a']:
+            generate_aac(
+                output_path,
+                frequency=frequencies[i],
+                duration=args.duration,
+                sample_rate=args.sample_rate,
+                channels=args.channels,
+                bit_depth=args.bit_depth,
+                max_freq=args.max_freq,
+                bitrate=args.aac_bitrate
+            )
+        elif args.type == 'flac':
+            generate_flac(
+                output_path,
+                frequency=frequencies[i],
+                duration=args.duration,
+                sample_rate=args.sample_rate,
+                channels=args.channels,
+                bit_depth=args.bit_depth,
+                max_freq=args.max_freq
             )
 
     print(f"\n✅ Done! Generated {args.n} {args.type.upper()} files in '{output_dir}/'")

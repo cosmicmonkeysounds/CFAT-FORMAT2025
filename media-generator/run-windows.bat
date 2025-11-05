@@ -22,7 +22,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 REM Run PowerShell script with all arguments
-powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%run.ps1" %*
+powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%run-windows.ps1" %*
 
 REM Capture exit code
 set EXIT_CODE=%ERRORLEVEL%

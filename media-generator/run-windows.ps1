@@ -265,16 +265,9 @@ function Main {
         # Run setup
         Invoke-Setup
 
-        # Check if any arguments were provided
-        if ($Arguments.Count -eq 0) {
-            Write-Warning "No arguments provided. Showing help:"
-            Write-Host ""
-            Invoke-Program @("--help")
-        } else {
-            # Run program with arguments
-            $exitCode = Invoke-Program $Arguments
-            exit $exitCode
-        }
+        # Run program with arguments (or without for interactive mode)
+        $exitCode = Invoke-Program $Arguments
+        exit $exitCode
     } catch {
         Write-Error "An error occurred: $_"
         Write-Host $_.ScriptStackTrace

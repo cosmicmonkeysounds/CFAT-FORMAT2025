@@ -4,17 +4,35 @@ This package includes smart launcher scripts that automatically handle all setup
 
 ## Quick Start
 
-### macOS / Linux
+### Interactive Mode (Easiest!)
+No command line knowledge needed - just run without arguments:
+
 ```bash
-./run.sh 10 -t mp4 --embed-audio
+# macOS / Linux
+./run-macos-linux.sh
+
+# Windows
+run-windows.bat
 ```
 
-### Windows
-```cmd
-run.bat 10 -t mp4 --embed-audio
-```
+Or double-click `run-windows.bat` in Windows Explorer!
 
-Or double-click `run.bat` in Windows Explorer.
+You'll be guided through:
+- Media type selection (Video, Image, Animation, Audio)
+- Format options (codecs, resolutions, quality)
+- Audio options (embedded, separate, formats)
+- Output settings (directory, filename)
+
+### Command Line Mode
+For power users who know what they want:
+
+```bash
+# macOS / Linux
+./run-macos-linux.sh 10 -t mp4 --embed-audio
+
+# Windows
+run-windows.bat 10 -t mp4 --embed-audio
+```
 
 ## What The Launchers Do Automatically
 
@@ -42,11 +60,15 @@ The launcher scripts handle everything:
 
 First time running:
 ```bash
-# macOS/Linux
-./run.sh --help
+# macOS/Linux - Interactive mode
+./run-macos-linux.sh
 
-# Windows
-run.bat --help
+# Windows - Interactive mode
+run-windows.bat
+
+# Or get help with command line mode
+./run-macos-linux.sh --help  # macOS/Linux
+run-windows.bat --help       # Windows
 ```
 
 You'll see:
@@ -70,7 +92,7 @@ This takes ~30 seconds the first time. After that, it starts instantly!
 
 Every run after the first:
 ```bash
-./run.sh 10 -t mp4 --embed-audio
+./run-macos-linux.sh 10 -t mp4 --embed-audio
 ```
 
 You'll see:
@@ -102,37 +124,37 @@ The launchers automatically detect when dependencies need updating:
 ### Generate Images
 ```bash
 # macOS/Linux
-./run.sh 10 -t jpg -w 1920 -H 1080
+./run-macos-linux.sh 10 -t jpg -w 1920 -H 1080
 
 # Windows
-run.bat 10 -t jpg -w 1920 -H 1080
+run-windows.bat 10 -t jpg -w 1920 -H 1080
 ```
 
 ### Generate Videos with Audio
 ```bash
 # macOS/Linux
-./run.sh 5 -t mp4 --embed-audio --audio-file --audio-format mp3
+./run-macos-linux.sh 5 -t mp4 --embed-audio --audio-file --audio-format mp3
 
 # Windows
-run.bat 5 -t mp4 --embed-audio --audio-file --audio-format mp3
+run-windows.bat 5 -t mp4 --embed-audio --audio-file --audio-format mp3
 ```
 
 ### Generate Audio Files
 ```bash
 # macOS/Linux
-./run.sh 20 -t ogg --min-freq 200 --max-freq 2000
+./run-macos-linux.sh 20 -t ogg --min-freq 200 --max-freq 2000
 
 # Windows
-run.bat 20 -t ogg --min-freq 200 --max-freq 2000
+run-windows.bat 20 -t ogg --min-freq 200 --max-freq 2000
 ```
 
 ### Generate SVG Vector Graphics
 ```bash
 # macOS/Linux
-./run.sh 10 -t svg -w 800 -H 600
+./run-macos-linux.sh 10 -t svg -w 800 -H 600
 
 # Windows
-run.bat 10 -t svg -w 800 -H 600
+run-windows.bat 10 -t svg -w 800 -H 600
 ```
 
 ## File Structure
@@ -140,9 +162,9 @@ run.bat 10 -t svg -w 800 -H 600
 After first run, you'll see:
 ```
 media-generator/
-├── run.sh              # macOS/Linux launcher
-├── run.ps1             # Windows PowerShell launcher
-├── run.bat             # Windows batch launcher
+├── run-macos-linux.sh  # macOS/Linux launcher
+├── run-windows.ps1     # Windows PowerShell launcher
+├── run-windows.bat     # Windows batch launcher
 ├── requirements.txt    # Python dependencies
 ├── media_generator/    # Main package
 └── venv/              # Virtual environment (auto-created)
@@ -155,7 +177,7 @@ media-generator/
 
 ### "Permission denied" on macOS/Linux
 ```bash
-chmod +x run.sh
+chmod +x run-macos-linux.sh
 ```
 
 ### "Script execution is disabled" on Windows
@@ -166,7 +188,7 @@ Set-ExecutionPolicy RemoteSigned
 
 Or use the batch file instead:
 ```cmd
-run.bat --help
+run-windows.bat --help
 ```
 
 ### Start Fresh
@@ -231,16 +253,16 @@ python -m media_generator 10 -t mp4
 To share with others, just zip the entire folder:
 ```
 media-generator.zip
-├── run.sh
-├── run.ps1
-├── run.bat
+├── run-macos-linux.sh
+├── run-windows.ps1
+├── run-windows.bat
 ├── requirements.txt
 ├── media_generator/
 └── (everything else)
 ```
 
 Users just unzip and run:
-- macOS/Linux: `./run.sh --help`
-- Windows: Double-click `run.bat`
+- macOS/Linux: `./run-macos-linux.sh --help`
+- Windows: Double-click `run-windows.bat`
 
 The launcher handles the rest!

@@ -4,14 +4,26 @@
 
 **Just want to run it? Use our smart launcher scripts!**
 
-### macOS / Linux
+### Interactive Mode (No Command Line Knowledge Needed!)
+Simply double-click or run without arguments for a guided experience:
+
 ```bash
-./run.sh 10 -t mp4 --embed-audio
+# macOS / Linux
+./run-macos-linux.sh
+
+# Windows
+run-windows.bat
 ```
 
-### Windows
-```cmd
-run.bat 10 -t mp4 --embed-audio
+You'll be guided through all options step-by-step!
+
+### Command Line Mode
+```bash
+# macOS / Linux
+./run-macos-linux.sh 10 -t mp4 --embed-audio
+
+# Windows
+run-windows.bat 10 -t mp4 --embed-audio
 ```
 
 **That's it!** The launcher automatically:
@@ -74,20 +86,22 @@ Using the launcher scripts:
 
 ```bash
 # macOS/Linux
-./run.sh 10 -t mp4                    # Generate 10 videos
-./run.sh 10 -t jpg                    # Generate 10 images
-./run.sh 10 -t wav                    # Generate 10 audio files
-./run.sh 5 -t mp4 --embed-audio       # Videos with audio
-./run.sh --help                       # Show all options
+./run-macos-linux.sh                      # Interactive mode (guided)
+./run-macos-linux.sh 10 -t mp4            # Generate 10 videos
+./run-macos-linux.sh 10 -t jpg            # Generate 10 images
+./run-macos-linux.sh 10 -t wav            # Generate 10 audio files
+./run-macos-linux.sh 5 -t mp4 --embed-audio   # Videos with audio
+./run-macos-linux.sh --help               # Show all options
 
 # Windows
-run.bat 10 -t mp4                     # Generate 10 videos
-run.bat 10 -t jpg                     # Generate 10 images
-run.bat 10 -t wav                     # Generate 10 audio files
-run.bat 5 -t mp4 --embed-audio        # Videos with audio
-run.bat --help                        # Show all options
+run-windows.bat                           # Interactive mode (guided)
+run-windows.bat 10 -t mp4                 # Generate 10 videos
+run-windows.bat 10 -t jpg                 # Generate 10 images
+run-windows.bat 10 -t wav                 # Generate 10 audio files
+run-windows.bat 5 -t mp4 --embed-audio    # Videos with audio
+run-windows.bat --help                    # Show all options
 ```
 
 ---
 
-**Not sure where to start?** → Use the launcher: `./run.sh --help` (or `run.bat --help` on Windows)
+**Not sure where to start?** → Use interactive mode: `./run-macos-linux.sh` (or `run-windows.bat` on Windows)

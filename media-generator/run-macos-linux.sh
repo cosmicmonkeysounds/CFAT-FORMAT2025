@@ -229,15 +229,8 @@ main() {
     # Run setup
     setup
 
-    # Check if any arguments were provided
-    if [[ $# -eq 0 ]]; then
-        print_warning "No arguments provided. Showing help:"
-        echo ""
-        run_program --help
-    else
-        # Run program with arguments
-        run_program "$@"
-    fi
+    # Run program with arguments (or without for interactive mode)
+    run_program "$@"
 }
 
 # Execute main function with all script arguments
