@@ -12,6 +12,9 @@ int NUM_WINDOWS = 2;              // Number of separate windows
 int[] DISPLAY_NUMBERS = {1, 2};   // Which display for each window
 int VIDEO_HEIGHT = 1080;          // Standard video height for animation
 
+// Audio configuration
+int AUDIO_SAMPLE_RATE = 44100;    // MUST match sample rate of audio files (check with ffprobe)
+
 // Shared state across all windows
 static SharedState sharedState;
 
@@ -20,6 +23,11 @@ void setup() {
   size(400, 300);
   pixelDensity(1);
   surface.setTitle("Carpet Hotel - Control");
+
+  // Configure audio engine for smooth playback
+  // Sample rate must match audio files (44100 Hz)
+  Sound s = new Sound(this);
+  s.sampleRate(AUDIO_SAMPLE_RATE);
 
   // Initialize shared state
   sharedState = new SharedState();
@@ -237,6 +245,7 @@ class SharedState {
 
   // Audio mixing
   float masterVolume = 0.7;       // Master volume control (0.0 to 1.0)
+  int audioUpdateCounter = 0;     // Counter for reducing audio update frequency
 
   // Configuration
   TransitionConfig config;
@@ -300,6 +309,17 @@ class SharedState {
       // Update audio mixing for current scene
       updateSceneAudio();
     }
+
+    // Update audio amplitudes at reduced frequency (every 3 frames = ~20fps)
+    audioUpdateCounter++;
+    if (audioUpdateCounter >= 3) {
+      audioUpdateCounter = 0;
+      for (Floor floor : floors) {
+        if (floor != null) {
+          floor.updateAmp();
+        }
+      }
+    }
   }
 
   void updateSceneAudio() {
@@ -310,8 +330,8 @@ class SharedState {
     // Set all floors to silent first
     for (int i = 0; i < floors.size(); i++) {
       Floor floor = floors.get(i);
-      if (floor != null && floor.audio != null) {
-        floor.audio.amp(0.0);
+      if (floor != null) {
+        floor.setTargetAmp(0.0);
       }
     }
 
@@ -320,8 +340,8 @@ class SharedState {
       int floorIdx = currentScene + i;
       if (floorIdx >= 0 && floorIdx < floors.size()) {
         Floor floor = floors.get(floorIdx);
-        if (floor != null && floor.audio != null) {
-          floor.audio.amp(volumePerFloor);
+        if (floor != null) {
+          floor.setTargetAmp(volumePerFloor);
         }
       }
     }
@@ -336,8 +356,8 @@ class SharedState {
     // Set all floors to silent first
     for (int i = 0; i < floors.size(); i++) {
       Floor floor = floors.get(i);
-      if (floor != null && floor.audio != null) {
-        floor.audio.amp(0.0);
+      if (floor != null) {
+        floor.setTargetAmp(0.0);
       }
     }
 
@@ -370,15 +390,13 @@ class SharedState {
     // Equal power mixing for audible floors
     float volumePerFloor = masterVolume / sqrt(audibleFloors.size());
 
-    // Crossfade between current and next floors based on fractional progress
+    // Smooth equal-power crossfade using cosine curves
+    // This prevents crackling and maintains perceived loudness
     for (int floorIdx : audibleFloors) {
       if (floorIdx >= 0 && floorIdx < floors.size()) {
         Floor floor = floors.get(floorIdx);
-        if (floor != null && floor.audio != null) {
-          // Calculate crossfade based on whether this floor is fading in or out
-          float volume = volumePerFloor;
-
-          // Floors in the "next" set fade in, floors in the "current" set fade out
+        if (floor != null) {
+          // Determine if this floor is fading in or out
           boolean isNext = false;
           for (int i = 0; i < NUM_WINDOWS; i++) {
             if (floorIdx == nextFloor + i) {
@@ -387,15 +405,21 @@ class SharedState {
             }
           }
 
+          // Apply smooth equal-power crossfade curves
+          float crossfadeGain;
           if (isNext) {
-            // Fading in
-            volume *= fractionalProgress;
+            // Fading in: use sine curve (0 to 1)
+            // Starts at 0 when progress=0, ends at 1 when progress=1
+            crossfadeGain = sin(fractionalProgress * HALF_PI);
           } else {
-            // Fading out
-            volume *= (1.0 - fractionalProgress);
+            // Fading out: use cosine curve (1 to 0)
+            // Starts at 1 when progress=0, ends at 0 when progress=1
+            crossfadeGain = cos(fractionalProgress * HALF_PI);
           }
 
-          floor.audio.amp(volume);
+          // Set target volume with smooth crossfade
+          float finalVolume = volumePerFloor * crossfadeGain;
+          floor.setTargetAmp(finalVolume);
         }
       }
     }
@@ -550,6 +574,9 @@ class Floor {
   String videoName;
   String audioName;
   int floorNumber;
+  float currentAmp = 0.0;          // Track current amplitude
+  float targetAmp = 0.0;           // Target amplitude
+  static final float AMP_THRESHOLD = 0.01;  // Only update if change > 1%
 
   Floor(PApplet parent, String videoFile, String audioFile, int number) {
     this.videoName = videoFile;
@@ -568,6 +595,32 @@ class Floor {
       audio = new SoundFile(parent, audioFile);
       audio.loop();
       audio.amp(0.0); // Start silent, will be controlled by mixing
+      currentAmp = 0.0;
+      targetAmp = 0.0;
+    }
+  }
+
+  // Set target amplitude (will be smoothly applied)
+  void setTargetAmp(float amp) {
+    targetAmp = constrain(amp, 0.0, 1.0);
+  }
+
+  // Update amplitude smoothly (call less frequently than every frame)
+  void updateAmp() {
+    if (audio == null) return;
+
+    // Smooth interpolation toward target
+    float diff = targetAmp - currentAmp;
+
+    // Only update if difference is significant
+    if (abs(diff) > AMP_THRESHOLD) {
+      // Smooth step toward target (slower movement = smoother audio)
+      currentAmp += diff * 0.15; // 15% per update
+      audio.amp(currentAmp);
+    } else if (abs(diff) > 0.001) {
+      // Final snap to target when very close
+      currentAmp = targetAmp;
+      audio.amp(currentAmp);
     }
   }
 
