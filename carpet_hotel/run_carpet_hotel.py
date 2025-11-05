@@ -27,6 +27,7 @@ import argparse
 import platform
 import threading
 import atexit
+import json
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -66,12 +67,18 @@ class CarpetHotelLauncher:
         self.displays = displays or [1, 2]
 
         # OSC configuration
-        self.osc_client = None
-        self.osc_server = None
+        self.osc_client = None  # Send to Processing
+        self.osc_server = None  # Receive from Processing
         self.osc_thread = None
+        self.sc_osc_client = None  # Send to SuperCollider
+        self.sc_osc_server = None  # Receive from SuperCollider
+        self.sc_osc_thread = None
         self.processing_send_port = 12000  # Send to Processing
         self.processing_recv_port = 12001  # Receive from Processing
+        self.sc_send_port = 57120  # Send to SuperCollider
+        self.sc_recv_port = 57121  # Receive from SuperCollider (if needed)
         self.current_state = "unknown"
+        self.is_paused = False  # Track pause state
 
         # Paths
         self.sc_script = self.script_dir / "carpet_hotel_audio.scd"
@@ -452,7 +459,7 @@ class CarpetHotelLauncher:
             return False
 
     def setup_osc(self):
-        """Setup OSC communication with Processing."""
+        """Setup OSC communication with Processing and SuperCollider."""
         if not OSC_AVAILABLE:
             return
 
@@ -464,9 +471,16 @@ class CarpetHotelLauncher:
         # Create OSC client to send to Processing
         self.osc_client = udp_client.SimpleUDPClient("127.0.0.1", self.processing_send_port)
 
+        # Create OSC client to send to SuperCollider
+        self.sc_osc_client = udp_client.SimpleUDPClient("127.0.0.1", self.sc_send_port)
+
         # Create OSC server to receive from Processing
         dispatcher = Dispatcher()
         dispatcher.map("/carpet/state", self.handle_processing_state)
+        # Forward audio commands from Processing to SuperCollider
+        dispatcher.map("/carpet/scene", self.forward_to_sc)
+        dispatcher.map("/carpet/transition", self.forward_to_sc)
+        dispatcher.map("/carpet/volume", self.forward_to_sc)
         self.osc_server = ThreadingOSCUDPServer(("127.0.0.1", self.processing_recv_port), dispatcher)
 
         # Start OSC server in background thread
@@ -474,8 +488,18 @@ class CarpetHotelLauncher:
         self.osc_thread.start()
 
         self.log(f"✓ OSC control enabled")
-        self.log(f"  Sending to Processing on port {self.processing_send_port}")
-        self.log(f"  Receiving from Processing on port {self.processing_recv_port}")
+        self.log(f"  Processing: send={self.processing_send_port}, recv={self.processing_recv_port}")
+        self.log(f"  SuperCollider: send={self.sc_send_port}")
+        self.log(f"  Python is now the OSC bus (Processing ↔ Python ↔ SuperCollider)")
+
+    def forward_to_sc(self, address, *args):
+        """Forward OSC messages to SuperCollider."""
+        if self.sc_osc_client and not self.is_paused:
+            try:
+                self.sc_osc_client.send_message(address, args)
+                self.log(f"[OSC-FWD] {address} {args} → SuperCollider")
+            except Exception as e:
+                self.log(f"[OSC-ERR] Failed to forward to SC: {e}")
 
     def handle_processing_state(self, address, *args):
         """Handle state updates from Processing."""
@@ -658,6 +682,58 @@ class CarpetHotelLauncher:
         except:
             pass  # Fail silently on emergency cleanup
 
+    def stop(self):
+        """Stop all processes but keep launcher instance alive."""
+        print("\n=== Stopping Carpet Hotel ===")
+        self.cleanup()
+        print("✓ All processes stopped (launcher still active)\n")
+
+    def pause(self):
+        """Pause playback - mute SC, pause videos, disable OSC inputs."""
+        print("\n=== Pausing Carpet Hotel ===")
+        self.is_paused = True
+
+        # Mute SuperCollider by setting volume to 0
+        if self.sc_osc_client:
+            try:
+                self.sc_osc_client.send_message("/carpet/volume", [0.0])
+                print("  ✓ SuperCollider muted")
+            except Exception as e:
+                print(f"  Warning: Failed to mute SC: {e}")
+
+        # Send pause command to Processing (if it supports it)
+        if self.osc_client:
+            try:
+                self.osc_client.send_message("/carpet/pause", [1])
+                print("  ✓ Processing paused")
+            except Exception as e:
+                print(f"  Warning: Failed to pause Processing: {e}")
+
+        print("✓ Paused (OSC forwarding disabled)\n")
+
+    def resume(self):
+        """Resume playback - unmute SC, resume videos, enable OSC inputs."""
+        print("\n=== Resuming Carpet Hotel ===")
+        self.is_paused = False
+
+        # Unmute SuperCollider by setting volume to default (0.7)
+        if self.sc_osc_client:
+            try:
+                self.sc_osc_client.send_message("/carpet/volume", [0.7])
+                print("  ✓ SuperCollider unmuted")
+            except Exception as e:
+                print(f"  Warning: Failed to unmute SC: {e}")
+
+        # Send resume command to Processing (if it supports it)
+        if self.osc_client:
+            try:
+                self.osc_client.send_message("/carpet/pause", [0])
+                print("  ✓ Processing resumed")
+            except Exception as e:
+                print(f"  Warning: Failed to resume Processing: {e}")
+
+        print("✓ Resumed (OSC forwarding enabled)\n")
+
     def cleanup(self):
         """Clean up both Processing and SuperCollider processes."""
         print("\n=== Cleaning up ===")
@@ -699,14 +775,30 @@ class CarpetHotelLauncher:
         except Exception as e:
             print(f"  Warning: {e}")
 
-        # Stop OSC server
+        # Stop OSC servers
         if self.osc_server:
             try:
-                print("Stopping OSC server...")
+                print("Stopping Processing OSC server...")
                 self.osc_server.shutdown()
-                print("✓ OSC server stopped")
+                print("✓ Processing OSC server stopped")
             except Exception as e:
                 print(f"  Warning: {e}")
+
+        if self.sc_osc_server:
+            try:
+                print("Stopping SuperCollider OSC server...")
+                self.sc_osc_server.shutdown()
+                print("✓ SuperCollider OSC server stopped")
+            except Exception as e:
+                print(f"  Warning: {e}")
+
+        # Reset process and client references
+        self.sc_process = None
+        self.processing_process = None
+        self.osc_client = None
+        self.osc_server = None
+        self.sc_osc_client = None
+        self.sc_osc_server = None
 
         print("\n✓ Shutdown complete\n")
 
@@ -719,12 +811,19 @@ def detect_screens():
             monitors = get_monitors()
             for i, monitor in enumerate(monitors):
                 # Get the monitor name - this is the REAL name like "MacBook Built-In", "Samsung Odyssey G9", etc.
-                display_name = getattr(monitor, 'name', f'Display {i + 1}')
+                display_name = getattr(monitor, 'name', None)
 
-                # Clean up the name if it's too technical
-                if display_name.startswith('\\\\'):
+                # Handle None or empty name
+                if not display_name:
+                    display_name = f'Display {i + 1}'
+                elif display_name.startswith('\\\\'):
                     # Windows device path - extract friendly name
                     display_name = f'Display {i + 1}'
+
+                # Mark primary display
+                if i == 0 or getattr(monitor, 'is_primary', False):
+                    if 'Primary' not in display_name:
+                        display_name = f'{display_name} (Primary)'
 
                 screens.append({
                     'index': i + 1,
@@ -752,21 +851,62 @@ def detect_screens():
 
     return screens
 
+def load_settings():
+    """Load last saved settings from config file."""
+    config_file = Path(__file__).parent / ".carpet_hotel_config.json"
+    default_settings = {
+        'audio_device': None,
+        'enable_keyboard': True,
+        'enable_python_terminal': True,
+        'enable_osc_external': True,
+        'displays': [1, 2]
+    }
+
+    try:
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                settings = json.load(f)
+                # Merge with defaults in case new settings were added
+                return {**default_settings, **settings}
+    except Exception as e:
+        print(f"Warning: Could not load settings: {e}")
+
+    return default_settings
+
+def save_settings(settings):
+    """Save settings to config file."""
+    config_file = Path(__file__).parent / ".carpet_hotel_config.json"
+    try:
+        with open(config_file, 'w') as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        print(f"Warning: Could not save settings: {e}")
+
 def guided_setup_gui():
-    """GUI wizard for configuration."""
+    """Persistent GUI control panel for configuration and control."""
     result = {'cancelled': True}
 
     root = tk.Tk()
-    root.title("Carpet Hotel - Setup Wizard")
-    root.geometry("700x550")
+    root.title("Carpet Hotel - Control Panel")
+    root.geometry("700x600")
     root.resizable(False, False)
+
+    # Load previous settings
+    saved_settings = load_settings()
+
+    # State management
+    launcher_instance = [None]  # Use list to allow modification in nested functions
+    launcher_thread = [None]
+    is_running = [False]
+    is_paused = [False]
 
     # Configuration storage
     config = {
-        'audio_device': None,
-        'test_mode': False,
-        'osc_control': False,
-        'displays': [1, 2]
+        'audio_device': saved_settings.get('audio_device'),
+        'enable_keyboard': saved_settings.get('enable_keyboard', True),
+        'enable_python_terminal': saved_settings.get('enable_python_terminal', True),
+        'enable_osc_external': saved_settings.get('enable_osc_external', True),
+        'displays': saved_settings.get('displays', [1, 2])
     }
 
     current_page = [0]  # Use list to allow modification in nested functions
@@ -783,8 +923,17 @@ def guided_setup_gui():
     ttk.Label(page1, text="Audio Output Device", font=('Arial', 14, 'bold')).pack(pady=10)
     ttk.Label(page1, text="Choose where you want the audio to play from:").pack(pady=5)
 
-    audio_var = tk.StringVar(value="default")
-    audio_custom = tk.StringVar()
+    # Initialize audio selection from saved settings
+    saved_audio = config.get('audio_device')
+    if saved_audio in ["MacBook Pro Speakers", "Built-in Output", "Multi-Output Device"]:
+        audio_var = tk.StringVar(value=saved_audio)
+        audio_custom = tk.StringVar()
+    elif saved_audio:
+        audio_var = tk.StringVar(value="custom")
+        audio_custom = tk.StringVar(value=saved_audio)
+    else:
+        audio_var = tk.StringVar(value="default")
+        audio_custom = tk.StringVar()
 
     ttk.Radiobutton(page1, text="MacBook Pro Speakers (recommended)",
                     variable=audio_var, value="MacBook Pro Speakers").pack(anchor='w', padx=40, pady=5)
@@ -826,10 +975,13 @@ def guided_setup_gui():
     available_listbox = tk.Listbox(left_frame, height=8, selectmode=tk.SINGLE, font=('Arial', 10))
     available_listbox.pack(fill='both', expand=True, pady=5)
 
-    # Populate available displays (initially all displays except 1 and 2 which are pre-selected)
+    # Get saved display selection
+    saved_displays = config.get('displays', [1, 2])
+
+    # Populate available displays (initially all displays except saved ones)
     for screen in available_screens:
         screen_name = screen.get('name', f"Display {screen['index']}")
-        if screen['index'] not in [1, 2]:  # Don't show pre-selected displays
+        if screen['index'] not in saved_displays:
             available_listbox.insert(tk.END, screen_name)
 
     # Right side: Selected displays
@@ -842,12 +994,12 @@ def guided_setup_gui():
     selected_listbox = tk.Listbox(right_frame, height=8, selectmode=tk.SINGLE, font=('Arial', 10))
     selected_listbox.pack(fill='both', expand=True, pady=5)
 
-    # Pre-populate with displays 1 and 2 (only if they exist)
-    for screen in available_screens:
-        if screen['index'] == 1:
-            selected_listbox.insert(tk.END, screen.get('name', 'Display 1 (Primary)'))
-        elif screen['index'] == 2:
-            selected_listbox.insert(tk.END, screen.get('name', 'Display 2'))
+    # Pre-populate with saved displays (in order)
+    for display_num in saved_displays:
+        for screen in available_screens:
+            if screen['index'] == display_num:
+                selected_listbox.insert(tk.END, screen.get('name', f'Display {display_num}'))
+                break
 
     # Helper function to get display number from name
     def get_display_number(display_name):
@@ -977,10 +1129,10 @@ def guided_setup_gui():
     ttk.Label(page3, text="Select which control methods to enable (at least one):").pack(pady=5)
     ttk.Label(page3, text="Mouse wheel volume control is always available.", foreground='gray', font=('Arial', 9)).pack(pady=(0, 10))
 
-    # Checkbox variables (all enabled by default)
-    keyboard_var = tk.BooleanVar(value=True)
-    python_terminal_var = tk.BooleanVar(value=True)
-    external_osc_var = tk.BooleanVar(value=True)
+    # Checkbox variables - initialize from saved settings
+    keyboard_var = tk.BooleanVar(value=config.get('enable_keyboard', True))
+    python_terminal_var = tk.BooleanVar(value=config.get('enable_python_terminal', True))
+    external_osc_var = tk.BooleanVar(value=config.get('enable_osc_external', True))
 
     # Keyboard control checkbox
     ttk.Checkbutton(page3, text="Keyboard Control (in Processing)",
@@ -1064,17 +1216,86 @@ def guided_setup_gui():
 
     notebook.bind('<<NotebookTabChanged>>', on_page_changed)
 
+    # ===== Status Label =====
+    status_frame = ttk.Frame(root)
+    status_frame.pack(fill='x', padx=10, pady=(0, 5))
+    status_label = ttk.Label(status_frame, text="Ready to start", font=('Arial', 9), foreground='gray')
+    status_label.pack()
+
     # ===== Bottom Buttons =====
     button_frame = ttk.Frame(root)
     button_frame.pack(fill='x', padx=10, pady=10)
 
-    def on_cancel():
-        if messagebox.askokcancel("Cancel Setup", "Are you sure you want to cancel?"):
-            cleanup_previews()
-            result['cancelled'] = True
-            root.destroy()
+    # Create button references that we'll update dynamically
+    cancel_button = ttk.Button(button_frame, text="Quit")
+    back_button = ttk.Button(button_frame, text="◀ Back", command=lambda: notebook.select(max(0, notebook.index(notebook.select()) - 1)))
+    next_button = ttk.Button(button_frame, text="Next ▶", command=lambda: notebook.select(min(3, notebook.index(notebook.select()) + 1)))
+    start_button = ttk.Button(button_frame, text="Start")
+    stop_button = ttk.Button(button_frame, text="Stop")
+    pause_button = ttk.Button(button_frame, text="Pause")
+
+    def update_button_state():
+        """Update button visibility and commands based on running state."""
+        # Clear all buttons
+        for widget in button_frame.winfo_children():
+            widget.pack_forget()
+
+        if is_running[0]:
+            # Running state: show Stop and Pause/Resume
+            stop_button.pack(side='right', padx=5)
+            if is_paused[0]:
+                pause_button.config(text="Resume", command=on_resume)
+            else:
+                pause_button.config(text="Pause", command=on_pause)
+            pause_button.pack(side='right')
+        else:
+            # Initial state: show Cancel, Back, Next, Start
+            cancel_button.pack(side='left')
+            back_button.pack(side='left', padx=5)
+            next_button.pack(side='left')
+            start_button.pack(side='right')
+
+    def disable_config_ui():
+        """Disable configuration UI while running."""
+        notebook.tab(0, state='disabled')
+        notebook.tab(1, state='disabled')
+        notebook.tab(2, state='disabled')
+
+    def enable_config_ui():
+        """Enable configuration UI when stopped."""
+        notebook.tab(0, state='normal')
+        notebook.tab(1, state='normal')
+        notebook.tab(2, state='normal')
+
+    def run_launcher_thread():
+        """Run launcher in background thread."""
+        try:
+            launcher = launcher_instance[0]
+            if launcher:
+                # Run the launcher (this blocks until stopped)
+                launcher.run()
+        except Exception as e:
+            print(f"Error in launcher thread: {e}")
+            status_label.config(text=f"Error: {e}", foreground='red')
+            is_running[0] = False
+            enable_config_ui()
+            update_button_state()
+
+    def on_quit():
+        """Quit the application."""
+        if is_running[0]:
+            if messagebox.askokcancel("Quit", "Stop Carpet Hotel and quit?"):
+                cleanup_previews()
+                if launcher_instance[0]:
+                    launcher_instance[0].stop()
+                root.destroy()
+        else:
+            if messagebox.askokcancel("Quit", "Are you sure you want to quit?"):
+                cleanup_previews()
+                root.destroy()
 
     def on_start():
+        """Start Carpet Hotel in background thread."""
         # Cleanup preview windows
         cleanup_previews()
 
@@ -1121,14 +1342,69 @@ def guided_setup_gui():
                                         "Continue with keyboard control only?"):
                 return
 
-        result['cancelled'] = False
-        result['config'] = config
-        root.destroy()
+        # Save settings for next time
+        save_settings(config)
 
-    ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side='left')
-    ttk.Button(button_frame, text="◀ Back", command=lambda: notebook.select(max(0, notebook.index(notebook.select()) - 1))).pack(side='left', padx=5)
-    ttk.Button(button_frame, text="Next ▶", command=lambda: notebook.select(min(3, notebook.index(notebook.select()) + 1))).pack(side='left')
-    ttk.Button(button_frame, text="Start", command=on_start, style='Accent.TButton').pack(side='right')
+        # Create launcher instance
+        launcher_instance[0] = CarpetHotelLauncher(
+            audio_device=config['audio_device'],
+            enable_keyboard=config['enable_keyboard'],
+            enable_python_terminal=config['enable_python_terminal'],
+            enable_osc_external=config['enable_osc_external'],
+            displays=config['displays']
+        )
+
+        # Update state
+        is_running[0] = True
+        is_paused[0] = False
+        status_label.config(text="Starting Carpet Hotel...", foreground='blue')
+        disable_config_ui()
+        update_button_state()
+
+        # Start launcher in background thread
+        launcher_thread[0] = threading.Thread(target=run_launcher_thread, daemon=True)
+        launcher_thread[0].start()
+
+        # Update status after a moment
+        root.after(2000, lambda: status_label.config(text="Running", foreground='green'))
+
+    def on_stop():
+        """Stop Carpet Hotel but keep GUI open."""
+        status_label.config(text="Stopping...", foreground='orange')
+        if launcher_instance[0]:
+            launcher_instance[0].stop()
+        is_running[0] = False
+        is_paused[0] = False
+        launcher_instance[0] = None
+        enable_config_ui()
+        update_button_state()
+        status_label.config(text="Stopped - Ready to start", foreground='gray')
+
+    def on_pause():
+        """Pause Carpet Hotel."""
+        status_label.config(text="Pausing...", foreground='orange')
+        if launcher_instance[0]:
+            launcher_instance[0].pause()
+        is_paused[0] = True
+        update_button_state()
+        status_label.config(text="Paused", foreground='orange')
+
+    def on_resume():
+        """Resume Carpet Hotel."""
+        status_label.config(text="Resuming...", foreground='blue')
+        if launcher_instance[0]:
+            launcher_instance[0].resume()
+        is_paused[0] = False
+        update_button_state()
+        status_label.config(text="Running", foreground='green')
+
+    # Set button commands
+    cancel_button.config(command=on_quit)
+    start_button.config(command=on_start)
+    stop_button.config(command=on_stop)
+
+    # Initialize button state
+    update_button_state()
 
     # Center window
     root.update_idletasks()
@@ -1136,11 +1412,25 @@ def guided_setup_gui():
     y = (root.winfo_screenheight() // 2) - (root.winfo_height() // 2)
     root.geometry(f"+{x}+{y}")
 
+    # Handle window close button
+    def on_window_close():
+        if is_running[0]:
+            if messagebox.askokcancel("Quit", "Stop Carpet Hotel and quit?"):
+                cleanup_previews()
+                if launcher_instance[0]:
+                    launcher_instance[0].stop()
+                root.destroy()
+        else:
+            cleanup_previews()
+            root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_window_close)
+
+    # Run main loop - this keeps the GUI open permanently
     root.mainloop()
 
-    if result['cancelled']:
-        return None
-    return result['config']
+    # When GUI closes, we're done
+    # The GUI doesn't return anything anymore - it's persistent
 
 def guided_setup():
     """Interactive guided setup for all configuration options."""
@@ -1365,17 +1655,12 @@ Environment Variables:
         args.displays
     ])
 
-    # Guide mode - run interactive setup if no config args provided and not building
+    # GUI mode - run persistent control panel if no config args provided and not building
     if not has_config_args and not args.build and not args.sc_only:
-        config = guided_setup_gui()
-        if config is None:
-            print("\nSetup cancelled by user.")
-            sys.exit(0)
-        audio_device = config['audio_device']
-        enable_keyboard = config['enable_keyboard']
-        enable_python_terminal = config['enable_python_terminal']
-        enable_osc_external = config['enable_osc_external']
-        displays = config['displays']
+        # Run the persistent GUI - it handles everything internally
+        guided_setup_gui()
+        # When GUI closes, we're done
+        sys.exit(0)
     else:
         # Use command line arguments (legacy support for old flags)
         audio_device = args.audio_device
@@ -1387,20 +1672,20 @@ Environment Variables:
         if args.displays:
             displays = [int(d.strip()) for d in args.displays.split(',')]
 
-    launcher = CarpetHotelLauncher(
-        audio_device=audio_device,
-        enable_keyboard=enable_keyboard,
-        enable_python_terminal=enable_python_terminal,
-        enable_osc_external=enable_osc_external,
-        displays=displays
-    )
+        launcher = CarpetHotelLauncher(
+            audio_device=audio_device,
+            enable_keyboard=enable_keyboard,
+            enable_python_terminal=enable_python_terminal,
+            enable_osc_external=enable_osc_external,
+            displays=displays
+        )
 
-    if args.build:
-        success = launcher.build_processing()
-        sys.exit(0 if success else 1)
-    else:
-        success = launcher.run(sc_only=args.sc_only)
-        sys.exit(0 if success else 1)
+        if args.build:
+            success = launcher.build_processing()
+            sys.exit(0 if success else 1)
+        else:
+            success = launcher.run(sc_only=args.sc_only)
+            sys.exit(0 if success else 1)
 
 if __name__ == '__main__':
     main()

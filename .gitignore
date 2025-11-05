@@ -246,3 +246,4 @@ tmp/
 temp/
 *.tmp
 media-generator/.github
+carpet_hotel/.carpet_hotel_config.json

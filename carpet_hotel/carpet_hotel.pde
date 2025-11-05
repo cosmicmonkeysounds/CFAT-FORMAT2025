@@ -17,10 +17,13 @@ boolean TEST_MODE = false;        // Keyboard input (1-9, arrows)
 boolean OSC_CONTROL_MODE = false; // OSC input from Python
 
 // OSC configuration
+// ARCHITECTURE: Python is the central OSC bus
+//   Processing ↔ Python ↔ SuperCollider
+//   Audio commands (scene/transition/volume) go through Python to SuperCollider
 OscP5 oscP5;
-NetAddress scAddress;             // SuperCollider
-NetAddress pythonAddress;         // Python controller
-int SC_PORT = 57120;              // SuperCollider default port
+NetAddress scAddress;             // SuperCollider (legacy reference, not used directly)
+NetAddress pythonAddress;         // Python controller - central OSC bus
+int SC_PORT = 57120;              // SuperCollider port (Python forwards to this)
 int PYTHON_SEND_PORT = 12001;     // Send to Python
 int PYTHON_RECV_PORT = 12000;     // Receive from Python
 
@@ -44,9 +47,11 @@ void setup() {
   scAddress = new NetAddress("127.0.0.1", SC_PORT);
   pythonAddress = new NetAddress("127.0.0.1", PYTHON_SEND_PORT);
   println("\nOSC initialized:");
-  println("  -> SuperCollider on port " + SC_PORT);
+  println("  ARCHITECTURE: Python is central OSC bus");
+  println("    Processing ↔ Python ↔ SuperCollider");
   println("  -> Python on port " + PYTHON_SEND_PORT);
   println("  <- Listening on port " + PYTHON_RECV_PORT);
+  println("  (Python forwards audio to SuperCollider on port " + SC_PORT + ")");
 
   // Initialize shared state
   sharedState = new SharedState();
@@ -198,8 +203,8 @@ void mouseWheel(MouseEvent event) {
 void sendVolumeOSC() {
   OscMessage msg = new OscMessage("/carpet/volume");
   msg.add(masterVolume);
-  oscP5.send(msg, scAddress);
-  println("[OSC-SEND] /carpet/volume " + masterVolume);
+  oscP5.send(msg, pythonAddress);  // Send to Python, which forwards to SuperCollider
+  println("[OSC-SEND] /carpet/volume " + masterVolume + " (via Python)");
 }
 
 // OSC event handler for messages from Python
@@ -429,8 +434,8 @@ class SharedState {
     msg.add(currentScene);                // Current scene number
     msg.add(DISPLAY_NUMBERS.length);      // Number of active floors
     msg.add(0);                           // Not animating
-    oscP5.send(msg, scAddress);
-    println("[OSC-SEND] /carpet/scene " + currentScene + " " + DISPLAY_NUMBERS.length + " 0");
+    oscP5.send(msg, pythonAddress);       // Send to Python, which forwards to SuperCollider
+    println("[OSC-SEND] /carpet/scene " + currentScene + " " + DISPLAY_NUMBERS.length + " 0 (via Python)");
   }
 
   void sendTransitionOSC() {
@@ -443,8 +448,8 @@ class SharedState {
     msg.add(fractionalProgress);          // Progress within current floor (0.0-1.0)
     msg.add(animationDirection);          // Direction: 1 = up, -1 = down
     msg.add(DISPLAY_NUMBERS.length);      // Number of screens
-    oscP5.send(msg, scAddress);
-    println("[OSC-SEND] /carpet/transition " + currentFloor + " " + fractionalProgress + " " + animationDirection + " " + DISPLAY_NUMBERS.length);
+    oscP5.send(msg, pythonAddress);       // Send to Python, which forwards to SuperCollider
+    println("[OSC-SEND] /carpet/transition " + currentFloor + " " + fractionalProgress + " " + animationDirection + " " + DISPLAY_NUMBERS.length + " (via Python)");
   }
 
   void startTransition(int newScene) {
