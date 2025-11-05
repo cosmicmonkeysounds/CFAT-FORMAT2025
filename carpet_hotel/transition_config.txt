@@ -1,0 +1,45 @@
+# CARPET HOTEL - Transition Configuration
+# Edit these values to customize the elevator transition effects
+
+# === ANIMATION SETTINGS ===
+# Speed of floor scrolling (higher = faster)
+animation_speed=0.1
+
+# === SHADER EFFECT INTENSITIES ===
+# All intensities are multiplied by the dynamic intensity curve (0.0 to 1.0)
+
+# Chromatic aberration - RGB channel separation
+# Higher values = more color separation (default: 8.0)
+chromatic_intensity=8.0
+
+# Motion blur - number of blur samples
+# More samples = smoother blur but slower (default: 3)
+motion_blur_samples=3
+
+# Motion blur distance multiplier
+# Higher values = more dramatic blur (default: 15.0)
+motion_blur_intensity=15.0
+
+# Bloom effect - bright glow overlay
+# Higher values = stronger glow (default: 80.0)
+bloom_intensity=80.0
+
+# === EFFECT CURVE ===
+# Maximum effect intensity at peak (0.0 to 1.0)
+# Effects ramp up to this value at 50% of transition (default: 0.8)
+max_effect_intensity=0.8
+
+# Effect threshold - minimum intensity before effects are applied
+# Lower = effects start earlier (default: 0.05)
+effect_threshold=0.05
+
+# === COLOR TINTING ===
+# RGB channel alpha values for chromatic aberration (0-255)
+chromatic_r_alpha=200
+chromatic_g_alpha=200
+chromatic_b_alpha=200
+
+# === MOTION BLUR SETTINGS ===
+# Alpha fade multiplier for motion blur samples
+# Higher divisor = more transparent blur (default: 2)
+motion_blur_alpha_divisor=2

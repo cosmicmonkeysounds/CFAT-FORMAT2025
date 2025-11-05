@@ -34,7 +34,8 @@ void setup() {
   println("\n=== CARPET HOTEL CONTROL ===");
   println("Windows launched: " + NUM_WINDOWS);
   println("Videos loaded: " + sharedState.videos.size());
-  println("\nTIP: Edit 'data/transition_config.txt' to customize transition effects");
+  println("\nTIP: Edit 'transition_config.txt' to customize transition effects");
+  println("(Config file is in the same folder as the .pde file)");
   println("\nCONTROLS:");
   println("1-9: Switch to scene");
   println("D: Toggle debug panel");
@@ -131,7 +132,7 @@ class TransitionConfig {
   int motionBlurAlphaDivisor = 2;
 
   void loadFromFile(PApplet parent) {
-    String[] lines = parent.loadStrings("transition_config.txt");
+    String[] lines = parent.loadStrings(parent.sketchPath("transition_config.txt"));
     if (lines == null) {
       println("Could not load transition_config.txt, using defaults");
       return;
@@ -410,6 +411,9 @@ class FloorWindow extends PApplet {
     // Determine which scene we're showing (current or animating to target)
     int displayScene = sharedState.currentScene;
 
+    // Enable clipping to prevent videos from rendering outside viewport
+    pushMatrix();
+
     if (sharedState.isAnimating) {
       // During animation, render both current and target videos
       renderAnimatedTransition();
@@ -418,6 +422,8 @@ class FloorWindow extends PApplet {
       int videoIdx = displayScene + windowIndex;
       renderVideo(videoIdx, 0, 0);
     }
+
+    popMatrix();
 
     // Debug panel (on top of everything)
     if (sharedState.showDebug) {
@@ -438,15 +444,27 @@ class FloorWindow extends PApplet {
     // When going DOWN (lower floor), floors should scroll UP on screen (positive direction)
     float offsetPixels = fractionalProgress * VIDEO_HEIGHT * (-sharedState.animationDirection);
 
-    // Current floor video
-    int currentVideoIdx = currentFloor + windowIndex;
-    renderVideoWithEffects(currentVideoIdx, 0, offsetPixels);
+    // Each window needs to render 2 videos during transition:
+    // 1. The video currently visible in this window
+    // 2. The video that's sliding in from off-screen
 
-    // Next floor video (in the direction of travel)
+    // Current video for this window
+    int currentVideoIdx = currentFloor + windowIndex;
+
+    // Next video that's sliding in (offset by screen height)
     int nextFloor = currentFloor + sharedState.animationDirection;
     int nextVideoIdx = nextFloor + windowIndex;
-    float nextOffset = sharedState.animationDirection > 0 ? -VIDEO_HEIGHT : VIDEO_HEIGHT;
-    renderVideoWithEffects(nextVideoIdx, 0, nextOffset + offsetPixels);
+
+    // Render both videos with proper offset
+    if (sharedState.animationDirection > 0) {
+      // Going UP: new floor slides in from BOTTOM
+      renderVideoWithEffects(currentVideoIdx, 0, offsetPixels);
+      renderVideoWithEffects(nextVideoIdx, 0, offsetPixels + VIDEO_HEIGHT);
+    } else {
+      // Going DOWN: new floor slides in from TOP
+      renderVideoWithEffects(currentVideoIdx, 0, offsetPixels);
+      renderVideoWithEffects(nextVideoIdx, 0, offsetPixels - VIDEO_HEIGHT);
+    }
   }
 
   void renderVideo(int videoIdx, float baseX, float baseY) {
