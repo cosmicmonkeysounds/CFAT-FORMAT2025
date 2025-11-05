@@ -34,10 +34,12 @@ void setup() {
   println("\n=== CARPET HOTEL CONTROL ===");
   println("Windows launched: " + NUM_WINDOWS);
   println("Videos loaded: " + sharedState.videos.size());
+  println("\nTIP: Edit 'data/transition_config.txt' to customize transition effects");
   println("\nCONTROLS:");
   println("1-9: Switch to scene");
   println("D: Toggle debug panel");
   println("F: Toggle fullscreen");
+  println("R: Reload config file");
   println("SPACE: Print info");
   println("ESC: Close all windows");
 }
@@ -94,6 +96,10 @@ void keyPressed() {
   } else if (key == 'd' || key == 'D') {
     sharedState.showDebug = !sharedState.showDebug;
     println("Debug panel: " + (sharedState.showDebug ? "ON" : "OFF"));
+  } else if (key == 'r' || key == 'R') {
+    println("\nReloading transition configuration...");
+    sharedState.config.loadFromFile(this);
+    println("Configuration reloaded!");
   }
 }
 
@@ -106,6 +112,96 @@ void exit() {
     sharedState.cleanup();
   }
   super.exit();
+}
+
+/**
+ * Transition configuration
+ */
+class TransitionConfig {
+  float animationSpeed = 0.1;
+  float chromaticIntensity = 8.0;
+  int motionBlurSamples = 3;
+  float motionBlurIntensity = 15.0;
+  float bloomIntensity = 80.0;
+  float maxEffectIntensity = 0.8;
+  float effectThreshold = 0.05;
+  int chromaticRAlpha = 200;
+  int chromaticGAlpha = 200;
+  int chromaticBAlpha = 200;
+  int motionBlurAlphaDivisor = 2;
+
+  void loadFromFile(PApplet parent) {
+    String[] lines = parent.loadStrings("transition_config.txt");
+    if (lines == null) {
+      println("Could not load transition_config.txt, using defaults");
+      return;
+    }
+
+    println("\nLoading transition configuration:");
+    for (String line : lines) {
+      line = line.trim();
+      if (line.length() == 0 || line.startsWith("#")) {
+        continue;
+      }
+
+      String[] parts = line.split("=");
+      if (parts.length != 2) continue;
+
+      String key = parts[0].trim();
+      String value = parts[1].trim();
+
+      try {
+        switch (key) {
+          case "animation_speed":
+            animationSpeed = Float.parseFloat(value);
+            println("  animation_speed = " + animationSpeed);
+            break;
+          case "chromatic_intensity":
+            chromaticIntensity = Float.parseFloat(value);
+            println("  chromatic_intensity = " + chromaticIntensity);
+            break;
+          case "motion_blur_samples":
+            motionBlurSamples = Integer.parseInt(value);
+            println("  motion_blur_samples = " + motionBlurSamples);
+            break;
+          case "motion_blur_intensity":
+            motionBlurIntensity = Float.parseFloat(value);
+            println("  motion_blur_intensity = " + motionBlurIntensity);
+            break;
+          case "bloom_intensity":
+            bloomIntensity = Float.parseFloat(value);
+            println("  bloom_intensity = " + bloomIntensity);
+            break;
+          case "max_effect_intensity":
+            maxEffectIntensity = Float.parseFloat(value);
+            println("  max_effect_intensity = " + maxEffectIntensity);
+            break;
+          case "effect_threshold":
+            effectThreshold = Float.parseFloat(value);
+            println("  effect_threshold = " + effectThreshold);
+            break;
+          case "chromatic_r_alpha":
+            chromaticRAlpha = Integer.parseInt(value);
+            println("  chromatic_r_alpha = " + chromaticRAlpha);
+            break;
+          case "chromatic_g_alpha":
+            chromaticGAlpha = Integer.parseInt(value);
+            println("  chromatic_g_alpha = " + chromaticGAlpha);
+            break;
+          case "chromatic_b_alpha":
+            chromaticBAlpha = Integer.parseInt(value);
+            println("  chromatic_b_alpha = " + chromaticBAlpha);
+            break;
+          case "motion_blur_alpha_divisor":
+            motionBlurAlphaDivisor = Integer.parseInt(value);
+            println("  motion_blur_alpha_divisor = " + motionBlurAlphaDivisor);
+            break;
+        }
+      } catch (Exception e) {
+        println("  Error parsing " + key + ": " + value);
+      }
+    }
+  }
 }
 
 /**
@@ -123,9 +219,11 @@ class SharedState {
   int startScene = 0;
   int targetScene = 0;
   float animationProgress = 0.0;  // 0.0 to total distance in floors
-  float animationSpeed = 0.1;     // Speed per frame
   int animationDirection = 0;     // 1 = up (to higher floor), -1 = down (to lower floor)
   float totalDistance = 0;        // Total floors to travel
+
+  // Configuration
+  TransitionConfig config;
 
   PApplet parent;
 
@@ -133,6 +231,10 @@ class SharedState {
     parent = p;
     videos = new ArrayList<Movie>();
     videoNames = new ArrayList<String>();
+
+    // Load configuration
+    config = new TransitionConfig();
+    config.loadFromFile(parent);
 
     // Find all carpet videos
     findCarpetVideos();
@@ -158,8 +260,8 @@ class SharedState {
 
   void update() {
     if (isAnimating) {
-      // Increment animation progress linearly
-      animationProgress += animationSpeed;
+      // Increment animation progress linearly using config speed
+      animationProgress += config.animationSpeed;
 
       // Check if animation is complete
       if (animationProgress >= totalDistance) {
@@ -205,7 +307,7 @@ class SharedState {
     // Peak at 50% of journey, return to 0 at start and end
     float normalizedProgress = animationProgress / totalDistance;
     // Sine wave that peaks at 0.5
-    return sin(normalizedProgress * PI) * 0.8; // Max intensity 0.8
+    return sin(normalizedProgress * PI) * config.maxEffectIntensity;
   }
 
   void ensureVideoLoaded(int index) {
@@ -397,29 +499,29 @@ class FloorWindow extends PApplet {
       // Get shader intensity (peaks at 50% of transition)
       float intensity = sharedState.getShaderIntensity();
 
-      if (intensity > 0.05) {
+      if (intensity > sharedState.config.effectThreshold) {
         // Apply shader effects during transition
         pushMatrix();
         translate(drawX, drawY);
 
         // Apply chromatic aberration by drawing RGB channels separately
-        tint(255, 0, 0, 200); // Red channel
-        float chromaticOffset = intensity * 8;
+        tint(255, 0, 0, sharedState.config.chromaticRAlpha); // Red channel
+        float chromaticOffset = intensity * sharedState.config.chromaticIntensity;
         image(video, -chromaticOffset, 0, drawWidth, drawHeight);
 
-        tint(0, 255, 0, 200); // Green channel
+        tint(0, 255, 0, sharedState.config.chromaticGAlpha); // Green channel
         image(video, 0, 0, drawWidth, drawHeight);
 
-        tint(0, 0, 255, 200); // Blue channel
+        tint(0, 0, 255, sharedState.config.chromaticBAlpha); // Blue channel
         image(video, chromaticOffset, 0, drawWidth, drawHeight);
 
         noTint();
 
         // Motion blur effect - draw multiple slightly offset copies
-        int blurSamples = 3;
-        float blurDirection = sharedState.animationDirection * intensity * 15;
+        int blurSamples = sharedState.config.motionBlurSamples;
+        float blurDirection = sharedState.animationDirection * intensity * sharedState.config.motionBlurIntensity;
         for (int i = 1; i <= blurSamples; i++) {
-          tint(255, 255 / (i * 2));
+          tint(255, 255 / (i * sharedState.config.motionBlurAlphaDivisor));
           image(video, 0, -blurDirection * i, drawWidth, drawHeight);
         }
 
@@ -427,7 +529,7 @@ class FloorWindow extends PApplet {
         popMatrix();
 
         // Bloom effect - draw a blurred bright overlay
-        tint(255, intensity * 80); // Subtle bloom
+        tint(255, intensity * sharedState.config.bloomIntensity); // Subtle bloom
         image(video, drawX, drawY, drawWidth, drawHeight);
         noTint();
       } else {
@@ -441,7 +543,7 @@ class FloorWindow extends PApplet {
     // Semi-transparent background
     fill(0, 200);
     noStroke();
-    rect(10, 10, 550, 420);
+    rect(10, 10, 600, 500);
 
     // Debug text
     fill(0, 255, 0);
@@ -490,8 +592,19 @@ class FloorWindow extends PApplet {
     text("Frame Count: " + frameCount, 20, y); y += lineHeight;
 
     y += 10;
+    fill(100, 255, 100);
+    text("=== CONFIG (press R to reload) ===", 20, y); y += lineHeight;
+    fill(255);
+    text("Speed: " + nf(sharedState.config.animationSpeed, 0, 2) +
+         " | Chromatic: " + nf(sharedState.config.chromaticIntensity, 0, 1), 20, y); y += lineHeight;
+    text("Blur samples: " + sharedState.config.motionBlurSamples +
+         " | Blur intensity: " + nf(sharedState.config.motionBlurIntensity, 0, 1), 20, y); y += lineHeight;
+    text("Bloom: " + nf(sharedState.config.bloomIntensity, 0, 1) +
+         " | Max FX: " + nf(sharedState.config.maxEffectIntensity, 0, 2), 20, y); y += lineHeight;
+
+    y += 5;
     fill(100);
-    text("Press D to hide debug | Press F to toggle fullscreen", 20, y);
+    text("Press D to hide | F for fullscreen | R to reload config", 20, y);
   }
 
   public void keyPressed() {
@@ -522,6 +635,10 @@ class FloorWindow extends PApplet {
         surface.setSize(1280, 720);
         println("Window " + windowIndex + " fullscreen OFF");
       }
+    } else if (key == 'r' || key == 'R') {
+      println("\nReloading transition configuration...");
+      sharedState.config.loadFromFile(sharedState.parent);
+      println("Configuration reloaded!");
     }
   }
 }
