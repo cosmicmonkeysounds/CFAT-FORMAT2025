@@ -1,7 +1,6 @@
 /**
  * CARPET HOTEL - Multi-Window Video Installation
- * Creates separate windows for each display, each showing one floor
- * Scene switching is synchronized across all windows
+ * Simplified version - each window shows one video
  */
 
 import processing.video.*;
@@ -10,8 +9,6 @@ import java.io.File;
 // Configuration
 int NUM_WINDOWS = 2;              // Number of separate windows
 int[] DISPLAY_NUMBERS = {1, 2};   // Which display for each window
-int VIDEO_WIDTH = 1920;
-int VIDEO_HEIGHT = 1080;
 
 // Shared state across all windows
 static SharedState sharedState;
@@ -19,6 +16,7 @@ static SharedState sharedState;
 void setup() {
   // Create tiny control window
   size(400, 300);
+  pixelDensity(1);
   surface.setTitle("Carpet Hotel - Control");
 
   // Initialize shared state
@@ -34,18 +32,14 @@ void setup() {
 
   println("\n=== CARPET HOTEL CONTROL ===");
   println("Windows launched: " + NUM_WINDOWS);
-  println("\nCONTROLS (use control window):");
-  println("1-9, 0: Switch to scene");
-  println("UP/DOWN: Navigate scenes");
-  println("D: Toggle debug panel");
-  println("SPACE: Print scene info");
+  println("Videos loaded: " + sharedState.videos.size());
+  println("\nCONTROLS:");
+  println("1-9: Switch to scene");
+  println("SPACE: Print info");
   println("ESC: Close all windows");
 }
 
 void draw() {
-  // Update shared state once per frame
-  sharedState.update();
-
   background(40);
   fill(255);
   textAlign(LEFT, TOP);
@@ -53,27 +47,35 @@ void draw() {
 
   int y = 20;
   text("=== CARPET HOTEL CONTROL ===", 20, y); y += 30;
-  text("Scene: " + sharedState.currentSceneIndex + " / " + (sharedState.numScenes - 1), 20, y); y += 25;
-  text("Windows: " + NUM_WINDOWS, 20, y); y += 25;
+  text("Videos: " + sharedState.videos.size(), 20, y); y += 25;
+  text("Current scene: " + sharedState.currentScene, 20, y); y += 25;
 
   y += 10;
   for (int i = 0; i < NUM_WINDOWS; i++) {
-    int floorIdx = sharedState.currentSceneIndex + i;
-    if (floorIdx < sharedState.floors.size()) {
-      Floor f = sharedState.floors.get(floorIdx);
-      text("Window " + i + " -> Floor " + floorIdx + ": " + f.name, 20, y);
+    int videoIdx = sharedState.currentScene + i;
+    if (videoIdx < sharedState.videos.size()) {
+      text("Window " + i + " -> Video " + videoIdx, 20, y);
       y += 20;
     }
   }
-
-  y += 20;
-  text("Press 1-9 to switch scenes", 20, y); y += 20;
-  text("Press UP/DOWN to navigate", 20, y); y += 20;
-  text("Press D to toggle debug", 20, y); y += 20;
 }
 
 void keyPressed() {
-  sharedState.handleKey(key, keyCode);
+  if (key >= '1' && key <= '9') {
+    int scene = key - '1';
+    if (scene >= 0 && scene < sharedState.getNumScenes()) {
+      sharedState.currentScene = scene;
+      println("Scene " + scene);
+    }
+  } else if (key == ' ') {
+    println("\n=== SCENE " + sharedState.currentScene + " ===");
+    for (int i = 0; i < NUM_WINDOWS; i++) {
+      int videoIdx = sharedState.currentScene + i;
+      if (videoIdx < sharedState.videos.size()) {
+        println("  Window " + i + " -> " + sharedState.videoNames.get(videoIdx));
+      }
+    }
+  }
 }
 
 void movieEvent(Movie m) {
@@ -91,193 +93,111 @@ void exit() {
  * Shared state synchronized across all windows
  */
 class SharedState {
-  ArrayList<Floor> floors;
-  ArrayList<String> videoFilenames;
-  int currentSceneIndex = 0;
-  int numScenes = 0;
-
-  float globalTime = 0;
-  float startTime;
-
-  boolean showDebugPanel = false;
-
-  // Animation
-  boolean isAnimating = false;
-  int targetSceneIndex = 0;
-  float cameraYOffset = 0;
-  float targetCameraY = 0;
-  float animationSpeed = 0.08;
+  ArrayList<Movie> videos;
+  ArrayList<String> videoNames;
+  int currentScene = 0;
 
   PApplet parent;
 
   void init(PApplet p) {
     parent = p;
-    startTime = p.millis() / 1000.0;
+    videos = new ArrayList<Movie>();
+    videoNames = new ArrayList<String>();
 
-    // Find videos
-    videoFilenames = new ArrayList<String>();
+    // Find all carpet videos
     findCarpetVideos();
 
-    // Create floors
-    floors = new ArrayList<Floor>();
-    if (videoFilenames.size() > 0) {
-      // Load first NUM_WINDOWS videos
-      for (int i = 0; i < videoFilenames.size(); i++) {
-        if (i < NUM_WINDOWS) {
-          Movie movie = new Movie(parent, videoFilenames.get(i));
-          floors.add(new Floor(videoFilenames.get(i), movie, i));
-        } else {
-          floors.add(new Floor(videoFilenames.get(i), null, i));
-        }
-      }
+    // Load first NUM_WINDOWS videos
+    for (int i = 0; i < min(NUM_WINDOWS, videoNames.size()); i++) {
+      Movie m = new Movie(parent, videoNames.get(i));
+      m.loop();
+      m.play();
+      videos.add(m);
+      println("Loaded: " + videoNames.get(i));
+    }
 
-      numScenes = max(1, floors.size() - NUM_WINDOWS + 1);
-      println("Loaded " + floors.size() + " floors, " + numScenes + " scenes");
-
-      // Start first videos
-      for (int i = 0; i < min(NUM_WINDOWS, floors.size()); i++) {
-        floors.get(i).startPlaying();
-      }
+    // Placeholder for unloaded videos
+    while (videos.size() < videoNames.size()) {
+      videos.add(null);
     }
   }
 
-  void update() {
-    globalTime = (parent.millis() / 1000.0) - startTime;
-
-    // Update animation
-    if (isAnimating) {
-      float diff = targetCameraY - cameraYOffset;
-      cameraYOffset += diff * animationSpeed;
-
-      if (abs(diff) < 0.5) {
-        cameraYOffset = targetCameraY;
-        isAnimating = false;
-        currentSceneIndex = targetSceneIndex;
-        println("Arrived at scene " + currentSceneIndex);
-      }
-    }
-
-    // Manage video playback
-    for (int i = 0; i < floors.size(); i++) {
-      int minVisible = max(0, currentSceneIndex - 1);
-      int maxVisible = min(floors.size() - 1, currentSceneIndex + NUM_WINDOWS);
-      boolean isVisible = (i >= minVisible && i <= maxVisible);
-
-      if (isVisible) {
-        if (floors.get(i).isLoaded && floors.get(i).video != null) {
-          floors.get(i).video.play();
-        }
-      } else {
-        if (floors.get(i).isLoaded && floors.get(i).video != null) {
-          floors.get(i).video.pause();
-        }
-      }
-    }
+  int getNumScenes() {
+    return max(1, videoNames.size() - NUM_WINDOWS + 1);
   }
 
-  void handleKey(char k, int kc) {
-    if (floors.size() == 0) return;
-
-    // Toggle debug
-    if (k == 'd' || k == 'D') {
-      showDebugPanel = !showDebugPanel;
-      println("Debug panel: " + (showDebugPanel ? "ON" : "OFF"));
-      return;
-    }
-
-    // Scene info
-    if (k == ' ') {
-      println("\n=== SCENE " + currentSceneIndex + " ===");
-      for (int i = 0; i < NUM_WINDOWS; i++) {
-        int floorIdx = currentSceneIndex + i;
-        if (floorIdx < floors.size()) {
-          println("  Window " + i + " -> Floor " + floorIdx + ": " + floors.get(floorIdx).name);
-        }
-      }
-      return;
-    }
-
-    // Navigate scenes
-    int newScene = -1;
-
-    if (k >= '1' && k <= '9') {
-      newScene = k - '1';
-    } else if (k == '0') {
-      newScene = 9;
-    } else if (k == CODED) {
-      if (kc == UP) {
-        newScene = currentSceneIndex + 1;
-        if (newScene >= numScenes) newScene = numScenes - 1;
-      } else if (kc == DOWN) {
-        newScene = currentSceneIndex - 1;
-        if (newScene < 0) newScene = 0;
-      }
-    }
-
-    if (newScene >= 0 && newScene < numScenes && newScene != currentSceneIndex) {
-      startSceneTransition(newScene);
-    }
-  }
-
-  void startSceneTransition(int newScene) {
-    println("Transitioning to scene " + newScene);
-    targetSceneIndex = newScene;
-
-    int sceneDiff = newScene - currentSceneIndex;
-    targetCameraY = cameraYOffset - (sceneDiff * VIDEO_HEIGHT);
-
-    isAnimating = true;
-
-    // Load videos for new scene
-    for (int i = 0; i < NUM_WINDOWS; i++) {
-      int floorIdx = newScene + i;
-      if (floorIdx < floors.size()) {
-        floors.get(floorIdx).ensureLoaded(parent);
-        floors.get(floorIdx).startPlaying();
-      }
+  void ensureVideoLoaded(int index) {
+    if (index >= 0 && index < videoNames.size() && videos.get(index) == null) {
+      println("Loading: " + videoNames.get(index));
+      Movie m = new Movie(parent, videoNames.get(index));
+      m.loop();
+      m.play();
+      videos.set(index, m);
     }
   }
 
   void findCarpetVideos() {
-    String[] extensions = {".mp4", ".mov", ".MP4", ".MOV"};
-    String[] patterns = {"carpet", "carpet_"};
+    println("\nSearching for videos in: " + parent.dataPath(""));
 
-    int videoIndex = 1;
-    boolean foundVideo = true;
+    File dataFolder = new File(parent.dataPath(""));
+    if (!dataFolder.exists() || !dataFolder.isDirectory()) {
+      println("ERROR: Data folder does not exist!");
+      return;
+    }
 
-    while (foundVideo) {
-      foundVideo = false;
+    String[] files = dataFolder.list();
+    if (files == null || files.length == 0) {
+      println("ERROR: Data folder is empty!");
+      return;
+    }
 
-      for (String pattern : patterns) {
-        for (String ext : extensions) {
-          String filename = pattern + videoIndex + ext;
-          File f = new File(parent.dataPath(filename));
-          if (f.exists()) {
-            videoFilenames.add(filename);
-            println("Found: " + filename);
-            foundVideo = true;
-            break;
-          }
-        }
-        if (foundVideo) break;
+    // Find all carpet videos
+    ArrayList<String> foundFiles = new ArrayList<String>();
+    for (String filename : files) {
+      String lower = filename.toLowerCase();
+      if ((lower.startsWith("carpet_") || lower.startsWith("carpet")) &&
+          (lower.endsWith(".mp4") || lower.endsWith(".mov"))) {
+        foundFiles.add(filename);
       }
+    }
 
-      videoIndex++;
-      if (videoIndex > 100) break;
+    // Sort by number
+    java.util.Collections.sort(foundFiles, new java.util.Comparator<String>() {
+      public int compare(String a, String b) {
+        int numA = extractNumber(a);
+        int numB = extractNumber(b);
+        return Integer.compare(numA, numB);
+      }
+    });
+
+    // Add to list
+    for (String filename : foundFiles) {
+      videoNames.add(filename);
+      println("Found: " + filename);
+    }
+  }
+
+  int extractNumber(String filename) {
+    String name = filename.replaceAll("\\.[^.]*$", "");
+    String numStr = name.replaceAll("[^0-9]", "");
+    try {
+      return Integer.parseInt(numStr);
+    } catch (Exception e) {
+      return 0;
     }
   }
 
   void cleanup() {
-    for (Floor f : floors) {
-      if (f.isLoaded && f.video != null) {
-        f.video.stop();
+    for (Movie m : videos) {
+      if (m != null) {
+        m.stop();
       }
     }
   }
 }
 
 /**
- * Individual floor window
+ * Individual floor window - just plays one video
  */
 class FloorWindow extends PApplet {
   int windowIndex;
@@ -287,7 +207,7 @@ class FloorWindow extends PApplet {
   }
 
   public void settings() {
-    fullScreen(P3D, DISPLAY_NUMBERS[windowIndex]);
+    fullScreen(P2D, DISPLAY_NUMBERS[windowIndex]);
     pixelDensity(1);
   }
 
@@ -299,207 +219,65 @@ class FloorWindow extends PApplet {
   public void draw() {
     background(0);
 
-    // Calculate which floor to show
-    int floorIdx = sharedState.currentSceneIndex + windowIndex;
+    // Calculate which video to show
+    int videoIdx = sharedState.currentScene + windowIndex;
 
-    if (floorIdx >= 0 && floorIdx < sharedState.floors.size()) {
-      Floor floor = sharedState.floors.get(floorIdx);
+    if (videoIdx >= 0 && videoIdx < sharedState.videoNames.size()) {
+      // Ensure video is loaded
+      sharedState.ensureVideoLoaded(videoIdx);
 
-      // Calculate viewport with letterboxing
-      float videoAspect = (float)VIDEO_WIDTH / (float)VIDEO_HEIGHT;
-      float screenAspect = (float)width / (float)height;
+      Movie video = sharedState.videos.get(videoIdx);
 
-      float viewportWidth, viewportHeight;
-
-      if (videoAspect > screenAspect) {
-        viewportWidth = width;
-        viewportHeight = width / videoAspect;
-      } else {
-        viewportHeight = height;
-        viewportWidth = height * videoAspect;
-      }
-
-      float scaleX = viewportWidth / VIDEO_WIDTH;
-      float scaleY = viewportHeight / VIDEO_HEIGHT;
-      float viewportX = (width - viewportWidth) / 2;
-      float viewportY = (height - viewportHeight) / 2;
-
-      pushMatrix();
-      translate(viewportX, viewportY);
-      scale(scaleX, scaleY);
-      translate(0, sharedState.cameraYOffset);
-
-      // Render floor
-      pushMatrix();
-      translate(0, -floorIdx * VIDEO_HEIGHT);
-      floor.display(sharedState.globalTime, sharedState.showDebugPanel, sharedState.cameraYOffset, sharedState.targetCameraY, sharedState.isAnimating, sharedState.targetSceneIndex, sharedState.floors.size(), sharedState.currentSceneIndex);
-      popMatrix();
-
-      // During animation, render adjacent floor
-      if (sharedState.isAnimating) {
-        int nextFloorIdx = floorIdx + (sharedState.targetSceneIndex > sharedState.currentSceneIndex ? 1 : -1);
-        if (nextFloorIdx >= 0 && nextFloorIdx < sharedState.floors.size()) {
-          Floor nextFloor = sharedState.floors.get(nextFloorIdx);
-          if (nextFloor.isLoaded) {
-            pushMatrix();
-            translate(0, -nextFloorIdx * VIDEO_HEIGHT);
-            nextFloor.display(sharedState.globalTime, false, 0, 0, false, 0, 0, 0);
-            popMatrix();
-          }
+      if (video != null) {
+        // Read frame
+        if (video.available()) {
+          video.read();
         }
+
+        // Draw video
+        if (video.width > 0 && video.height > 0) {
+          image(video, 0, 0, width, height);
+
+          // Debug indicator
+          fill(0, 255, 0);
+          noStroke();
+          rect(10, 10, 50, 50);
+          fill(255);
+          text("Window " + windowIndex + " | Video " + videoIdx, 70, 35);
+        } else {
+          // Waiting for video
+          fill(255);
+          textAlign(CENTER, CENTER);
+          text("Loading video...", width/2, height/2);
+        }
+      } else {
+        // Video not loaded
+        fill(255);
+        textAlign(CENTER, CENTER);
+        text("Video " + videoIdx + " not loaded", width/2, height/2);
       }
-
-      popMatrix();
-    }
-  }
-}
-
-/**
- * Floor class
- */
-class Floor {
-  String name;
-  Movie video;
-  float duration;
-  boolean isLoaded;
-  int floorIndex;
-  float yPosition;
-
-  Floor(String name, Movie video, int index) {
-    this.name = name;
-    this.video = video;
-    this.isLoaded = (video != null);
-    this.floorIndex = index;
-    this.yPosition = -index * VIDEO_HEIGHT;
-
-    if (this.isLoaded) {
-      this.duration = this.video.duration();
-      if (this.duration <= 0) {
-        this.duration = 10.0;
-        println("WARNING: Could not get duration for " + name + ", using default");
-      }
-      this.video.loop();
     } else {
-      this.duration = 10.0;
-    }
-  }
-
-  void ensureLoaded(PApplet parent) {
-    if (!isLoaded) {
-      println("Loading video: " + name);
-      this.video = new Movie(parent, name);
-      this.duration = this.video.duration();
-      if (this.duration <= 0) {
-        this.duration = 10.0;
-      }
-      this.video.loop();
-      this.isLoaded = true;
-    }
-  }
-
-  void startPlaying() {
-    if (isLoaded && video != null) {
-      video.play();
-    }
-  }
-
-  void stopPlaying() {
-    if (isLoaded && video != null) {
-      video.pause();
-    }
-  }
-
-  float getLoopTime(float globalTime) {
-    return globalTime % duration;
-  }
-
-  void display(float globalTime, boolean showDebug, float cameraY, float targetY, boolean animating, int targetScene, int totalFloors, int currentScene) {
-    if (!isLoaded || video == null) {
-      fill(50);
-      rectMode(CORNER);
-      rect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+      // No video for this window
       fill(255);
       textAlign(CENTER, CENTER);
-      textSize(20);
-      text("Floor " + floorIndex + " - Not loaded", VIDEO_WIDTH/2, VIDEO_HEIGHT/2);
-      return;
+      text("No video", width/2, height/2);
     }
+  }
 
-    if (video.available()) {
-      video.read();
-    }
-
-    if (video.width > 0 && video.height > 0) {
-      float loopTime = getLoopTime(globalTime);
-
-      // Draw video
-      imageMode(CORNER);
-      float videoAspect = (float)video.width / (float)video.height;
-      float sceneAspect = (float)VIDEO_WIDTH / (float)VIDEO_HEIGHT;
-
-      float drawWidth, drawHeight;
-      float drawX = 0, drawY = 0;
-
-      if (videoAspect > sceneAspect) {
-        drawHeight = VIDEO_HEIGHT;
-        drawWidth = VIDEO_HEIGHT * videoAspect;
-        drawX = (VIDEO_WIDTH - drawWidth) / 2;
-      } else {
-        drawWidth = VIDEO_WIDTH;
-        drawHeight = VIDEO_WIDTH / videoAspect;
-        drawY = (VIDEO_HEIGHT - drawHeight) / 2;
+  public void keyPressed() {
+    if (key >= '1' && key <= '9') {
+      int scene = key - '1';
+      if (scene >= 0 && scene < sharedState.getNumScenes()) {
+        sharedState.currentScene = scene;
+        println("Scene " + scene);
       }
-
-      image(video, drawX, drawY, drawWidth, drawHeight);
-
-      // Debug overlay
-      if (showDebug) {
-        int playingCount = 0;
-        int loadedCount = 0;
-        for (Floor f : sharedState.floors) {
-          if (f.isLoaded) {
-            loadedCount++;
-            try {
-              if (f.video != null && f.video.isPlaying()) playingCount++;
-            } catch (Exception e) {
-              if (f.video != null && f.video.time() > 0) playingCount++;
-            }
-          }
+    } else if (key == ' ') {
+      println("\n=== SCENE " + sharedState.currentScene + " ===");
+      for (int i = 0; i < NUM_WINDOWS; i++) {
+        int vIdx = sharedState.currentScene + i;
+        if (vIdx < sharedState.videoNames.size()) {
+          println("  Window " + i + " -> " + sharedState.videoNames.get(vIdx));
         }
-
-        fill(0, 200);
-        noStroke();
-        rect(10, 10, 450, 280);
-
-        fill(255);
-        textAlign(LEFT, TOP);
-        textSize(14);
-        int y = 15;
-        int lineHeight = 20;
-
-        text("=== CARPET HOTEL DEBUG ===", 20, y); y += lineHeight;
-        text("Scene: " + currentScene + " / " + (sharedState.numScenes - 1), 20, y); y += lineHeight;
-        text("This floor: " + floorIndex + " (" + name + ")", 20, y); y += lineHeight;
-        text("Loop: " + nf(loopTime, 0, 2) + " / " + nf(duration, 0, 2) + "s", 20, y); y += lineHeight;
-        text("Global Time: " + nf(globalTime, 0, 2) + "s", 20, y); y += lineHeight;
-        y += 5;
-        text("Camera Y: " + nf(cameraY, 0, 1), 20, y); y += lineHeight;
-        text("Target Y: " + nf(targetY, 0, 1), 20, y); y += lineHeight;
-        text("Animating: " + animating, 20, y); y += lineHeight;
-        if (animating) {
-          text("Target Scene: " + targetScene, 20, y); y += lineHeight;
-        }
-        y += 5;
-        text("Videos Playing: " + playingCount + " / " + loadedCount, 20, y); y += lineHeight;
-        text("This Video: " + (isLoaded ? "loaded" : "not loaded"), 20, y); y += lineHeight;
-        if (isLoaded && video != null) {
-          try {
-            text("Playing: " + video.isPlaying(), 20, y); y += lineHeight;
-          } catch (Exception e) {
-            text("Playing: " + (video.time() > 0), 20, y); y += lineHeight;
-          }
-        }
-        text("Frame Rate: " + nf(frameRate, 0, 1) + " fps", 20, y);
       }
     }
   }
