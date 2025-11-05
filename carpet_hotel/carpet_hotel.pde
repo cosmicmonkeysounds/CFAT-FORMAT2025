@@ -9,54 +9,100 @@ import netP5.*;
 import java.io.File;
 
 // Configuration
-int NUM_WINDOWS = 2;              // Number of separate windows
-int[] DISPLAY_NUMBERS = {1, 2};   // Which display for each window
+int[] DISPLAY_NUMBERS = {1, 2};   // Which display for each window (settable via CLI)
 int VIDEO_HEIGHT = 1080;          // Standard video height for animation
 
-// OSC configuration for audio
+// Input modes (settable via CLI)
+boolean TEST_MODE = false;        // Keyboard input (1-9, arrows)
+boolean OSC_CONTROL_MODE = false; // OSC input from Python
+
+// OSC configuration
 OscP5 oscP5;
-NetAddress scAddress;
+NetAddress scAddress;             // SuperCollider
+NetAddress pythonAddress;         // Python controller
 int SC_PORT = 57120;              // SuperCollider default port
+int PYTHON_SEND_PORT = 12001;     // Send to Python
+int PYTHON_RECV_PORT = 12000;     // Receive from Python
+
+// Volume control
+float masterVolume = 0.5;         // Start at 50%
 
 // Shared state across all windows
 static SharedState sharedState;
 
 void setup() {
+  // Parse command line arguments
+  parseArgs();
+
   // Create tiny control window
   size(400, 300);
   pixelDensity(1);
   surface.setTitle("Carpet Hotel - Control");
 
-  // Initialize OSC for SuperCollider communication
-  oscP5 = new OscP5(this, 12000); // Listen on port 12000
+  // Initialize OSC
+  oscP5 = new OscP5(this, PYTHON_RECV_PORT);
   scAddress = new NetAddress("127.0.0.1", SC_PORT);
-  println("\nOSC initialized - sending to SuperCollider on port " + SC_PORT);
+  pythonAddress = new NetAddress("127.0.0.1", PYTHON_SEND_PORT);
+  println("\nOSC initialized:");
+  println("  -> SuperCollider on port " + SC_PORT);
+  println("  -> Python on port " + PYTHON_SEND_PORT);
+  println("  <- Listening on port " + PYTHON_RECV_PORT);
 
   // Initialize shared state
   sharedState = new SharedState();
   sharedState.init(this);
 
   // Launch separate windows for each display
-  for (int i = 0; i < NUM_WINDOWS; i++) {
+  for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
     String[] args = {"FloorWindow_" + i};
     FloorWindow window = new FloorWindow(i);
     PApplet.runSketch(args, window);
   }
 
   println("\n=== CARPET HOTEL CONTROL ===");
-  println("Windows launched: " + NUM_WINDOWS);
+  println("Windows: " + DISPLAY_NUMBERS.length);
+  println("Displays: " + java.util.Arrays.toString(DISPLAY_NUMBERS));
   println("Floors loaded: " + sharedState.floors.size());
   println("Videos: " + sharedState.videoNames.size());
   println("Audio: " + sharedState.audioNames.size() + " (handled by SuperCollider)");
+  println("Volume: " + int(masterVolume * 100) + "%");
+  println("\nInput modes:");
+  println("  Test mode (keyboard): " + (TEST_MODE ? "ENABLED" : "disabled"));
+  println("  OSC control (Python): " + (OSC_CONTROL_MODE ? "ENABLED" : "disabled"));
   println("\nTIP: Edit 'transition_config.txt' to customize transition effects");
-  println("(Config file is in the same folder as the .pde file)");
   println("\nCONTROLS:");
-  println("1-9: Switch to scene");
-  println("D: Toggle debug panel");
-  println("F: Toggle fullscreen");
-  println("R: Reload config file");
-  println("SPACE: Print info");
-  println("ESC: Close all windows");
+  if (TEST_MODE) {
+    println("  1-9: Switch to scene");
+    println("  UP/DOWN: Next/previous scene");
+    println("  Mouse wheel: Volume");
+  }
+  println("  D: Toggle debug panel");
+  println("  F: Toggle fullscreen");
+  println("  R: Reload config file");
+  println("  SPACE: Print info");
+  println("  ESC: Close all windows");
+
+  // Send initial volume to SuperCollider
+  sendVolumeOSC();
+}
+
+void parseArgs() {
+  // Parse command line arguments
+  // Format: --test-mode --osc-control --displays=1,2,3
+  for (String arg : args) {
+    if (arg.equals("--test-mode")) {
+      TEST_MODE = true;
+    } else if (arg.equals("--osc-control")) {
+      OSC_CONTROL_MODE = true;
+    } else if (arg.startsWith("--displays=")) {
+      String displaysStr = arg.substring("--displays=".length());
+      String[] parts = displaysStr.split(",");
+      DISPLAY_NUMBERS = new int[parts.length];
+      for (int i = 0; i < parts.length; i++) {
+        DISPLAY_NUMBERS[i] = Integer.parseInt(parts[i].trim());
+      }
+    }
+  }
 }
 
 void draw() {
@@ -85,7 +131,7 @@ void draw() {
 
   y += 10;
   text("Current windows:", 20, y); y += 20;
-  for (int i = 0; i < NUM_WINDOWS; i++) {
+  for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
     int videoIdx = sharedState.currentScene + i;
     if (videoIdx < sharedState.videoNames.size()) {
       String filename = sharedState.videoNames.get(videoIdx);
@@ -96,14 +142,34 @@ void draw() {
 }
 
 void keyPressed() {
-  if (key >= '1' && key <= '9') {
-    int scene = key - '1';
-    if (scene >= 0 && scene < sharedState.getNumScenes()) {
-      sharedState.startTransition(scene);
+  // Test mode keyboard controls
+  if (TEST_MODE) {
+    if (key >= '1' && key <= '9') {
+      int scene = key - '1';
+      if (scene >= 0 && scene < sharedState.getNumScenes()) {
+        sharedState.startTransition(scene);
+      }
+    } else if (key == CODED) {
+      if (keyCode == UP) {
+        // Next scene
+        int nextScene = sharedState.currentScene + 1;
+        if (nextScene < sharedState.getNumScenes()) {
+          sharedState.startTransition(nextScene);
+        }
+      } else if (keyCode == DOWN) {
+        // Previous scene
+        int prevScene = sharedState.currentScene - 1;
+        if (prevScene >= 0) {
+          sharedState.startTransition(prevScene);
+        }
+      }
     }
-  } else if (key == ' ') {
+  }
+
+  // Global controls (always available)
+  if (key == ' ') {
     println("\n=== SCENE " + sharedState.currentScene + " ===");
-    for (int i = 0; i < NUM_WINDOWS; i++) {
+    for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
       int videoIdx = sharedState.currentScene + i;
       if (videoIdx < sharedState.videos.size()) {
         println("  Window " + i + " -> " + sharedState.videoNames.get(videoIdx));
@@ -116,6 +182,51 @@ void keyPressed() {
     println("\nReloading transition configuration...");
     sharedState.config.loadFromFile(this);
     println("Configuration reloaded!");
+  }
+}
+
+void mouseWheel(MouseEvent event) {
+  if (TEST_MODE) {
+    // Adjust volume with mouse wheel
+    float delta = event.getCount() * -0.05; // Negative for natural scrolling
+    masterVolume = constrain(masterVolume + delta, 0.0, 1.0);
+    println("Volume: " + int(masterVolume * 100) + "%");
+    sendVolumeOSC();
+  }
+}
+
+void sendVolumeOSC() {
+  OscMessage msg = new OscMessage("/carpet/volume");
+  msg.add(masterVolume);
+  oscP5.send(msg, scAddress);
+  println("[OSC-SEND] /carpet/volume " + masterVolume);
+}
+
+// OSC event handler for messages from Python
+void oscEvent(OscMessage msg) {
+  if (!OSC_CONTROL_MODE) return;
+
+  // Handle scene transition requests from Python
+  if (msg.checkAddrPattern("/carpet/goto")) {
+    int targetScene = msg.get(0).intValue();
+    if (targetScene >= 0 && targetScene < sharedState.getNumScenes()) {
+      println("[OSC-RECV] Scene request: " + targetScene);
+      sharedState.startTransition(targetScene);
+
+      // Send acknowledgment to Python
+      OscMessage reply = new OscMessage("/carpet/state");
+      reply.add("transition_started");
+      reply.add(sharedState.currentScene);
+      reply.add(targetScene);
+      oscP5.send(reply, pythonAddress);
+      println("[OSC-SEND] State: transition_started " + sharedState.currentScene + " -> " + targetScene);
+    } else {
+      println("[OSC-RECV] Invalid scene request: " + targetScene);
+      OscMessage reply = new OscMessage("/carpet/state");
+      reply.add("error");
+      reply.add("Invalid scene: " + targetScene);
+      oscP5.send(reply, pythonAddress);
+    }
   }
 }
 
@@ -262,8 +373,8 @@ class SharedState {
     // Find all carpet videos and audio
     findCarpetMedia();
 
-    // Load first NUM_WINDOWS floors
-    for (int i = 0; i < min(NUM_WINDOWS, videoNames.size()); i++) {
+    // Load first DISPLAY_NUMBERS.length floors
+    for (int i = 0; i < min(DISPLAY_NUMBERS.length, videoNames.size()); i++) {
       String videoFile = videoNames.get(i);
       String audioFile = i < audioNames.size() ? audioNames.get(i) : null;
       Floor floor = new Floor(parent, videoFile, audioFile, i);
@@ -280,7 +391,7 @@ class SharedState {
   }
 
   int getNumScenes() {
-    return max(1, videoNames.size() - NUM_WINDOWS + 1);
+    return max(1, videoNames.size() - DISPLAY_NUMBERS.length + 1);
   }
 
   void update() {
@@ -294,6 +405,14 @@ class SharedState {
         isAnimating = false;
         currentScene = targetScene;
         println("Arrived at scene " + currentScene);
+
+        // Notify Python if in OSC control mode
+        if (OSC_CONTROL_MODE) {
+          OscMessage reply = new OscMessage("/carpet/state");
+          reply.add("entering_scene");
+          reply.add(currentScene);
+          oscP5.send(reply, pythonAddress);
+        }
       }
 
       // Send transition state to SuperCollider
@@ -307,11 +426,11 @@ class SharedState {
   void sendSceneOSC() {
     // Send current scene and number of active floors
     OscMessage msg = new OscMessage("/carpet/scene");
-    msg.add(currentScene);           // Current scene number
-    msg.add(NUM_WINDOWS);            // Number of active floors
-    msg.add(0);                      // Not animating
+    msg.add(currentScene);                // Current scene number
+    msg.add(DISPLAY_NUMBERS.length);      // Number of active floors
+    msg.add(0);                           // Not animating
     oscP5.send(msg, scAddress);
-    println("[OSC-SEND] /carpet/scene " + currentScene + " " + NUM_WINDOWS + " 0");
+    println("[OSC-SEND] /carpet/scene " + currentScene + " " + DISPLAY_NUMBERS.length + " 0");
   }
 
   void sendTransitionOSC() {
@@ -320,12 +439,12 @@ class SharedState {
     float fractionalProgress = animationProgress - floor(animationProgress);
 
     OscMessage msg = new OscMessage("/carpet/transition");
-    msg.add(currentFloor);           // Current floor during transition
-    msg.add(fractionalProgress);     // Progress within current floor (0.0-1.0)
-    msg.add(animationDirection);     // Direction: 1 = up, -1 = down
-    msg.add(NUM_WINDOWS);            // Number of screens
+    msg.add(currentFloor);                // Current floor during transition
+    msg.add(fractionalProgress);          // Progress within current floor (0.0-1.0)
+    msg.add(animationDirection);          // Direction: 1 = up, -1 = down
+    msg.add(DISPLAY_NUMBERS.length);      // Number of screens
     oscP5.send(msg, scAddress);
-    println("[OSC-SEND] /carpet/transition " + currentFloor + " " + fractionalProgress + " " + animationDirection + " " + NUM_WINDOWS);
+    println("[OSC-SEND] /carpet/transition " + currentFloor + " " + fractionalProgress + " " + animationDirection + " " + DISPLAY_NUMBERS.length);
   }
 
   void startTransition(int newScene) {
@@ -343,11 +462,20 @@ class SharedState {
 
     println("Will scroll through " + totalDistance + " floor(s)");
 
+    // Notify Python if in OSC control mode
+    if (OSC_CONTROL_MODE) {
+      OscMessage reply = new OscMessage("/carpet/state");
+      reply.add("entering_transition");
+      reply.add(currentScene);
+      reply.add(newScene);
+      oscP5.send(reply, pythonAddress);
+    }
+
     // Preload videos along the path
     int minScene = min(currentScene, targetScene);
     int maxScene = max(currentScene, targetScene);
     for (int scene = minScene; scene <= maxScene; scene++) {
-      for (int i = 0; i < NUM_WINDOWS; i++) {
+      for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
         int videoIdx = scene + i;
         if (videoIdx >= 0 && videoIdx < videoNames.size()) {
           ensureVideoLoaded(videoIdx);
@@ -755,7 +883,7 @@ class FloorWindow extends PApplet {
       }
     } else if (key == ' ') {
       println("\n=== SCENE " + sharedState.currentScene + " ===");
-      for (int i = 0; i < NUM_WINDOWS; i++) {
+      for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
         int vIdx = sharedState.currentScene + i;
         if (vIdx < sharedState.videoNames.size()) {
           println("  Window " + i + " -> " + sharedState.videoNames.get(vIdx));
