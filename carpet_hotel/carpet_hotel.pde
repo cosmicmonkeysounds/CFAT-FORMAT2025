@@ -9,6 +9,7 @@ import java.io.File;
 // Configuration
 int NUM_WINDOWS = 2;              // Number of separate windows
 int[] DISPLAY_NUMBERS = {1, 2};   // Which display for each window
+int VIDEO_HEIGHT = 1080;          // Standard video height for animation
 
 // Shared state across all windows
 static SharedState sharedState;
@@ -42,6 +43,9 @@ void setup() {
 }
 
 void draw() {
+  // Update animation state
+  sharedState.update();
+
   background(40);
   fill(255);
   textAlign(LEFT, TOP);
@@ -52,6 +56,9 @@ void draw() {
   text("Videos: " + sharedState.videos.size(), 20, y); y += 25;
   text("Scenes: " + sharedState.getNumScenes(), 20, y); y += 25;
   text("Current scene: " + sharedState.currentScene, 20, y); y += 25;
+  if (sharedState.isAnimating) {
+    text("Animating to scene: " + sharedState.targetScene, 20, y); y += 25;
+  }
   text("Debug: " + (sharedState.showDebug ? "ON" : "OFF"), 20, y); y += 25;
   text("Fullscreen: " + (sharedState.isFullscreen ? "ON" : "OFF"), 20, y); y += 25;
 
@@ -71,8 +78,7 @@ void keyPressed() {
   if (key >= '1' && key <= '9') {
     int scene = key - '1';
     if (scene >= 0 && scene < sharedState.getNumScenes()) {
-      sharedState.currentScene = scene;
-      println("Scene " + scene);
+      sharedState.startTransition(scene);
     }
   } else if (key == ' ') {
     println("\n=== SCENE " + sharedState.currentScene + " ===");
@@ -109,6 +115,13 @@ class SharedState {
   boolean showDebug = true;
   boolean isFullscreen = true;
 
+  // Animation state
+  boolean isAnimating = false;
+  int targetScene = 0;
+  float animationProgress = 0.0;  // 0.0 to 1.0
+  float animationSpeed = 0.05;    // Easing speed
+  int animationDirection = 0;     // 1 = up (to higher floor), -1 = down (to lower floor)
+
   PApplet parent;
 
   void init(PApplet p) {
@@ -136,6 +149,39 @@ class SharedState {
 
   int getNumScenes() {
     return max(1, videoNames.size() - NUM_WINDOWS + 1);
+  }
+
+  void update() {
+    if (isAnimating) {
+      // Ease animation progress
+      animationProgress += (1.0 - animationProgress) * animationSpeed;
+
+      // Check if animation is complete
+      if (animationProgress > 0.98) {
+        animationProgress = 1.0;
+        isAnimating = false;
+        currentScene = targetScene;
+        println("Arrived at scene " + currentScene);
+      }
+    }
+  }
+
+  void startTransition(int newScene) {
+    if (newScene == currentScene || isAnimating) {
+      return; // Already there or currently animating
+    }
+
+    println("Starting transition from scene " + currentScene + " to scene " + newScene);
+    targetScene = newScene;
+    animationDirection = (newScene > currentScene) ? 1 : -1;
+    animationProgress = 0.0;
+    isAnimating = true;
+
+    // Preload videos for target scene
+    for (int i = 0; i < NUM_WINDOWS; i++) {
+      int videoIdx = targetScene + i;
+      ensureVideoLoaded(videoIdx);
+    }
   }
 
   void ensureVideoLoaded(int index) {
@@ -235,67 +281,87 @@ class FloorWindow extends PApplet {
   public void draw() {
     background(0);
 
-    // Calculate which video to show
-    int videoIdx = sharedState.currentScene + windowIndex;
+    // Determine which scene we're showing (current or animating to target)
+    int displayScene = sharedState.currentScene;
 
-    if (videoIdx >= 0 && videoIdx < sharedState.videoNames.size()) {
-      // Ensure video is loaded
-      sharedState.ensureVideoLoaded(videoIdx);
-
-      Movie video = sharedState.videos.get(videoIdx);
-
-      if (video != null) {
-        // Read frame
-        if (video.available()) {
-          video.read();
-        }
-
-        // Draw video
-        if (video.width > 0 && video.height > 0) {
-          // Calculate letterboxing to maintain aspect ratio
-          float videoAspect = (float)video.width / (float)video.height;
-          float screenAspect = (float)width / (float)height;
-
-          float drawWidth, drawHeight, drawX, drawY;
-
-          if (videoAspect > screenAspect) {
-            // Video is wider - fit to width
-            drawWidth = width;
-            drawHeight = width / videoAspect;
-            drawX = 0;
-            drawY = (height - drawHeight) / 2;
-          } else {
-            // Video is taller - fit to height
-            drawHeight = height;
-            drawWidth = height * videoAspect;
-            drawX = (width - drawWidth) / 2;
-            drawY = 0;
-          }
-
-          // Draw video centered with letterboxing
-          image(video, drawX, drawY, drawWidth, drawHeight);
-
-          // Advanced debug panel
-          if (sharedState.showDebug) {
-            drawDebugPanel(video, videoIdx);
-          }
-        } else {
-          // Waiting for video
-          fill(255);
-          textAlign(CENTER, CENTER);
-          text("Loading video...", width/2, height/2);
-        }
-      } else {
-        // Video not loaded
-        fill(255);
-        textAlign(CENTER, CENTER);
-        text("Video " + videoIdx + " not loaded", width/2, height/2);
-      }
+    if (sharedState.isAnimating) {
+      // During animation, render both current and target videos
+      renderAnimatedTransition();
     } else {
-      // No video for this window
-      fill(255);
-      textAlign(CENTER, CENTER);
-      text("No video", width/2, height/2);
+      // Normal rendering - just show current video
+      int videoIdx = displayScene + windowIndex;
+      renderVideo(videoIdx, 0, 0);
+    }
+
+    // Debug panel (on top of everything)
+    if (sharedState.showDebug) {
+      int videoIdx = displayScene + windowIndex;
+      if (videoIdx >= 0 && videoIdx < sharedState.videos.size() && sharedState.videos.get(videoIdx) != null) {
+        drawDebugPanel(sharedState.videos.get(videoIdx), videoIdx);
+      }
+    }
+  }
+
+  void renderAnimatedTransition() {
+    // Calculate vertical offset based on animation progress
+    // animationDirection: 1 = moving up (to higher floor), -1 = moving down (to lower floor)
+    float offsetPixels = sharedState.animationProgress * VIDEO_HEIGHT * sharedState.animationDirection;
+
+    // Render current scene videos
+    int currentVideoIdx = sharedState.currentScene + windowIndex;
+    renderVideo(currentVideoIdx, 0, -offsetPixels);
+
+    // Render target scene videos
+    int targetVideoIdx = sharedState.targetScene + windowIndex;
+    float targetOffset = sharedState.animationDirection > 0 ? VIDEO_HEIGHT : -VIDEO_HEIGHT;
+    renderVideo(targetVideoIdx, 0, targetOffset - offsetPixels);
+  }
+
+  void renderVideo(int videoIdx, float baseX, float baseY) {
+    if (videoIdx < 0 || videoIdx >= sharedState.videoNames.size()) {
+      return; // Out of bounds
+    }
+
+    // Ensure video is loaded
+    sharedState.ensureVideoLoaded(videoIdx);
+    Movie video = sharedState.videos.get(videoIdx);
+
+    if (video == null) {
+      return; // Not loaded yet
+    }
+
+    // Read frame
+    if (video.available()) {
+      video.read();
+    }
+
+    // Draw video
+    if (video.width > 0 && video.height > 0) {
+      // Calculate letterboxing to maintain aspect ratio
+      float videoAspect = (float)video.width / (float)video.height;
+      float screenAspect = (float)width / (float)height;
+
+      float drawWidth, drawHeight, drawX, drawY;
+
+      if (videoAspect > screenAspect) {
+        // Video is wider - fit to width
+        drawWidth = width;
+        drawHeight = width / videoAspect;
+        drawX = 0;
+        drawY = (height - drawHeight) / 2;
+      } else {
+        // Video is taller - fit to height
+        drawHeight = height;
+        drawWidth = height * videoAspect;
+        drawX = (width - drawWidth) / 2;
+        drawY = 0;
+      }
+
+      // Apply animation offset
+      drawY += baseY;
+
+      // Draw video centered with letterboxing
+      image(video, drawX, drawY, drawWidth, drawHeight);
     }
   }
 
@@ -303,7 +369,7 @@ class FloorWindow extends PApplet {
     // Semi-transparent background
     fill(0, 200);
     noStroke();
-    rect(10, 10, 450, 300);
+    rect(10, 10, 500, 350);
 
     // Debug text
     fill(0, 255, 0);
@@ -321,6 +387,10 @@ class FloorWindow extends PApplet {
 
     y += 5;
     text("Scene: " + sharedState.currentScene + " / " + (sharedState.getNumScenes() - 1), 20, y); y += lineHeight;
+    if (sharedState.isAnimating) {
+      text("Animating to: " + sharedState.targetScene + " (" + nf(sharedState.animationProgress * 100, 0, 1) + "%)", 20, y); y += lineHeight;
+      text("Direction: " + (sharedState.animationDirection > 0 ? "UP (higher floor)" : "DOWN (lower floor)"), 20, y); y += lineHeight;
+    }
     text("Video Index: " + videoIdx + " / " + (sharedState.videoNames.size() - 1), 20, y); y += lineHeight;
     text("Video File: " + sharedState.videoNames.get(videoIdx), 20, y); y += lineHeight;
 
@@ -353,8 +423,7 @@ class FloorWindow extends PApplet {
     if (key >= '1' && key <= '9') {
       int scene = key - '1';
       if (scene >= 0 && scene < sharedState.getNumScenes()) {
-        sharedState.currentScene = scene;
-        println("Scene " + scene);
+        sharedState.startTransition(scene);
       }
     } else if (key == ' ') {
       println("\n=== SCENE " + sharedState.currentScene + " ===");
