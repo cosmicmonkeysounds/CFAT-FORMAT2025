@@ -57,7 +57,10 @@ void draw() {
   text("Scenes: " + sharedState.getNumScenes(), 20, y); y += 25;
   text("Current scene: " + sharedState.currentScene, 20, y); y += 25;
   if (sharedState.isAnimating) {
-    text("Animating to scene: " + sharedState.targetScene, 20, y); y += 25;
+    float pct = (sharedState.animationProgress / sharedState.totalDistance) * 100;
+    text("Animating: " + sharedState.startScene + " -> " + sharedState.targetScene, 20, y); y += 20;
+    text("Progress: " + nf(pct, 0, 1) + "% (" + nf(sharedState.animationProgress, 0, 1) + "/" + sharedState.totalDistance + " floors)", 20, y); y += 20;
+    text("Effects: " + nf(sharedState.getShaderIntensity() * 100, 0, 1) + "%", 20, y); y += 25;
   }
   text("Debug: " + (sharedState.showDebug ? "ON" : "OFF"), 20, y); y += 25;
   text("Fullscreen: " + (sharedState.isFullscreen ? "ON" : "OFF"), 20, y); y += 25;
@@ -117,10 +120,12 @@ class SharedState {
 
   // Animation state
   boolean isAnimating = false;
+  int startScene = 0;
   int targetScene = 0;
-  float animationProgress = 0.0;  // 0.0 to 1.0
-  float animationSpeed = 0.05;    // Easing speed
+  float animationProgress = 0.0;  // 0.0 to total distance in floors
+  float animationSpeed = 0.1;     // Speed per frame
   int animationDirection = 0;     // 1 = up (to higher floor), -1 = down (to lower floor)
+  float totalDistance = 0;        // Total floors to travel
 
   PApplet parent;
 
@@ -153,12 +158,12 @@ class SharedState {
 
   void update() {
     if (isAnimating) {
-      // Ease animation progress
-      animationProgress += (1.0 - animationProgress) * animationSpeed;
+      // Increment animation progress linearly
+      animationProgress += animationSpeed;
 
       // Check if animation is complete
-      if (animationProgress > 0.98) {
-        animationProgress = 1.0;
+      if (animationProgress >= totalDistance) {
+        animationProgress = totalDistance;
         isAnimating = false;
         currentScene = targetScene;
         println("Arrived at scene " + currentScene);
@@ -172,16 +177,35 @@ class SharedState {
     }
 
     println("Starting transition from scene " + currentScene + " to scene " + newScene);
+    startScene = currentScene;
     targetScene = newScene;
     animationDirection = (newScene > currentScene) ? 1 : -1;
+    totalDistance = abs(newScene - currentScene);
     animationProgress = 0.0;
     isAnimating = true;
 
-    // Preload videos for target scene
-    for (int i = 0; i < NUM_WINDOWS; i++) {
-      int videoIdx = targetScene + i;
-      ensureVideoLoaded(videoIdx);
+    println("Will scroll through " + totalDistance + " floor(s)");
+
+    // Preload videos along the path
+    int minScene = min(currentScene, targetScene);
+    int maxScene = max(currentScene, targetScene);
+    for (int scene = minScene; scene <= maxScene; scene++) {
+      for (int i = 0; i < NUM_WINDOWS; i++) {
+        int videoIdx = scene + i;
+        if (videoIdx >= 0 && videoIdx < videoNames.size()) {
+          ensureVideoLoaded(videoIdx);
+        }
+      }
     }
+  }
+
+  float getShaderIntensity() {
+    if (!isAnimating || totalDistance == 0) return 0.0;
+
+    // Peak at 50% of journey, return to 0 at start and end
+    float normalizedProgress = animationProgress / totalDistance;
+    // Sine wave that peaks at 0.5
+    return sin(normalizedProgress * PI) * 0.8; // Max intensity 0.8
   }
 
   void ensureVideoLoaded(int index) {
@@ -303,21 +327,31 @@ class FloorWindow extends PApplet {
   }
 
   void renderAnimatedTransition() {
-    // Calculate vertical offset based on animation progress
-    // animationDirection: 1 = moving up (to higher floor), -1 = moving down (to lower floor)
-    float offsetPixels = sharedState.animationProgress * VIDEO_HEIGHT * sharedState.animationDirection;
+    // Calculate which floor we're between
+    int currentFloor = sharedState.startScene + (int)sharedState.animationProgress * sharedState.animationDirection;
+    float fractionalProgress = sharedState.animationProgress - floor(sharedState.animationProgress);
 
-    // Render current scene videos
-    int currentVideoIdx = sharedState.currentScene + windowIndex;
-    renderVideo(currentVideoIdx, 0, -offsetPixels);
+    // Calculate vertical offset for smooth scrolling
+    // When going UP (higher floor), floors should scroll DOWN on screen (negative direction)
+    // When going DOWN (lower floor), floors should scroll UP on screen (positive direction)
+    float offsetPixels = fractionalProgress * VIDEO_HEIGHT * (-sharedState.animationDirection);
 
-    // Render target scene videos
-    int targetVideoIdx = sharedState.targetScene + windowIndex;
-    float targetOffset = sharedState.animationDirection > 0 ? VIDEO_HEIGHT : -VIDEO_HEIGHT;
-    renderVideo(targetVideoIdx, 0, targetOffset - offsetPixels);
+    // Current floor video
+    int currentVideoIdx = currentFloor + windowIndex;
+    renderVideoWithEffects(currentVideoIdx, 0, offsetPixels);
+
+    // Next floor video (in the direction of travel)
+    int nextFloor = currentFloor + sharedState.animationDirection;
+    int nextVideoIdx = nextFloor + windowIndex;
+    float nextOffset = sharedState.animationDirection > 0 ? -VIDEO_HEIGHT : VIDEO_HEIGHT;
+    renderVideoWithEffects(nextVideoIdx, 0, nextOffset + offsetPixels);
   }
 
   void renderVideo(int videoIdx, float baseX, float baseY) {
+    renderVideoWithEffects(videoIdx, baseX, baseY);
+  }
+
+  void renderVideoWithEffects(int videoIdx, float baseX, float baseY) {
     if (videoIdx < 0 || videoIdx >= sharedState.videoNames.size()) {
       return; // Out of bounds
     }
@@ -360,8 +394,46 @@ class FloorWindow extends PApplet {
       // Apply animation offset
       drawY += baseY;
 
-      // Draw video centered with letterboxing
-      image(video, drawX, drawY, drawWidth, drawHeight);
+      // Get shader intensity (peaks at 50% of transition)
+      float intensity = sharedState.getShaderIntensity();
+
+      if (intensity > 0.05) {
+        // Apply shader effects during transition
+        pushMatrix();
+        translate(drawX, drawY);
+
+        // Apply chromatic aberration by drawing RGB channels separately
+        tint(255, 0, 0, 200); // Red channel
+        float chromaticOffset = intensity * 8;
+        image(video, -chromaticOffset, 0, drawWidth, drawHeight);
+
+        tint(0, 255, 0, 200); // Green channel
+        image(video, 0, 0, drawWidth, drawHeight);
+
+        tint(0, 0, 255, 200); // Blue channel
+        image(video, chromaticOffset, 0, drawWidth, drawHeight);
+
+        noTint();
+
+        // Motion blur effect - draw multiple slightly offset copies
+        int blurSamples = 3;
+        float blurDirection = sharedState.animationDirection * intensity * 15;
+        for (int i = 1; i <= blurSamples; i++) {
+          tint(255, 255 / (i * 2));
+          image(video, 0, -blurDirection * i, drawWidth, drawHeight);
+        }
+
+        noTint();
+        popMatrix();
+
+        // Bloom effect - draw a blurred bright overlay
+        tint(255, intensity * 80); // Subtle bloom
+        image(video, drawX, drawY, drawWidth, drawHeight);
+        noTint();
+      } else {
+        // Normal rendering without effects
+        image(video, drawX, drawY, drawWidth, drawHeight);
+      }
     }
   }
 
@@ -369,7 +441,7 @@ class FloorWindow extends PApplet {
     // Semi-transparent background
     fill(0, 200);
     noStroke();
-    rect(10, 10, 500, 350);
+    rect(10, 10, 550, 420);
 
     // Debug text
     fill(0, 255, 0);
@@ -388,8 +460,11 @@ class FloorWindow extends PApplet {
     y += 5;
     text("Scene: " + sharedState.currentScene + " / " + (sharedState.getNumScenes() - 1), 20, y); y += lineHeight;
     if (sharedState.isAnimating) {
-      text("Animating to: " + sharedState.targetScene + " (" + nf(sharedState.animationProgress * 100, 0, 1) + "%)", 20, y); y += lineHeight;
+      float pct = (sharedState.animationProgress / sharedState.totalDistance) * 100;
+      text("Animating: " + sharedState.startScene + " -> " + sharedState.targetScene + " (" + nf(pct, 0, 1) + "%)", 20, y); y += lineHeight;
       text("Direction: " + (sharedState.animationDirection > 0 ? "UP (higher floor)" : "DOWN (lower floor)"), 20, y); y += lineHeight;
+      text("Floors traveled: " + nf(sharedState.animationProgress, 0, 2) + " / " + sharedState.totalDistance, 20, y); y += lineHeight;
+      text("Shader intensity: " + nf(sharedState.getShaderIntensity() * 100, 0, 1) + "%", 20, y); y += lineHeight;
     }
     text("Video Index: " + videoIdx + " / " + (sharedState.videoNames.size() - 1), 20, y); y += lineHeight;
     text("Video File: " + sharedState.videoNames.get(videoIdx), 20, y); y += lineHeight;
