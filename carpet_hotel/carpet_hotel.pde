@@ -35,6 +35,8 @@ void setup() {
   println("Videos loaded: " + sharedState.videos.size());
   println("\nCONTROLS:");
   println("1-9: Switch to scene");
+  println("D: Toggle debug panel");
+  println("F: Toggle fullscreen");
   println("SPACE: Print info");
   println("ESC: Close all windows");
 }
@@ -48,14 +50,19 @@ void draw() {
   int y = 20;
   text("=== CARPET HOTEL CONTROL ===", 20, y); y += 30;
   text("Videos: " + sharedState.videos.size(), 20, y); y += 25;
+  text("Scenes: " + sharedState.getNumScenes(), 20, y); y += 25;
   text("Current scene: " + sharedState.currentScene, 20, y); y += 25;
+  text("Debug: " + (sharedState.showDebug ? "ON" : "OFF"), 20, y); y += 25;
+  text("Fullscreen: " + (sharedState.isFullscreen ? "ON" : "OFF"), 20, y); y += 25;
 
   y += 10;
+  text("Current windows:", 20, y); y += 20;
   for (int i = 0; i < NUM_WINDOWS; i++) {
     int videoIdx = sharedState.currentScene + i;
-    if (videoIdx < sharedState.videos.size()) {
-      text("Window " + i + " -> Video " + videoIdx, 20, y);
-      y += 20;
+    if (videoIdx < sharedState.videoNames.size()) {
+      String filename = sharedState.videoNames.get(videoIdx);
+      text("  W" + i + " -> Floor " + videoIdx + ": " + filename, 20, y);
+      y += 18;
     }
   }
 }
@@ -75,6 +82,9 @@ void keyPressed() {
         println("  Window " + i + " -> " + sharedState.videoNames.get(videoIdx));
       }
     }
+  } else if (key == 'd' || key == 'D') {
+    sharedState.showDebug = !sharedState.showDebug;
+    println("Debug panel: " + (sharedState.showDebug ? "ON" : "OFF"));
   }
 }
 
@@ -96,6 +106,8 @@ class SharedState {
   ArrayList<Movie> videos;
   ArrayList<String> videoNames;
   int currentScene = 0;
+  boolean showDebug = true;
+  boolean isFullscreen = true;
 
   PApplet parent;
 
@@ -170,10 +182,12 @@ class SharedState {
       }
     });
 
-    // Add to list
-    for (String filename : foundFiles) {
+    // Add to list (sorted low to high by number)
+    println("\nVideos found (sorted by floor number):");
+    for (int i = 0; i < foundFiles.size(); i++) {
+      String filename = foundFiles.get(i);
       videoNames.add(filename);
-      println("Found: " + filename);
+      println("  Floor " + i + ": " + filename);
     }
   }
 
@@ -201,13 +215,15 @@ class SharedState {
  */
 class FloorWindow extends PApplet {
   int windowIndex;
+  int displayNum;
 
   FloorWindow(int index) {
     this.windowIndex = index;
+    this.displayNum = DISPLAY_NUMBERS[index];
   }
 
   public void settings() {
-    fullScreen(P2D, DISPLAY_NUMBERS[windowIndex]);
+    fullScreen(P2D, displayNum);
     pixelDensity(1);
   }
 
@@ -259,12 +275,10 @@ class FloorWindow extends PApplet {
           // Draw video centered with letterboxing
           image(video, drawX, drawY, drawWidth, drawHeight);
 
-          // Debug indicator
-          fill(0, 255, 0);
-          noStroke();
-          rect(10, 10, 50, 50);
-          fill(255);
-          text("Window " + windowIndex + " | Video " + videoIdx, 70, 35);
+          // Advanced debug panel
+          if (sharedState.showDebug) {
+            drawDebugPanel(video, videoIdx);
+          }
         } else {
           // Waiting for video
           fill(255);
@@ -285,6 +299,56 @@ class FloorWindow extends PApplet {
     }
   }
 
+  void drawDebugPanel(Movie video, int videoIdx) {
+    // Semi-transparent background
+    fill(0, 200);
+    noStroke();
+    rect(10, 10, 450, 300);
+
+    // Debug text
+    fill(0, 255, 0);
+    textAlign(LEFT, TOP);
+    textSize(14);
+    int y = 20;
+    int lineHeight = 22;
+
+    text("=== CARPET HOTEL DEBUG ===", 20, y); y += lineHeight + 5;
+
+    fill(255);
+    text("Window: " + windowIndex, 20, y); y += lineHeight;
+    text("Display: " + DISPLAY_NUMBERS[windowIndex], 20, y); y += lineHeight;
+    text("Screen: " + width + "x" + height, 20, y); y += lineHeight;
+
+    y += 5;
+    text("Scene: " + sharedState.currentScene + " / " + (sharedState.getNumScenes() - 1), 20, y); y += lineHeight;
+    text("Video Index: " + videoIdx + " / " + (sharedState.videoNames.size() - 1), 20, y); y += lineHeight;
+    text("Video File: " + sharedState.videoNames.get(videoIdx), 20, y); y += lineHeight;
+
+    y += 5;
+    text("Video Resolution: " + video.width + "x" + video.height, 20, y); y += lineHeight;
+    text("Video Time: " + nf(video.time(), 0, 2) + "s", 20, y); y += lineHeight;
+
+    try {
+      text("Video Duration: " + nf(video.duration(), 0, 2) + "s", 20, y); y += lineHeight;
+    } catch (Exception e) {
+      text("Video Duration: unknown", 20, y); y += lineHeight;
+    }
+
+    try {
+      text("Video Playing: " + video.isPlaying(), 20, y); y += lineHeight;
+    } catch (Exception e) {
+      text("Video Playing: " + (video.time() > 0), 20, y); y += lineHeight;
+    }
+
+    y += 5;
+    text("Frame Rate: " + nf(frameRate, 0, 1) + " fps", 20, y); y += lineHeight;
+    text("Frame Count: " + frameCount, 20, y); y += lineHeight;
+
+    y += 10;
+    fill(100);
+    text("Press D to hide debug | Press F to toggle fullscreen", 20, y);
+  }
+
   public void keyPressed() {
     if (key >= '1' && key <= '9') {
       int scene = key - '1';
@@ -299,6 +363,20 @@ class FloorWindow extends PApplet {
         if (vIdx < sharedState.videoNames.size()) {
           println("  Window " + i + " -> " + sharedState.videoNames.get(vIdx));
         }
+      }
+    } else if (key == 'd' || key == 'D') {
+      sharedState.showDebug = !sharedState.showDebug;
+      println("Debug panel: " + (sharedState.showDebug ? "ON" : "OFF"));
+    } else if (key == 'f' || key == 'F') {
+      sharedState.isFullscreen = !sharedState.isFullscreen;
+      if (sharedState.isFullscreen) {
+        // Return to fullscreen
+        surface.setSize(displayWidth, displayHeight);
+        println("Window " + windowIndex + " fullscreen ON");
+      } else {
+        // Windowed mode
+        surface.setSize(1280, 720);
+        println("Window " + windowIndex + " fullscreen OFF");
       }
     }
   }
