@@ -27,10 +27,10 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python carpet_hotel_parser.py                  # Show help
-  python carpet_hotel_parser.py --build          # Build Processing executable
-  python carpet_hotel_parser.py --sc-only        # Run SuperCollider only
-  python carpet_hotel_gui.py                     # Launch GUI control panel (recommended)
+  python components/parser.py                    # Show help
+  python components/parser.py --build            # Build Processing executable
+  python components/parser.py --sc-only          # Run SuperCollider only
+  python components/gui.py                       # Launch GUI control panel (recommended)
 
 Requirements:
   SuperCollider and Processing installed
@@ -90,9 +90,9 @@ def main():
         print("  CARPET HOTEL")
         print("="*60)
         print("\nFor graphical control panel, run:")
-        print("  python carpet_hotel_gui.py")
+        print("  python components/gui.py")
         print("\nFor command-line operation, use:")
-        print("  python carpet_hotel_parser.py --help")
+        print("  python components/parser.py --help")
         print()
         sys.exit(0)
 

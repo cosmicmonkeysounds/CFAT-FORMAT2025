@@ -187,6 +187,6 @@ echo "========================================================"
 echo ""
 
 # Run the GUI control panel
-python3 app/carpet_hotel_gui.py
+python3 app/components/gui.py
 
 # Note: We stay in the venv, but it will be deactivated when the script exits

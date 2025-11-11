@@ -39,9 +39,9 @@ class LaunchScriptTests:
     def __init__(self):
         self.script_dir = Path(__file__).parent.parent.parent.absolute()  # /app/
         self.parent_dir = self.script_dir.parent  # /carpet_hotel/
-        self.parser_script = self.script_dir / 'carpet_hotel_parser.py'
-        self.core_script = self.script_dir / 'carpet_hotel.py'
-        self.gui_script = self.script_dir / 'carpet_hotel_gui.py'
+        self.parser_script = self.script_dir / 'components' / 'parser.py'
+        self.core_script = self.script_dir / 'carpet_hotel_core.py'
+        self.gui_script = self.script_dir / 'components' / 'gui.py'
         self.launch_macos = self.parent_dir / 'launch_macos.sh'
         self.launch_windows = self.parent_dir / 'launch_windows.bat'
 
@@ -54,9 +54,9 @@ class LaunchScriptTests:
         print_test("\n=== TEST 1: File Existence ===")
 
         files_to_check = [
-            ('carpet_hotel_parser.py', self.parser_script),
-            ('carpet_hotel.py', self.core_script),
-            ('carpet_hotel_gui.py', self.gui_script),
+            ('components/parser.py', self.parser_script),
+            ('carpet_hotel_core.py', self.core_script),
+            ('components/gui.py', self.gui_script),
             ('launch_macos.sh', self.launch_macos),
             ('launch_windows.bat', self.launch_windows),
         ]
@@ -89,17 +89,17 @@ class LaunchScriptTests:
         print_test("\n=== TEST 2: Parser Import ===")
 
         try:
-            import carpet_hotel_parser
-            print_pass("carpet_hotel_parser module imported successfully")
+            from components import parser
+            print_pass("components.parser module imported successfully")
 
             # Check for required functions
-            if hasattr(carpet_hotel_parser, 'parse_arguments'):
+            if hasattr(parser, 'parse_arguments'):
                 print_pass("parse_arguments() function exists")
             else:
                 print_fail("parse_arguments() function NOT FOUND")
                 return False
 
-            if hasattr(carpet_hotel_parser, 'main'):
+            if hasattr(parser, 'main'):
                 print_pass("main() function exists")
             else:
                 print_fail("main() function NOT FOUND")
@@ -108,7 +108,7 @@ class LaunchScriptTests:
             return True
 
         except ImportError as e:
-            print_fail(f"Failed to import carpet_hotel_parser: {e}")
+            print_fail(f"Failed to import components.parser: {e}")
             return False
 
     # ========================================================================
@@ -120,18 +120,24 @@ class LaunchScriptTests:
         print_test("\n=== TEST 3: Core Module Import ===")
 
         try:
-            import carpet_hotel
-            print_pass("carpet_hotel module imported successfully")
+            import carpet_hotel_core
+            print_pass("carpet_hotel_core module imported successfully")
 
-            # Check for CarpetHotelLauncher class
-            if hasattr(carpet_hotel, 'CarpetHotelLauncher'):
-                print_pass("CarpetHotelLauncher class exists")
+            # Check for CarpetHotelCore class
+            if hasattr(carpet_hotel_core, 'CarpetHotelCore'):
+                print_pass("CarpetHotelCore class exists")
             else:
-                print_fail("CarpetHotelLauncher class NOT FOUND")
+                print_fail("CarpetHotelCore class NOT FOUND")
                 return False
 
+            # Check for backwards compatibility alias
+            if hasattr(carpet_hotel_core, 'CarpetHotelLauncher'):
+                print_pass("CarpetHotelLauncher alias exists")
+            else:
+                print_warn("CarpetHotelLauncher alias not found (minor issue)")
+
             # Make sure main() doesn't exist (it should be in parser now)
-            if not hasattr(carpet_hotel, 'main'):
+            if not hasattr(carpet_hotel_core, 'main'):
                 print_pass("main() correctly removed from core module")
             else:
                 print_warn("main() still exists in core module (should be in parser)")
@@ -139,7 +145,7 @@ class LaunchScriptTests:
             return True
 
         except ImportError as e:
-            print_fail(f"Failed to import carpet_hotel: {e}")
+            print_fail(f"Failed to import carpet_hotel_core: {e}")
             return False
 
     # ========================================================================
@@ -151,11 +157,11 @@ class LaunchScriptTests:
         print_test("\n=== TEST 4: GUI Module Import ===")
 
         try:
-            import carpet_hotel_gui
-            print_pass("carpet_hotel_gui module imported successfully")
+            from components import gui
+            print_pass("components.gui module imported successfully")
 
             # Check for CarpetHotelGUI class
-            if hasattr(carpet_hotel_gui, 'CarpetHotelGUI'):
+            if hasattr(gui, 'CarpetHotelGUI'):
                 print_pass("CarpetHotelGUI class exists")
             else:
                 print_fail("CarpetHotelGUI class NOT FOUND")
@@ -164,7 +170,7 @@ class LaunchScriptTests:
             return True
 
         except ImportError as e:
-            print_fail(f"Failed to import carpet_hotel_gui: {e}")
+            print_fail(f"Failed to import components.gui: {e}")
             return False
 
     # ========================================================================
@@ -181,7 +187,7 @@ class LaunchScriptTests:
 
         try:
             result = subprocess.run(
-                ['python3', str(self.parser_script), '--help'],
+                ['python3', '-m', 'components.parser', '--help'],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -233,7 +239,7 @@ class LaunchScriptTests:
 
         try:
             result = subprocess.run(
-                ['python3', str(self.parser_script)],
+                ['python3', '-m', 'components.parser'],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -245,7 +251,7 @@ class LaunchScriptTests:
                 print_pass("Parser with no args executed successfully")
 
                 # Should recommend GUI
-                if 'carpet_hotel_gui.py' in result.stdout:
+                if 'gui' in result.stdout.lower():
                     print_pass("Recommends GUI control panel")
                 else:
                     print_warn("Does not mention GUI control panel")
@@ -315,7 +321,7 @@ class LaunchScriptTests:
 
         required_content = [
             '@echo off',
-            'carpet_hotel_gui.py',
+            'gui.py',
             'cd /d',
         ]
 
@@ -347,7 +353,7 @@ class LaunchScriptTests:
 
         try:
             # Import the parser module
-            import carpet_hotel_parser
+            from components import parser as carpet_hotel_parser
 
             # Test with sys.argv override
             test_cases = [

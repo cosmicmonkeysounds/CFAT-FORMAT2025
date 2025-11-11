@@ -244,6 +244,6 @@ echo ========================================================
 echo.
 
 REM Run the GUI control panel
-python app\carpet_hotel_gui.py
+python app\components\gui.py
 
 REM Note: The venv will be deactivated when the script exits
