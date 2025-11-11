@@ -91,7 +91,7 @@ class CarpetHotelLauncher:
 
         # Scene tracking for Arduino control
         self.current_scene = 0
-        self.total_scenes = 9  # Scenes 0-8
+        self.total_scenes = self.count_video_files()  # Count video files in data directory
 
         # Arduino elevator control
         self.arduino_serial = None
@@ -586,6 +586,30 @@ class CarpetHotelLauncher:
     # ARDUINO ELEVATOR CONTROL
     # ============================================================================
 
+    def count_video_files(self):
+        """Count video files in the data directory to determine number of scenes."""
+        import os
+        import glob
+
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(script_dir, 'data')
+
+        # Count video files (mp4, mov, avi, etc.)
+        video_extensions = ['*.mp4', '*.mov', '*.avi', '*.m4v']
+        video_files = []
+        for ext in video_extensions:
+            pattern = os.path.join(data_dir, ext)
+            video_files.extend(glob.glob(pattern))
+
+        num_videos = len(video_files)
+        if num_videos == 0:
+            print(f"[WARNING] No video files found in {data_dir}, using default of 9 scenes")
+            return 9  # Default fallback
+
+        print(f"[INFO] Found {num_videos} video file(s) in data directory → {num_videos} scenes")
+        return num_videos
+
     def find_arduino_port(self):
         """Find the Arduino port automatically."""
         if not SERIAL_AVAILABLE:
@@ -667,6 +691,7 @@ class CarpetHotelLauncher:
 
             print("✓ Arduino elevator control enabled")
             self.log("✓ Arduino elevator control enabled")
+            self.log(f"  Total scenes: {self.total_scenes} (scenes 0-{self.total_scenes-1})")
             self.log(f"  Button presses will trigger scene changes")
             return True
 

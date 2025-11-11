@@ -291,6 +291,24 @@ void parseCommand(char* command) {
       transitionPeriod = period;
     }
   }
+  // Handle direct LED control (for testing)
+  else if (strcmp(cmdName, "RED") == 0 || strcmp(cmdName, "YELLOW") == 0 || strcmp(cmdName, "GREEN") == 0) {
+    // Parse state (1, 0, ON, OFF)
+    bool state = false;
+    if (strcmp(valueStr, "1") == 0 || strcmp(valueStr, "ON") == 0) {
+      state = true;
+    }
+
+    // Set LED directly and disable animation mode
+    currentMode = ANIM_OFF;
+    if (strcmp(cmdName, "RED") == 0) {
+      analogWrite(PIN_LED_RED, state ? 255 : 0);
+    } else if (strcmp(cmdName, "YELLOW") == 0) {
+      analogWrite(PIN_LED_YELLOW, state ? 255 : 0);
+    } else if (strcmp(cmdName, "GREEN") == 0) {
+      analogWrite(PIN_LED_GREEN, state ? 255 : 0);
+    }
+  }
 }
 
 void updateAnimations() {

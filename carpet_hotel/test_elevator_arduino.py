@@ -70,15 +70,12 @@ def test_elevator_control(port=None):
         print("\nArduino connected!")
         print("\nTest controls:")
         print("  Press UP or DOWN buttons on the hardware")
-        print("  Type '1' for STABLE animation (green pulse)")
-        print("  Type '2' for TRANSITION animation (RGB cycle)")
-        print("  Type '0' to turn OFF all LEDs")
-        print("  Type 'p' followed by number to set period (e.g., 'p500')")
+        print("  Type 'r', 'y', or 'g' to toggle RED, YELLOW, or GREEN LEDs")
         print("  Type 'q' to quit")
         print("\n" + "="*50 + "\n")
 
-        # Animation state
-        period_input = ""
+        # LED states
+        led_states = {'RED': False, 'YELLOW': False, 'GREEN': False}
 
         # Non-blocking input setup
         import select
@@ -96,33 +93,21 @@ def test_elevator_control(port=None):
                     key = sys.stdin.read(1).lower()
                     if key == 'q':
                         break
-                    elif key == '1':
-                        cmd = "ANIM:STABLE\n"
+                    elif key == 'r':
+                        led_states['RED'] = not led_states['RED']
+                        cmd = f"RED:{1 if led_states['RED'] else 0}\n"
                         ser.write(cmd.encode())
-                        print(f"Animation command sent: {cmd.strip()}")
-                    elif key == '2':
-                        cmd = "ANIM:TRANSITION\n"
+                        print(f"LED command sent: {cmd.strip()}")
+                    elif key == 'y':
+                        led_states['YELLOW'] = not led_states['YELLOW']
+                        cmd = f"YELLOW:{1 if led_states['YELLOW'] else 0}\n"
                         ser.write(cmd.encode())
-                        print(f"Animation command sent: {cmd.strip()}")
-                    elif key == '0':
-                        cmd = "ANIM:OFF\n"
+                        print(f"LED command sent: {cmd.strip()}")
+                    elif key == 'g':
+                        led_states['GREEN'] = not led_states['GREEN']
+                        cmd = f"GREEN:{1 if led_states['GREEN'] else 0}\n"
                         ser.write(cmd.encode())
-                        print(f"Animation command sent: {cmd.strip()}")
-                    elif key == 'p':
-                        period_input = ""
-                        print("Enter period in ms (then press Enter): ", end='', flush=True)
-                    elif key.isdigit() and period_input is not None:
-                        period_input += key
-                        print(key, end='', flush=True)
-                    elif key == '\n' and period_input:
-                        try:
-                            period = int(period_input)
-                            cmd = f"PERIOD:{period}\n"
-                            ser.write(cmd.encode())
-                            print(f"\nPeriod command sent: {cmd.strip()}")
-                        except ValueError:
-                            print("\nInvalid period")
-                        period_input = ""
+                        print(f"LED command sent: {cmd.strip()}")
 
             time.sleep(0.01)  # Small delay to prevent CPU spinning
 
