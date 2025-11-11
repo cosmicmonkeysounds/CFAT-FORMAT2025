@@ -21,6 +21,7 @@ from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
 
 from utils import find_arduino_port, detect_serial_ports
+from logger import get_logger
 
 
 class CarpetHotelArduino:
@@ -51,6 +52,29 @@ class CarpetHotelArduino:
         self.osc_server: Optional[ThreadingOSCUDPServer] = None
         self.osc_thread: Optional[threading.Thread] = None
         self.running = False
+
+        # Logger
+        self.log = get_logger("Arduino")
+
+        # Message callback for GUI logging
+        self.message_callback = None
+
+    def set_message_callback(self, callback):
+        """
+        Set callback function for message logging.
+
+        Args:
+            callback: Function that takes (message: str) parameter
+        """
+        self.message_callback = callback
+
+    def _notify(self, message: str):
+        """Send message to callback if set."""
+        if self.message_callback:
+            try:
+                self.message_callback(message)
+            except Exception as e:
+                self.log.error(f"Callback error: {e}")
 
     def connect(self) -> bool:
         """
@@ -189,33 +213,50 @@ class CarpetHotelArduino:
             if not line or line == "READY":
                 return
 
-            # Convert serial messages to OSC
-            if line == "up":
+            # Convert serial messages to OSC (Arduino sends uppercase UP/DOWN)
+            line_upper = line.upper()
+            if line_upper == "UP":
                 self.osc_client.send_message("/carpet/elevator/up", [])
-                print(f"[Serial→OSC] Button UP → /carpet/elevator/up")
-            elif line == "down":
+                self.log.success("Button UP pressed")
+                self._notify("✓ Button UP pressed")
+            elif line_upper == "DOWN":
                 self.osc_client.send_message("/carpet/elevator/down", [])
-                print(f"[Serial→OSC] Button DOWN → /carpet/elevator/down")
+                self.log.success("Button DOWN pressed")
+                self._notify("✓ Button DOWN pressed")
             else:
-                print(f"[Serial] Unknown message: {line}")
+                self.log.warning(f"Unknown message: {line}")
+                self._notify(f"⚠ Unknown: {line}")
 
         except Exception as e:
-            print(f"✗ Error processing serial message: {e}")
+            self.log.error(f"Error processing serial: {e}")
 
-    def set_led(self, color: str, state: int):
+    def set_led(self, color: str, value: int):
         """
-        Set LED state directly.
+        Set LED brightness using PWM.
 
         Args:
             color: 'red', 'yellow', or 'green'
-            state: 0 (off) or 1 (on)
+            value: 0-255 (PWM brightness), or 0/1 for legacy compatibility
         """
         if not self.serial_conn:
-            print("✗ Arduino not connected")
+            self.log.error("Arduino not connected")
             return
 
-        cmd = f"{color.upper()}:{state}\n"
-        self.serial_conn.write(cmd.encode())
+        # Convert legacy 0/1 to 0/255
+        if value == 1:
+            value = 255
+
+        # Clamp to valid range
+        value = max(0, min(255, value))
+
+        cmd = f"{color.upper()}:{value}\n"
+        try:
+            self.serial_conn.write(cmd.encode())
+            self.log.debug(f"LED {color.upper()} → {value}")
+            self._notify(f"LED {color.upper()}: {value}")
+        except Exception as e:
+            self.log.error(f"Failed to set LED: {e}")
+            self._notify(f"✗ LED error: {e}")
 
     def set_led_animation_mode(self, mode: str):
         """
@@ -224,16 +265,18 @@ class CarpetHotelArduino:
         Args:
             mode: 'STABLE', 'TRANSITION', or 'OFF'
         """
+        self.log.info(f"LED animation mode: {mode}")
+
         # Map modes to LED states
         if mode == "STABLE":
             # Green on, others off
             self.set_led("red", 0)
             self.set_led("yellow", 0)
-            self.set_led("green", 1)
+            self.set_led("green", 255)
         elif mode == "TRANSITION":
-            # Yellow blinking
+            # Yellow on (Python will handle blinking)
             self.set_led("red", 0)
-            self.set_led("yellow", 1)
+            self.set_led("yellow", 255)
             self.set_led("green", 0)
         elif mode == "OFF":
             # All off

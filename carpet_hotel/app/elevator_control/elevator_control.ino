@@ -4,13 +4,14 @@
  * Hardware:
  * - Pin A0: DOWN button (momentary, normally-closed)
  * - Pin A1: UP button (momentary, normally-closed)
- * - Pin D2: GREEN LED
- * - Pin D3: YELLOW LED
- * - Pin D4: RED LED
+ * - Pin A2: GREEN LED (PWM capable)
+ * - Pin A3: YELLOW LED (PWM capable)
+ * - Pin A4: RED LED (PWM capable)
  *
  * Serial Protocol:
- * - Sends: "up" or "down" when buttons are pressed
- * - Receives: "RED:1" / "RED:0", "YELLOW:1" / "YELLOW:0", "GREEN:1" / "GREEN:0"
+ * - Sends: "UP" or "DOWN" when buttons are pressed
+ * - Receives: "RED:255" / "RED:0", "YELLOW:128", "GREEN:255", etc.
+ *   Values are 0-255 for PWM brightness control
  *
  * Note: LED animations are controlled by Python, not by Arduino
  */
@@ -151,13 +152,13 @@ private:
 // Pin definitions
 const int PIN_BUTTON_DOWN = A0;
 const int PIN_BUTTON_UP = A1;
-const int PIN_LED_GREEN = 2;
-const int PIN_LED_YELLOW = 3;
-const int PIN_LED_RED = 4;
+const int PIN_LED_GREEN = A2;   // PWM capable
+const int PIN_LED_YELLOW = A3;  // PWM capable
+const int PIN_LED_RED = A4;     // PWM capable
 
 // Buttons using MomentarySwitch class
-MomentarySwitch buttonDown(PIN_BUTTON_DOWN, false, PULLUP_UP, 50);
-MomentarySwitch buttonUp(PIN_BUTTON_UP, false, PULLUP_UP, 50);
+MomentarySwitch buttonDown(PIN_BUTTON_DOWN, PULLUP_UP, 50);
+MomentarySwitch buttonUp(PIN_BUTTON_UP, PULLUP_UP, 50);
 
 // No animation logic - Python controls LEDs directly
 
@@ -182,10 +183,10 @@ void setup() {
   pinMode(PIN_LED_YELLOW, OUTPUT);
   pinMode(PIN_LED_GREEN, OUTPUT);
 
-  // Initialize LEDs to OFF
-  digitalWrite(PIN_LED_RED, LOW);
-  digitalWrite(PIN_LED_YELLOW, LOW);
-  digitalWrite(PIN_LED_GREEN, LOW);
+  // Initialize LEDs to OFF (PWM value 0)
+  analogWrite(PIN_LED_RED, 0);
+  analogWrite(PIN_LED_YELLOW, 0);
+  analogWrite(PIN_LED_GREEN, 0);
 
   // Send ready message
   Serial.println("READY");
@@ -198,10 +199,10 @@ void loop() {
 
   // Check for button presses
   if (buttonDown.wasPressed()) {
-    Serial.println("down");
+    Serial.println("DOWN");
   }
   if (buttonUp.wasPressed()) {
-    Serial.println("up");
+    Serial.println("UP");
   }
 
   // Process serial commands
@@ -240,23 +241,29 @@ void parseCommand(char* command) {
     return;  // Invalid command format
   }
 
-  // Split into LED name and state
+  // Split into LED name and value
   *colon = '\0';  // Null terminate the LED name
   char* ledName = command;
-  char* stateStr = colon + 1;
+  char* valueStr = colon + 1;
 
-  // Parse state (1, 0, ON, OFF)
-  bool state = false;
-  if (strcmp(stateStr, "1") == 0 || strcmp(stateStr, "ON") == 0) {
-    state = true;
+  // Parse PWM value (0-255) or legacy ON/OFF
+  int pwmValue = 0;
+  if (strcmp(valueStr, "ON") == 0 || strcmp(valueStr, "1") == 0) {
+    pwmValue = 255;  // Full brightness
+  } else if (strcmp(valueStr, "OFF") == 0 || strcmp(valueStr, "0") == 0) {
+    pwmValue = 0;    // OFF
+  } else {
+    // Parse as integer (0-255)
+    pwmValue = atoi(valueStr);
+    pwmValue = constrain(pwmValue, 0, 255);
   }
 
-  // Set LED directly
+  // Set LED using PWM
   if (strcmp(ledName, "RED") == 0) {
-    digitalWrite(PIN_LED_RED, state ? HIGH : LOW);
+    analogWrite(PIN_LED_RED, pwmValue);
   } else if (strcmp(ledName, "YELLOW") == 0) {
-    digitalWrite(PIN_LED_YELLOW, state ? HIGH : LOW);
+    analogWrite(PIN_LED_YELLOW, pwmValue);
   } else if (strcmp(ledName, "GREEN") == 0) {
-    digitalWrite(PIN_LED_GREEN, state ? HIGH : LOW);
+    analogWrite(PIN_LED_GREEN, pwmValue);
   }
 }

@@ -239,6 +239,19 @@ class CarpetHotelSuperCollider:
             True if stopped successfully
         """
         self.initialized = False
+
+        # Send Cmd+. (stop all sound) to sclang via stdin
+        if self.process.process and self.process.process.stdin:
+            try:
+                # Send the equivalent of Cmd+. in SuperCollider
+                # This stops all synths and cleans up properly
+                self.process.process.stdin.write("CmdPeriod.run;\n")
+                self.process.process.stdin.flush()
+                print("[SuperCollider] Sent stop command")
+                time.sleep(0.5)  # Give SC time to stop synths
+            except Exception as e:
+                print(f"[SuperCollider] Could not send stop command: {e}")
+
         return self.process.stop()
 
     def is_running(self) -> bool:

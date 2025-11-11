@@ -545,6 +545,13 @@ class CarpetHotelGUI:
             success = self.core.start_arduino(port)
 
             if success:
+                # Set message callback for logging
+                if self.core.arduino:
+                    def arduino_message_callback(msg):
+                        self.root.after(0, lambda: self.log_to_widget(self.hardware_log, msg))
+
+                    self.core.arduino.set_message_callback(arduino_message_callback)
+
                 self.hardware_running = True
                 self.root.after(0, self.update_hardware_ui, True)
                 self.log_to_widget(self.hardware_log, "✓ Arduino connected")
