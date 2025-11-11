@@ -23,35 +23,71 @@ USAGE: Run with sclang carpet_hotel_audio.scd
 var audioPath, floors, players, volumes;
 var numFloors = 10;
 var masterVolume = 0.7;
-var audioDevice;
+var audioDevice, sampleRate;  // Declare at global scope
+var arg0, arg1, arg0AsInt, isArg0Number;  // Command line args
 
 // ===== SERVER CONFIGURATION =====
 "=== CARPET HOTEL AUDIO ENGINE ===".postln;
 
-// Get audio device from command line argument (if provided)
-audioDevice = thisProcess.argv.at(0);
-if(audioDevice.notNil, {
-    ("Using audio device: " ++ audioDevice).postln;
-}, {
+// Send init message via OSC
+{
+    var initClient = NetAddr("127.0.0.1", 12001);
+    initClient.sendMsg("/sc/init", "starting");
+    "Sent OSC: /sc/init starting".postln;
+}.defer(0.1);
+
+// Parse command line arguments
+// Python passes: sclang script.scd [device] [sample_rate]
+// Python always passes sample rate, optionally passes device
+arg0 = thisProcess.argv.at(0);
+arg1 = thisProcess.argv.at(1);
+
+// Determine if arg0 is a sample rate (number) or device name (string)
+arg0AsInt = if(arg0.notNil, { arg0.asInteger }, { 0 });
+isArg0Number = (arg0AsInt > 1000);  // Sample rates are > 1000
+
+if(isArg0Number, {
+    // arg0 is sample rate, no device specified
+    sampleRate = arg0AsInt;
+    audioDevice = nil;
+    ("Using sample rate: " ++ sampleRate ++ " Hz").postln;
     "Using default audio device".postln;
+}, {
+    // arg0 is device name, arg1 is sample rate
+    audioDevice = arg0;
+    if(audioDevice.notNil, {
+        ("Using audio device: " ++ audioDevice).postln;
+    }, {
+        "Using default audio device".postln;
+    });
+
+    if(arg1.notNil, {
+        sampleRate = arg1.asInteger;
+        if(sampleRate > 0, {
+            ("Using sample rate: " ++ sampleRate ++ " Hz").postln;
+        }, {
+            sampleRate = 48000;
+            ("Invalid sample rate, using default: " ++ sampleRate ++ " Hz").postln;
+        });
+    }, {
+        sampleRate = 48000;
+        ("No sample rate argument, using default: " ++ sampleRate ++ " Hz").postln;
+    });
 });
 
 "Configuring audio server...".postln;
 
 // Set server options BEFORE booting
-s.options.sampleRate = 44100;        // Match audio file sample rate
+s.options.sampleRate = sampleRate;   // Use detected/specified sample rate
 s.options.numOutputBusChannels = 2;  // Stereo output
 s.options.numInputBusChannels = 0;   // No input needed
 s.options.blockSize = 512;           // Balance between latency and CPU
 s.options.memSize = 65536;           // Increased memory for buffers
 
-// IMPORTANT: Set input and output device separately to avoid microphone issues
+// IMPORTANT: Only set output device if specified, leave input to default
 if(audioDevice.notNil, {
-    s.options.outDevice = audioDevice;   // Output only
-    s.options.inDevice = nil;            // Explicitly no input
-}, {
-    // Even with default, explicitly disable input
-    s.options.inDevice = nil;
+    s.options.outDevice = audioDevice;
+    // Don't set inDevice - with numInputBusChannels = 0, SC will handle it
 });
 
 // Boot server and wait
@@ -63,6 +99,13 @@ SystemClock.sched(1.0, { 1.0 }); // Reschedule every second to keep alive
 s.waitForBoot({
     "Audio server ready!".postln;
     ("Sample rate: " ++ s.sampleRate ++ " Hz").postln;
+
+    // Send OSC message: server booted
+    {
+        var initClient = NetAddr("127.0.0.1", 12001);
+        initClient.sendMsg("/sc/server", "booted");
+        "Sent OSC: /sc/server booted".postln;
+    }.defer(0.1);
 
     // Initialize
     floors = Dictionary.new;
@@ -76,39 +119,56 @@ s.waitForBoot({
     audioPath = (thisProcess.nowExecutingPath.dirname +/+ "../data/").standardizePath;
     ("Searching in: " ++ audioPath).postln;
 
-    // Load all carpet audio files
-    (1..numFloors).do({ |i|
-        var path = audioPath ++ "carpet_" ++ i ++ ".wav";
-        var file = PathName(path);
+    // Use a Routine to allow s.sync to work properly
+    Routine({
+        // Load all carpet audio files
+        (1..numFloors).do({ |i|
+            var path = audioPath ++ "carpet_" ++ i ++ ".wav";
+            var file = PathName(path);
 
-        if(file.isFile, {
-            var buffer = Buffer.read(s, path);
-            floors[i] = buffer;
-            ("  Loaded floor " ++ i ++ ": " ++ file.fileName).postln;
+            if(file.isFile, {
+                var buffer = Buffer.read(s, path);
+                floors[i] = buffer;
+                ("  Loaded floor " ++ i ++ ": " ++ file.fileName).postln;
 
-            // Wait for buffer to load
-            s.sync;
+                // Wait for buffer to load
+                s.sync;
 
-            // Create looping player for each floor (start silent)
-            players[i] = {
-                var sig = PlayBuf.ar(
-                    2, // stereo
-                    buffer,
-                    BufRateScale.kr(buffer),
-                    loop: 1
-                );
-                var amp = \amp.kr(0.0, 0.05); // 50ms lag for smooth changes
-                sig * amp;
-            }.play(outbus: 0, addAction: \addToTail);
+                // Create looping player for each floor (start silent)
+                // Detect mono vs stereo and handle appropriately
+                players[i] = {
+                    var numChannels = buffer.numChannels;
+                    var sig = PlayBuf.ar(
+                        numChannels,
+                        buffer,
+                        BufRateScale.kr(buffer),
+                        loop: 1
+                    );
+                    var amp = \amp.kr(0.0, 0.05); // 50ms lag for smooth changes
+                    // If mono, duplicate to stereo output
+                    if(numChannels == 1, {
+                        sig = sig ! 2;  // Duplicate mono to stereo
+                    });
+                    sig * amp;
+                }.play(outbus: 0, addAction: \addToTail);
 
-            volumes[i] = 0.0;
-        }, {
-            ("  WARNING: Floor " ++ i ++ " audio not found").postln;
+                volumes[i] = 0.0;
+            }, {
+                ("  WARNING: Floor " ++ i ++ " audio not found").postln;
+            });
         });
-    });
 
-    "\n✓ Audio engine ready!".postln;
-    "✓ Listening for OSC on port 57120 (built-in, no library needed)".postln;
+        "\n✓ Audio engine ready!".postln;
+        "✓ Listening for OSC on port 57120 (built-in, no library needed)".postln;
+
+        // Send OSC message: audio engine ready
+        {
+            var initClient = NetAddr("127.0.0.1", 12001);
+            initClient.sendMsg("/sc/ready", "audio_engine_ready");
+            "Sent OSC: /sc/ready audio_engine_ready".postln;
+        }.defer(0.5);
+    }).play;
+
     "\nOSC Messages:".postln;
     "  /carpet/scene [sceneNum, numWindows, isAnimating]".postln;
     "  /carpet/transition [currentFloor, progress, direction, numWindows]".postln;

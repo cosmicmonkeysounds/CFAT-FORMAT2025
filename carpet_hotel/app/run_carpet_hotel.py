@@ -60,14 +60,61 @@ except ImportError:
     print("Warning: pyserial not installed. Arduino elevator control will not be available.")
     print("  Install with: pip install pyserial")
 
+def detect_audio_sample_rate(audio_device=None):
+    """
+    Detect the sample rate of the audio device.
+    Returns the detected sample rate or 48000 as a safe default.
+    """
+    system = platform.system()
+
+    # Try common sample rates in order of likelihood
+    common_rates = [48000, 44100, 96000, 88200, 192000]
+
+    if system == "Darwin":  # macOS
+        try:
+            # Use system_profiler to get audio info
+            result = subprocess.run(
+                ['system_profiler', 'SPAudioDataType'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            # Look for sample rate in output
+            # Format: "      Default Sample Rate: 48000"
+            for line in result.stdout.split('\n'):
+                if 'Sample Rate' in line or 'sample rate' in line:
+                    # Extract number
+                    import re
+                    match = re.search(r'(\d+)', line)
+                    if match:
+                        rate = int(match.group(1))
+                        if rate in common_rates:
+                            print(f"[Audio] Detected sample rate: {rate} Hz")
+                            return rate
+        except Exception as e:
+            print(f"[Audio] Could not auto-detect sample rate: {e}")
+
+    # Default to 48000 Hz (most common on modern systems)
+    default_rate = 48000
+    print(f"[Audio] Using default sample rate: {default_rate} Hz")
+    return default_rate
+
 class CarpetHotelLauncher:
-    def __init__(self, audio_device=None, enable_keyboard=True, enable_python_terminal=True,
+    def __init__(self, audio_device=None, sample_rate=None, enable_keyboard=True, enable_python_terminal=True,
                  enable_osc_external=True, displays=None, arduino_port="auto"):
         self.sc_process = None
         self.processing_process = None
         self.script_dir = Path(__file__).parent.absolute()
         self.platform = platform.system()  # 'Darwin' (macOS), 'Windows', 'Linux'
         self.audio_device = audio_device
+
+        # Auto-detect sample rate if not provided
+        if sample_rate is None:
+            self.sample_rate = detect_audio_sample_rate(audio_device)
+        else:
+            self.sample_rate = sample_rate
+            print(f"[Audio] Using specified sample rate: {self.sample_rate} Hz")
 
         # Input modes
         self.enable_keyboard = enable_keyboard          # Keyboard control in Processing
@@ -102,6 +149,11 @@ class CarpetHotelLauncher:
         self.led_animation_thread = None
         self.led_animation_mode = "OFF"  # OFF, STABLE, TRANSITION
         self.led_animation_running = False
+
+        # SuperCollider status tracking
+        self.sc_init_received = False
+        self.sc_server_booted = False
+        self.sc_ready = False
 
         # Paths
         self.sc_script = self.script_dir / "carpet_hotel_audio.scd"
@@ -277,38 +329,50 @@ class CarpetHotelLauncher:
                 time.sleep(wait_time)
 
             try:
+                # Reset OSC status flags for this attempt
+                self.sc_init_received = False
+                self.sc_server_booted = False
+                self.sc_ready = False
+
                 # Launch sclang with the audio script
                 # Simple approach: just pass audio device as arg, let SC scan data/ directory
                 self.log("  Starting SuperCollider audio engine...")
 
-                # Build command
-                cmd = [self.sclang_path, str(self.sc_script)]
+                # Build command - use heredoc to execute the script
+                # SC's sclang doesn't auto-execute .scd files, need to use executeFile
+                # Note: The SC script handles missing arguments gracefully, using defaults
+                execute_cmd = f'thisProcess.interpreter.executeFile("{str(self.sc_script)}");'
 
-                # Add audio device as argument if specified
-                if self.audio_device:
-                    cmd.append(self.audio_device)
+                self.log(f"  Executing: {execute_cmd}")
 
                 self.sc_process = subprocess.Popen(
-                    cmd,
+                    [self.sclang_path],
+                    stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,  # Combine stderr with stdout
+                    stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1
                 )
 
-                # Monitor output for success/failure indicators
-                self.log("  Waiting for audio server to boot...")
-                success_marker = False
+                # Send the execute command to stdin
+                try:
+                    self.sc_process.stdin.write(execute_cmd + "\n")
+                    self.sc_process.stdin.flush()
+                    # Keep stdin open so SC doesn't exit
+                except Exception as e:
+                    self.log(f"  Error writing to SC stdin: {e}")
+
+                # Monitor output and wait for OSC status messages
+                self.log("  Waiting for SuperCollider to initialize via OSC...")
                 failure_marker = False
                 start_time = time.time()
-                timeout = 30  # seconds (increased for class library compilation)
+                timeout = 45  # seconds (increased for class library compilation + OSC init)
 
                 # Create a list to collect output
                 output_lines = []
 
                 def collect_output():
-                    nonlocal success_marker, failure_marker
-                    sc_booted = False  # Track if SC itself has booted
+                    nonlocal failure_marker
                     try:
                         for line in iter(self.sc_process.stdout.readline, ''):
                             if not line:
@@ -320,33 +384,44 @@ class CarpetHotelLauncher:
                             with open(self.log_file, 'a') as f:
                                 f.write(message + "\n")
 
-                            # Track SC boot
-                            if "Welcome to SuperCollider" in line:
-                                sc_booted = True
-                                self.log("  SuperCollider class library loaded, executing script...")
-
-                            # Check for success markers (only after SC booted)
-                            if sc_booted:
-                                if "Audio engine ready!" in line or "Listening for OSC" in line or "Audio server ready!" in line or "CARPET HOTEL" in line:
-                                    success_marker = True
-                                if "could not initialize audio" in line or "Server 'localhost' exited" in line or "ERROR: Audio device" in line:
-                                    failure_marker = True
+                            # Check for failure markers
+                            if "could not initialize audio" in line or "Server 'localhost' exited" in line or "ERROR: Audio device" in line:
+                                failure_marker = True
                     except Exception as e:
-                        # print(f"[SC] Stream error: {e}")
+                        # Silently handle stream errors
                         pass
 
                 # Start background thread to collect output
                 sc_thread = threading.Thread(target=collect_output, daemon=True)
                 sc_thread.start()
 
-                # Wait for success or failure
+                # Wait for OSC status messages instead of text parsing
+                init_seen = False
+                server_seen = False
+                ready_seen = False
+
                 while time.time() - start_time < timeout:
-                    if success_marker:
-                        self.log("✓ SuperCollider audio engine launched successfully")
-                        self.log("  Waiting 5 seconds for audio server to fully initialize...")
-                        time.sleep(5)
-                        self.log("  Audio server booted and ready for OSC")
+                    # Check OSC status flags (set by OSC handlers)
+                    if self.sc_init_received and not init_seen:
+                        self.log("  ✓ SC script started (received /sc/init)")
+                        init_seen = True
+
+                    if self.sc_server_booted and not server_seen:
+                        self.log("  ✓ SC audio server booted (received /sc/server)")
+                        server_seen = True
+
+                    if self.sc_ready and not ready_seen:
+                        self.log("  ✓ SC audio engine ready (received /sc/ready)")
+                        ready_seen = True
+
+                    # Success: All OSC messages received
+                    if self.sc_ready:
+                        self.log("✓ SuperCollider audio engine launched successfully (confirmed via OSC)")
+                        self.log("  Waiting 2 seconds for final initialization...")
+                        time.sleep(2)
                         return True
+
+                    # Failure: Process died or error detected
                     if failure_marker or self.sc_process.poll() is not None:
                         if attempt < max_attempts - 1:
                             # Will retry
@@ -360,16 +435,19 @@ class CarpetHotelLauncher:
                                 self.log("\n  HINT: Try a different audio device:")
                                 self.log("    python run_carpet_hotel.py --audio-device \"Multi-Output Device\"")
                             return False
-                    time.sleep(0.2)
+
+                    time.sleep(0.1)
 
                 # Check if we timed out
-                if not success_marker:
+                if not self.sc_ready:
                     if attempt < max_attempts - 1:
                         # Timeout but we have retries left
-                        self.log(f"  Attempt {attempt + 1} timed out, will retry...")
+                        self.log(f"  Attempt {attempt + 1} timed out (OSC messages not received), will retry...")
+                        self.log(f"    Status: init={self.sc_init_received}, server={self.sc_server_booted}, ready={self.sc_ready}")
                     else:
                         # Final timeout
-                        self.log("❌ SuperCollider boot timed out after all attempts")
+                        self.log("❌ SuperCollider boot timed out after all attempts (OSC ready message not received)")
+                        self.log(f"  Final status: init={self.sc_init_received}, server={self.sc_server_booted}, ready={self.sc_ready}")
                         return False
 
             except Exception as e:
@@ -528,6 +606,10 @@ class CarpetHotelLauncher:
         dispatcher.map("/carpet/scene", self.forward_to_sc)
         dispatcher.map("/carpet/transition", self.forward_to_sc)
         dispatcher.map("/carpet/volume", self.forward_to_sc)
+        # SuperCollider init status messages
+        dispatcher.map("/sc/init", self.handle_sc_init)
+        dispatcher.map("/sc/server", self.handle_sc_server)
+        dispatcher.map("/sc/ready", self.handle_sc_ready)
         # Arduino elevator LED control
         dispatcher.map("/carpet/elevator/led/red", self.handle_elevator_led_red)
         dispatcher.map("/carpet/elevator/led/yellow", self.handle_elevator_led_yellow)
@@ -589,6 +671,27 @@ class CarpetHotelLauncher:
         # elif state == "error":
         #     error = args[1] if len(args) > 1 else "Unknown error"
         #     print(f"\n[Processing] ERROR: {error}")
+
+    def handle_sc_init(self, address, *args):
+        """Handle SuperCollider init message."""
+        status = args[0] if args else "unknown"
+        self.sc_init_received = True
+        self.log(f"[SC-INIT] {status}")
+        print(f"[SC-INIT] {status}")
+
+    def handle_sc_server(self, address, *args):
+        """Handle SuperCollider server boot message."""
+        status = args[0] if args else "unknown"
+        self.sc_server_booted = True
+        self.log(f"[SC-SERVER] {status}")
+        print(f"[SC-SERVER] {status}")
+
+    def handle_sc_ready(self, address, *args):
+        """Handle SuperCollider ready message."""
+        status = args[0] if args else "unknown"
+        self.sc_ready = True
+        self.log(f"[SC-READY] {status}")
+        print(f"[SC-READY] ✓ Audio engine ready!")
 
     def send_scene_command(self, scene):
         """Send scene transition command to Processing via OSC."""
@@ -1468,8 +1571,16 @@ def guided_setup_gui():
 
     root = tk.Tk()
     root.title("Carpet Hotel - Control Panel")
-    root.geometry("700x600")
+    root.geometry("1400x1200")  # 2x larger
     root.resizable(False, False)
+
+    # Configure styles for 2x scaling
+    style = ttk.Style()
+    style.configure('TButton', font=('Arial', 16), padding=15)
+    style.configure('TLabel', font=('Arial', 16))
+    style.configure('TRadiobutton', font=('Arial', 16))
+    style.configure('TCheckbutton', font=('Arial', 16))
+    style.configure('TNotebook.Tab', font=('Arial', 14), padding=[20, 10])
 
     # Load previous settings
     saved_settings = load_settings()
@@ -1483,6 +1594,7 @@ def guided_setup_gui():
     # Configuration storage
     config = {
         'audio_device': saved_settings.get('audio_device'),
+        'sample_rate': saved_settings.get('sample_rate'),  # Auto-detect if None
         'enable_keyboard': saved_settings.get('enable_keyboard', True),
         'enable_python_terminal': saved_settings.get('enable_python_terminal', True),
         'enable_osc_external': saved_settings.get('enable_osc_external', True),
@@ -1501,7 +1613,7 @@ def guided_setup_gui():
     page1 = ttk.Frame(notebook)
     notebook.add(page1, text="1. Audio")
 
-    ttk.Label(page1, text="Audio Output Device", font=('Arial', 14, 'bold')).pack(pady=10)
+    ttk.Label(page1, text="Audio Output Device", font=('Arial', 28, 'bold')).pack(pady=20)
     ttk.Label(page1, text="Choose where you want the audio to play from:").pack(pady=5)
 
     # Initialize audio selection from saved settings
@@ -1536,7 +1648,7 @@ def guided_setup_gui():
     page2 = ttk.Frame(notebook)
     notebook.add(page2, text="2. Displays")
 
-    ttk.Label(page2, text="Display Configuration", font=('Arial', 14, 'bold')).pack(pady=10)
+    ttk.Label(page2, text="Display Configuration", font=('Arial', 28, 'bold')).pack(pady=20)
     ttk.Label(page2, text="Select which displays to use (order matters!)").pack(pady=5)
 
     # Detect available screens
@@ -1550,10 +1662,10 @@ def guided_setup_gui():
     left_frame = ttk.Frame(lists_frame)
     left_frame.pack(side='left', fill='both', expand=True, padx=5)
 
-    ttk.Label(left_frame, text="Available Displays:", font=('Arial', 10, 'bold')).pack()
-    ttk.Label(left_frame, text="(hover to preview)", foreground='gray', font=('Arial', 8)).pack()
+    ttk.Label(left_frame, text="Available Displays:", font=('Arial', 20, 'bold')).pack()
+    ttk.Label(left_frame, text="(hover to preview)", foreground='gray', font=('Arial', 16)).pack()
 
-    available_listbox = tk.Listbox(left_frame, height=8, selectmode=tk.SINGLE, font=('Arial', 10))
+    available_listbox = tk.Listbox(left_frame, height=8, selectmode=tk.SINGLE, font=('Arial', 18))
     available_listbox.pack(fill='both', expand=True, pady=5)
 
     # Get saved display selection
@@ -1569,10 +1681,10 @@ def guided_setup_gui():
     right_frame = ttk.Frame(lists_frame)
     right_frame.pack(side='left', fill='both', expand=True, padx=5)
 
-    ttk.Label(right_frame, text="Selected Displays:", font=('Arial', 10, 'bold')).pack()
-    ttk.Label(right_frame, text="(in order)", foreground='gray', font=('Arial', 8)).pack()
+    ttk.Label(right_frame, text="Selected Displays:", font=('Arial', 20, 'bold')).pack()
+    ttk.Label(right_frame, text="(in order)", foreground='gray', font=('Arial', 16)).pack()
 
-    selected_listbox = tk.Listbox(right_frame, height=8, selectmode=tk.SINGLE, font=('Arial', 10))
+    selected_listbox = tk.Listbox(right_frame, height=8, selectmode=tk.SINGLE, font=('Arial', 18))
     selected_listbox.pack(fill='both', expand=True, pady=5)
 
     # Pre-populate with saved displays (in order)
@@ -1621,7 +1733,7 @@ def guided_setup_gui():
         color = colors[(display_num - 1) % len(colors)]
 
         text = f"DISPLAY {display_num}\n{screen_info['name']}\n{screen_info['width']}x{screen_info['height']}"
-        label = tk.Label(preview, text=text, font=('Arial', 24, 'bold'),
+        label = tk.Label(preview, text=text, font=('Arial', 48, 'bold'),
                         bg=color, fg='white')
         label.pack(fill='both', expand=True)
 
@@ -1706,9 +1818,9 @@ def guided_setup_gui():
     page3 = ttk.Frame(notebook)
     notebook.add(page3, text="3. Controls")
 
-    ttk.Label(page3, text="Input Methods", font=('Arial', 14, 'bold')).pack(pady=10)
-    ttk.Label(page3, text="Select which control methods to enable (at least one):").pack(pady=5)
-    ttk.Label(page3, text="Mouse wheel volume control is always available.", foreground='gray', font=('Arial', 9)).pack(pady=(0, 10))
+    ttk.Label(page3, text="Input Methods", font=('Arial', 28, 'bold')).pack(pady=20)
+    ttk.Label(page3, text="Select which control methods to enable (at least one):").pack(pady=10)
+    ttk.Label(page3, text="Mouse wheel volume control is always available.", foreground='gray', font=('Arial', 18)).pack(pady=(0, 20))
 
     # Checkbox variables - initialize from saved settings
     keyboard_var = tk.BooleanVar(value=config.get('enable_keyboard', True))
@@ -1741,7 +1853,7 @@ def guided_setup_gui():
     page4 = ttk.Frame(notebook)
     notebook.add(page4, text="4. Arduino")
 
-    ttk.Label(page4, text="Arduino Elevator Control", font=('Arial', 14, 'bold')).pack(pady=10)
+    ttk.Label(page4, text="Arduino Elevator Control", font=('Arial', 28, 'bold')).pack(pady=20)
     ttk.Label(page4, text="Select the USB port for your Arduino (if connected):").pack(pady=5)
 
     # Arduino port selection variable
@@ -1760,7 +1872,7 @@ def guided_setup_gui():
               foreground='gray').pack(anchor='w', padx=60)
 
     # Available ports list
-    ttk.Label(page4, text="\nAvailable Serial Ports:", font=('Arial', 10, 'bold')).pack(anchor='w', padx=40, pady=(15, 5))
+    ttk.Label(page4, text="\nAvailable Serial Ports:", font=('Arial', 20, 'bold')).pack(anchor='w', padx=80, pady=(30, 10))
 
     ports_frame = ttk.Frame(page4)
     ports_frame.pack(padx=40, pady=5, fill='x')
@@ -1816,7 +1928,7 @@ def guided_setup_gui():
     refresh_ports()
 
     # Manual entry option
-    ttk.Label(page4, text="\nOr enter manually:", font=('Arial', 10, 'bold')).pack(anchor='w', padx=40, pady=(15, 5))
+    ttk.Label(page4, text="\nOr enter manually:", font=('Arial', 20, 'bold')).pack(anchor='w', padx=80, pady=(30, 10))
     custom_port_frame = ttk.Frame(page4)
     custom_port_frame.pack(anchor='w', padx=40, pady=5)
     ttk.Radiobutton(custom_port_frame, text="Custom port:",
@@ -1833,7 +1945,7 @@ def guided_setup_gui():
     page5 = ttk.Frame(notebook)
     notebook.add(page5, text="5. Testing")
 
-    ttk.Label(page5, text="Test Controls", font=('Arial', 14, 'bold')).pack(pady=10)
+    ttk.Label(page5, text="Test Controls", font=('Arial', 28, 'bold')).pack(pady=20)
     ttk.Label(page5, text="Test elevator controls and LEDs (Arduino must be connected)").pack(pady=5)
 
     # Elevator button testing
@@ -1917,14 +2029,14 @@ def guided_setup_gui():
     ttk.Button(anim_btn_frame, text="TRANSITION", command=lambda: set_animation_mode("TRANSITION"), width=12).pack(side='left', padx=5)
 
     ttk.Label(page5, text="Note: Start the system first (page 6) to enable testing",
-              foreground='gray', font=('Arial', 9)).pack(pady=10)
+              foreground='gray', font=('Arial', 18)).pack(pady=20)
 
     # ===== PAGE 6: Summary =====
     page6 = ttk.Frame(notebook)
     notebook.add(page6, text="6. Review")
 
-    ttk.Label(page6, text="Configuration Summary", font=('Arial', 14, 'bold')).pack(pady=10)
-    summary_text = tk.Text(page6, height=15, width=60, wrap='word', font=('Courier', 10))
+    ttk.Label(page6, text="Configuration Summary", font=('Arial', 28, 'bold')).pack(pady=20)
+    summary_text = tk.Text(page6, height=15, width=60, wrap='word', font=('Courier', 18))
     summary_text.pack(pady=10, padx=20)
 
     def update_summary():
@@ -1991,7 +2103,7 @@ def guided_setup_gui():
     # ===== Status Label =====
     status_frame = ttk.Frame(root)
     status_frame.pack(fill='x', padx=10, pady=(0, 5))
-    status_label = ttk.Label(status_frame, text="Ready to start", font=('Arial', 9), foreground='gray')
+    status_label = ttk.Label(status_frame, text="Ready to start", font=('Arial', 18), foreground='gray')
     status_label.pack()
 
     # ===== Bottom Buttons =====
@@ -2147,6 +2259,7 @@ def guided_setup_gui():
         # Create launcher instance
         launcher_instance[0] = CarpetHotelLauncher(
             audio_device=config['audio_device'],
+            sample_rate=config.get('sample_rate'),
             enable_keyboard=config['enable_keyboard'],
             enable_python_terminal=config['enable_python_terminal'],
             enable_osc_external=config['enable_osc_external'],
@@ -2429,6 +2542,8 @@ Environment Variables:
                        help='Run SuperCollider only (for testing)')
     parser.add_argument('--audio-device', type=str,
                        help='Audio device name for SuperCollider (e.g. "MacBook Pro Speakers")')
+    parser.add_argument('--sample-rate', type=int,
+                       help='Audio sample rate in Hz (e.g. 44100, 48000, 96000). Auto-detected if not specified.')
     parser.add_argument('--list-devices', action='store_true',
                        help='List available audio devices and exit')
     parser.add_argument('--test-mode', action='store_true',
@@ -2464,6 +2579,7 @@ Environment Variables:
     else:
         # Use command line arguments (legacy support for old flags)
         audio_device = args.audio_device
+        sample_rate = args.sample_rate if hasattr(args, 'sample_rate') else None
         # Map old flags to new structure
         enable_keyboard = args.test_mode
         enable_python_terminal = args.osc_control
@@ -2474,6 +2590,7 @@ Environment Variables:
 
         launcher = CarpetHotelLauncher(
             audio_device=audio_device,
+            sample_rate=sample_rate,
             enable_keyboard=enable_keyboard,
             enable_python_terminal=enable_python_terminal,
             enable_osc_external=enable_osc_external,

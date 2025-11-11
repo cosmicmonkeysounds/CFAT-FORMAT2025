@@ -6,6 +6,8 @@ __pycache__/
 *.pyd
 .Python
 
+app/configs/.carpet_hotel_config.json
+
 # Processing build outputs
 build/
 
