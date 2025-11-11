@@ -1,0 +1,31 @@
+{
+  "audio_device": "Default",
+  "master_volume": 0.7,
+  "active_displays": [
+    {
+      "index": 1,
+      "name": "Display 2",
+      "resolution": [
+        1728,
+        1117
+      ],
+      "main": false
+    },
+    {
+      "index": 0,
+      "name": "Display 1 [Primary]",
+      "resolution": [
+        5120,
+        1440
+      ],
+      "main": true
+    }
+  ],
+  "inactive_displays": [],
+  "enable_keyboard": true,
+  "serial_port": "/dev/cu.usbserial-21140 - USB2.0-Serial",
+  "window_width": 1000,
+  "window_height": 900,
+  "window_x": 5,
+  "window_y": 30
+}

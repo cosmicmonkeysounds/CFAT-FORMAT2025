@@ -110,13 +110,16 @@ DEFAULT_SETTINGS = {
     "master_volume": 0.7,
 
     # Video settings
-    "displays": [1],  # List of display indices
-    "enable_keyboard": False,
+    "active_displays": [],  # List of active display dicts
+    "inactive_displays": [],  # List of inactive display dicts
+    "enable_keyboard": True,
 
     # Hardware settings
     "serial_port": "",  # Empty = not selected
 
     # Window settings
-    "window_width": 900,
-    "window_height": 700,
+    "window_width": 1000,
+    "window_height": 900,
+    "window_x": None,
+    "window_y": None,
 }

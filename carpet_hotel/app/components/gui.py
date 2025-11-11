@@ -63,6 +63,11 @@ class CarpetHotelGUI:
         self.active_displays = []
         self.inactive_displays = []
 
+        # Display hover preview
+        self.preview_window = None
+        self.preview_display_index = None
+        self.preview_timer = None
+
         # Create GUI
         self.create_gui()
 
@@ -159,6 +164,8 @@ class CarpetHotelGUI:
                                           selectmode=tk.SINGLE)
         self.inactive_listbox.pack(fill='both', expand=True, pady=5)
         self.inactive_listbox.bind('<Double-Button-1>', self.move_to_active)
+        self.inactive_listbox.bind('<Motion>', lambda e: self.on_listbox_hover(e, self.inactive_listbox, self.inactive_displays))
+        self.inactive_listbox.bind('<Leave>', self.hide_display_preview)
 
         # Active Displays (right)
         active_frame = ttk.Frame(columns_frame)
@@ -171,6 +178,8 @@ class CarpetHotelGUI:
                                         selectmode=tk.SINGLE)
         self.active_listbox.pack(fill='both', expand=True, pady=5)
         self.active_listbox.bind('<Double-Button-1>', self.move_to_inactive)
+        self.active_listbox.bind('<Motion>', lambda e: self.on_listbox_hover(e, self.active_listbox, self.active_displays))
+        self.active_listbox.bind('<Leave>', self.hide_display_preview)
 
         # Reorder buttons below active list
         reorder_frame = ttk.Frame(active_frame)
@@ -273,6 +282,112 @@ class CarpetHotelGUI:
             self.active_displays[idx+1], self.active_displays[idx]
         self.update_display_lists()
         self.active_listbox.selection_set(idx+1)
+
+    def on_listbox_hover(self, event, listbox, display_list):
+        """Show preview window when hovering over a display in the listbox."""
+        # Get the item under cursor
+        index = listbox.nearest(event.y)
+        if index < 0 or index >= len(display_list):
+            self.hide_display_preview()
+            return
+
+        display = display_list[index]
+        display_index = display['index']
+
+        # Only show if hovering over a different display
+        if self.preview_display_index == display_index:
+            return
+
+        # Cancel any pending timer
+        if self.preview_timer:
+            self.root.after_cancel(self.preview_timer)
+
+        # Show preview after short delay (500ms)
+        self.preview_timer = self.root.after(500,
+            lambda: self.show_display_preview(display))
+
+    def show_display_preview(self, display):
+        """Show a preview window on the specified display."""
+        # Close existing preview
+        self.hide_display_preview()
+
+        # Create a new top-level window
+        self.preview_window = tk.Toplevel(self.root)
+        self.preview_window.attributes('-topmost', True)
+        self.preview_window.overrideredirect(True)  # No window decorations
+
+        # Get display info
+        display_index = display['index']
+        display_name = display['name']
+        resolution = display['resolution']
+
+        # Try to position window on the target display
+        # Note: Tkinter doesn't have perfect multi-monitor support, so we approximate
+        try:
+            # Use screeninfo to get monitor geometry if available
+            from screeninfo import get_monitors
+            monitors = get_monitors()
+            if display_index < len(monitors):
+                monitor = monitors[display_index]
+                x = monitor.x + (monitor.width // 2) - 200
+                y = monitor.y + (monitor.height // 2) - 75
+            else:
+                # Fallback: just center on main display
+                x = 300
+                y = 300
+        except:
+            # If screeninfo not available, estimate based on display index
+            x = display_index * 1920 + 600  # Assume displays are side-by-side
+            y = 400
+
+        # Position and size the window
+        self.preview_window.geometry(f"400x150+{x}+{y}")
+
+        # Set background
+        self.preview_window.configure(bg='#2c3e50')
+
+        # Add display info
+        frame = tk.Frame(self.preview_window, bg='#2c3e50', padx=30, pady=30)
+        frame.pack(fill='both', expand=True)
+
+        # Display number (large)
+        tk.Label(frame,
+                text=f"Display {display_index}",
+                font=('Arial', 32, 'bold'),
+                bg='#2c3e50',
+                fg='#ecf0f1').pack()
+
+        # Display name
+        tk.Label(frame,
+                text=display_name,
+                font=('Arial', 16),
+                bg='#2c3e50',
+                fg='#95a5a6').pack(pady=(10, 0))
+
+        # Resolution
+        tk.Label(frame,
+                text=f"{resolution[0]} × {resolution[1]}",
+                font=('Arial', 12),
+                bg='#2c3e50',
+                fg='#7f8c8d').pack()
+
+        self.preview_display_index = display_index
+
+    def hide_display_preview(self, event=None):
+        """Hide the display preview window."""
+        # Cancel any pending timer
+        if self.preview_timer:
+            self.root.after_cancel(self.preview_timer)
+            self.preview_timer = None
+
+        # Close preview window
+        if self.preview_window:
+            try:
+                self.preview_window.destroy()
+            except:
+                pass
+            self.preview_window = None
+            self.preview_display_index = None
 
     def start_video(self):
         """Start Processing video system."""
@@ -973,28 +1088,81 @@ class CarpetHotelGUI:
         self.volume_label.config(text=f"{int(volume * 100)}%")
         self.core.master_volume = volume
 
+        # Apply saved audio device
+        audio_device = self.settings.get("audio_device", DEFAULT_SETTINGS["audio_device"])
+        if audio_device:
+            self.audio_device_var.set(audio_device)
+
         # Apply saved serial port
         serial_port = self.settings.get("serial_port", DEFAULT_SETTINGS["serial_port"])
         if serial_port:
             self.serial_port_var.set(serial_port)
 
-        # Apply saved displays
-        displays = self.settings.get("displays", DEFAULT_SETTINGS["displays"])
-        if displays:
-            self.core.num_displays = len(displays)
-            # Update scene dropdown based on displays
-            self.root.after(100, self.update_scene_dropdown)
+        # Apply saved keyboard setting
+        enable_keyboard = self.settings.get("enable_keyboard", DEFAULT_SETTINGS["enable_keyboard"])
+        self.video_keyboard_var.set(enable_keyboard)
 
-        print(f"✓ Settings loaded: volume={int(volume*100)}%, displays={displays}, port={serial_port}")
+        # Apply saved display lists
+        saved_active = self.settings.get("active_displays", DEFAULT_SETTINGS["active_displays"])
+        saved_inactive = self.settings.get("inactive_displays", DEFAULT_SETTINGS["inactive_displays"])
+
+        # Only restore if we have saved displays
+        if saved_active or saved_inactive:
+            self.active_displays = saved_active
+            self.inactive_displays = saved_inactive
+            self.update_display_lists()
+
+            if saved_active:
+                self.core.num_displays = len(saved_active)
+                # Update scene dropdown based on displays
+                self.root.after(100, self.update_scene_dropdown)
+
+        # Apply saved window geometry
+        window_x = self.settings.get("window_x")
+        window_y = self.settings.get("window_y")
+        window_width = self.settings.get("window_width", DEFAULT_SETTINGS["window_width"])
+        window_height = self.settings.get("window_height", DEFAULT_SETTINGS["window_height"])
+
+        if window_x is not None and window_y is not None:
+            self.root.geometry(f"{window_width}x{window_height}+{window_x}+{window_y}")
+        else:
+            self.root.geometry(f"{window_width}x{window_height}")
+
+        print(f"✓ Settings loaded: volume={int(volume*100)}%, active_displays={len(saved_active)}, keyboard={enable_keyboard}")
 
     def save_settings(self):
         """Save current GUI settings."""
+        # Get window geometry
+        geometry = self.root.geometry()  # Returns "widthxheight+x+y"
+        try:
+            size, position = geometry.split('+', 1)
+            width, height = map(int, size.split('x'))
+            x, y = map(int, position.split('+'))
+        except:
+            width, height = DEFAULT_SETTINGS["window_width"], DEFAULT_SETTINGS["window_height"]
+            x, y = None, None
+
         self.settings.update({
+            # Audio settings
+            "audio_device": self.audio_device_var.get(),
             "master_volume": self.volume_var.get(),
+
+            # Video settings
+            "active_displays": self.active_displays,
+            "inactive_displays": self.inactive_displays,
+            "enable_keyboard": self.video_keyboard_var.get(),
+
+            # Hardware settings
             "serial_port": self.serial_port_var.get(),
-            "displays": self.active_displays,  # Save active displays
+
+            # Window settings
+            "window_width": width,
+            "window_height": height,
+            "window_x": x,
+            "window_y": y,
         })
         self.settings.save()
+        print(f"✓ Settings saved: {len(self.active_displays)} active displays, keyboard={self.video_keyboard_var.get()}")
 
     def run(self):
         """Run the GUI main loop."""
