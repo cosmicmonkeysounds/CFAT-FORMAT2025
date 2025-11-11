@@ -26,6 +26,17 @@ from carpet_hotel_scd import CarpetHotelSuperCollider
 from carpet_hotel_pde import CarpetHotelProcessing
 from carpet_hotel_arduino import CarpetHotelArduino
 
+# OSC forwarding
+try:
+    from pythonosc import udp_client
+    from pythonosc.dispatcher import Dispatcher
+    from pythonosc.osc_server import ThreadingOSCUDPServer
+    OSC_AVAILABLE = True
+except ImportError:
+    OSC_AVAILABLE = False
+    print("⚠ python-osc not installed - OSC forwarding disabled")
+    print("  Install with: pip install python-osc")
+
 
 class CarpetHotelCore:
     """
@@ -53,6 +64,19 @@ class CarpetHotelCore:
         self._monitor_thread = None
         self._monitor_running = False
 
+        # OSC communication
+        self.osc_server = None
+        self.osc_thread = None
+        self.sc_client = None
+        self.processing_recv_port = 12001  # Receive from Processing
+        self.sc_send_port = 57120          # Send to SuperCollider
+
+        # Global state (brain manages all state)
+        self.current_scene = 0
+        self.master_volume = 0.7
+        self.num_displays = 2
+        self.is_animating = False
+
         # Register cleanup handlers
         atexit.register(self._cleanup)
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -70,6 +94,13 @@ class CarpetHotelCore:
         self._monitor_running = False
         if self._monitor_thread and self._monitor_thread.is_alive():
             self._monitor_thread.join(timeout=1)
+
+        # Stop OSC server
+        if self.osc_server:
+            try:
+                self.osc_server.shutdown()
+            except:
+                pass
 
         if self.is_running():
             print("\nCleaning up running processes...")
@@ -101,6 +132,114 @@ class CarpetHotelCore:
                 daemon=True
             )
             self._monitor_thread.start()
+
+    # ========================================================================
+    # OSC Communication (Brain manages all state and routing)
+    # ========================================================================
+
+    def setup_osc(self) -> bool:
+        """
+        Setup OSC communication as central hub.
+
+        Core receives messages from Processing and forwards to SuperCollider.
+        Core manages all global state.
+
+        Returns:
+            True if setup successful
+        """
+        if not OSC_AVAILABLE:
+            print("⚠ OSC not available - audio control disabled")
+            return False
+
+        print("\nSetting up OSC communication...")
+        print("  Architecture: Processing ↔ Core (Brain) ↔ SuperCollider")
+
+        # Create OSC client to send to SuperCollider
+        self.sc_client = udp_client.SimpleUDPClient("127.0.0.1", self.sc_send_port)
+        print(f"  ✓ OSC client → SuperCollider (port {self.sc_send_port})")
+
+        # Create OSC server to receive from Processing
+        dispatcher = Dispatcher()
+        dispatcher.map("/carpet/scene", self._handle_scene)
+        dispatcher.map("/carpet/transition", self._handle_transition)
+        dispatcher.map("/carpet/volume", self._handle_volume)
+        dispatcher.map("/carpet/state", self._handle_state)
+
+        self.osc_server = ThreadingOSCUDPServer(
+            ("127.0.0.1", self.processing_recv_port),
+            dispatcher
+        )
+
+        # Start OSC server in background thread
+        self.osc_thread = threading.Thread(target=self.osc_server.serve_forever, daemon=True)
+        self.osc_thread.start()
+
+        print(f"  ✓ OSC server ← Processing (port {self.processing_recv_port})")
+        print("✓ OSC communication ready")
+
+        return True
+
+    def _handle_scene(self, address, *args):
+        """Handle scene change from Processing."""
+        if len(args) >= 3:
+            scene = args[0]
+            num_windows = args[1]
+            is_animating = args[2]
+
+            # Update global state
+            self.current_scene = scene
+            self.num_displays = num_windows
+            self.is_animating = (is_animating != 0)
+
+            # Forward to SuperCollider
+            if self.sc_client and self.sc_running:
+                self.sc_client.send_message("/carpet/scene", args)
+                print(f"[Core] Scene {scene} → SuperCollider")
+
+    def _handle_transition(self, address, *args):
+        """Handle transition from Processing."""
+        # Forward directly to SuperCollider
+        if self.sc_client and self.sc_running:
+            self.sc_client.send_message("/carpet/transition", args)
+            # Don't spam console during transitions
+
+    def _handle_volume(self, address, *args):
+        """Handle volume change from Processing."""
+        if len(args) >= 1:
+            volume = float(args[0])
+
+            # Update global state
+            self.master_volume = volume
+
+            # Forward to SuperCollider
+            if self.sc_client and self.sc_running:
+                self.sc_client.send_message("/carpet/volume", [volume])
+                print(f"[Core] Volume {int(volume * 100)}% → SuperCollider")
+
+    def _handle_state(self, address, *args):
+        """Handle state updates from Processing."""
+        if len(args) >= 1:
+            state = args[0]
+            print(f"[Core] Processing state: {state}")
+
+    def send_initial_scene(self):
+        """Send initial scene to SuperCollider to start audio."""
+        if self.sc_client and self.sc_running:
+            # Send scene 0 with current number of displays
+            self.sc_client.send_message("/carpet/scene", [
+                self.current_scene,
+                self.num_displays,
+                0  # not animating
+            ])
+            print(f"[Core] Initial scene {self.current_scene} → SuperCollider")
+
+            # Send initial volume
+            self.sc_client.send_message("/carpet/volume", [self.master_volume])
+            print(f"[Core] Initial volume {int(self.master_volume * 100)}% → SuperCollider")
+
+    # ========================================================================
+    # Component Management
+    # ========================================================================
 
     def start_supercollider(self) -> bool:
         """
@@ -156,6 +295,10 @@ class CarpetHotelCore:
             print("⚠ Processing already running")
             return True
 
+        # Update num_displays state
+        if displays:
+            self.num_displays = len(displays)
+
         self.processing = CarpetHotelProcessing(
             displays=displays,
             enable_keyboard=enable_keyboard
@@ -163,6 +306,17 @@ class CarpetHotelCore:
 
         if self.processing.start():
             self.pde_running = True
+
+            # Setup OSC communication if not already done
+            if not self.osc_server and OSC_AVAILABLE:
+                self.setup_osc()
+
+            # If both Processing and SC are running, send initial scene
+            if self.sc_running and self.osc_server:
+                print("\nBoth systems ready - starting audio...")
+                time.sleep(2)  # Give Processing time to init OSC
+                self.send_initial_scene()
+
             # Start monitoring thread to detect unexpected exits
             self._start_monitoring()
             return True
