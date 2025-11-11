@@ -7,9 +7,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from carpet_hotel_pde import CarpetHotelProcessing
+from components.processing import CarpetHotelProcessing
 
 def test_cleanup():
     """Test that Processing starts and stops cleanly."""

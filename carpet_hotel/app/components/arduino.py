@@ -20,8 +20,8 @@ from pythonosc import udp_client
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
 
-from utils import find_arduino_port, detect_serial_ports
-from logger import get_logger
+from components.utils.utils import find_arduino_port, detect_serial_ports
+from components.logger import get_logger
 
 
 class CarpetHotelArduino:

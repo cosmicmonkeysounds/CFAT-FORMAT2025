@@ -10,8 +10,8 @@ import sys
 import subprocess
 from pathlib import Path
 
-# Add parent directory to path for imports
-script_dir = Path(__file__).parent.parent.absolute()
+# Add app directory to path for imports
+script_dir = Path(__file__).parent.parent.parent.absolute()  # /app/
 sys.path.insert(0, str(script_dir))
 
 # Colors for output
@@ -37,8 +37,8 @@ def print_warn(msg):
 
 class LaunchScriptTests:
     def __init__(self):
-        self.script_dir = Path(__file__).parent.parent.absolute()
-        self.parent_dir = self.script_dir.parent
+        self.script_dir = Path(__file__).parent.parent.parent.absolute()  # /app/
+        self.parent_dir = self.script_dir.parent  # /carpet_hotel/
         self.parser_script = self.script_dir / 'carpet_hotel_parser.py'
         self.core_script = self.script_dir / 'carpet_hotel.py'
         self.gui_script = self.script_dir / 'carpet_hotel_gui.py'

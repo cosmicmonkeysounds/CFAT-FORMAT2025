@@ -17,7 +17,7 @@ import time
 from typing import Optional, List
 from pathlib import Path
 
-from utils import find_sclang, ProcessWrapper, get_app_dir, detect_audio_devices, detect_sample_rates
+from components.utils.utils import find_sclang, ProcessWrapper, get_app_dir, detect_audio_devices, detect_sample_rates
 
 
 class CarpetHotelSuperCollider:

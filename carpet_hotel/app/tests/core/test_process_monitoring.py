@@ -7,9 +7,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from carpet_hotel import CarpetHotelCore
+from carpet_hotel_core import CarpetHotelCore
 
 def test_monitoring():
     """Test that core detects when Processing exits unexpectedly."""

@@ -18,8 +18,8 @@ import threading
 from typing import Optional, List, Dict
 from pathlib import Path
 
-from utils import find_processing_java, ProcessWrapper, get_app_dir, detect_displays, get_data_dir
-from logger import get_logger
+from components.utils.utils import find_processing_java, ProcessWrapper, get_app_dir, detect_displays, get_data_dir
+from components.logger import get_logger
 
 
 class CarpetHotelProcessing:

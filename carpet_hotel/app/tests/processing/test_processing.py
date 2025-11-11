@@ -6,11 +6,11 @@ Test Processing wrapper
 import sys
 from pathlib import Path
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add app directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from carpet_hotel_pde import CarpetHotelProcessing
-from utils import find_processing_java, detect_displays
+from components.processing import CarpetHotelProcessing
+from components.utils.utils import find_processing_java, detect_displays
 
 def main():
     print("="*60)

@@ -16,8 +16,8 @@ Or import and use:
 
 import sys
 import argparse
-from carpet_hotel import CarpetHotelCore
-from carpet_hotel_scd import CarpetHotelSuperCollider
+from carpet_hotel_core import CarpetHotelCore
+from components.supercollider import CarpetHotelSuperCollider
 
 
 def parse_arguments():

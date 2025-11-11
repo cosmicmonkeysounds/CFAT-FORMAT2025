@@ -19,12 +19,16 @@ import time
 from typing import Optional, List, Dict
 
 # Import core and wrapper modules
-from carpet_hotel import CarpetHotelCore
-from carpet_hotel_scd import CarpetHotelSuperCollider
-from carpet_hotel_pde import CarpetHotelProcessing
-from carpet_hotel_arduino import CarpetHotelArduino
-from utils import detect_displays, detect_serial_ports
-from settings_manager import SettingsManager, DEFAULT_SETTINGS
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from carpet_hotel_core import CarpetHotelCore
+from components.supercollider import CarpetHotelSuperCollider
+from components.processing import CarpetHotelProcessing
+from components.arduino import CarpetHotelArduino
+from components.utils.utils import detect_displays, detect_serial_ports
+from components.settings_manager import SettingsManager, DEFAULT_SETTINGS
 
 # Check for OSC
 try:

@@ -22,13 +22,15 @@ import serial.tools.list_ports
 # ============================================================================
 
 def get_project_root() -> Path:
-    """Get the project root directory."""
-    return Path(__file__).parent.parent.absolute()
+    """Get the project root directory (carpets/carpet_hotel/)."""
+    # utils.py is in app/components/utils/, so go up 3 levels to project root
+    return Path(__file__).parent.parent.parent.parent.absolute()
 
 
 def get_app_dir() -> Path:
-    """Get the app directory."""
-    return Path(__file__).parent.absolute()
+    """Get the app directory (carpets/carpet_hotel/app/)."""
+    # utils.py is in app/components/utils/, so go up 2 levels to app/
+    return Path(__file__).parent.parent.parent.absolute()
 
 
 def get_data_dir() -> Path:

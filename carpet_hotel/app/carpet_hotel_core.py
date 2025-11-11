@@ -22,10 +22,10 @@ import threading
 import time
 
 # Import wrapper modules
-from carpet_hotel_scd import CarpetHotelSuperCollider
-from carpet_hotel_pde import CarpetHotelProcessing
-from carpet_hotel_arduino import CarpetHotelArduino
-from logger import get_logger
+from components.supercollider import CarpetHotelSuperCollider
+from components.processing import CarpetHotelProcessing
+from components.arduino import CarpetHotelArduino
+from components.logger import get_logger
 
 # OSC forwarding
 try:
