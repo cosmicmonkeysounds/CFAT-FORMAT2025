@@ -172,7 +172,7 @@ enum AnimMode {
 };
 
 AnimMode currentMode = ANIM_OFF;
-unsigned long transitionPeriod = 500;  // ms per LED in transition
+unsigned long transitionPeriod = 150;  // ms per LED in transition (was 500, now 150 for faster cycling)
 unsigned long lastAnimUpdate = 0;
 int transitionState = 0;  // 0=RED, 1=YELLOW, 2=GREEN
 float pulsePhase = 0.0;   // 0.0 to 2*PI for stable pulse
@@ -323,9 +323,9 @@ void updateAnimations() {
       break;
 
     case ANIM_STABLE: {
-      // Green LED blinks slowly (on/off pattern)
-      // Since PWM doesn't work, use simple on/off blinking
-      unsigned long blinkPeriod = 1000;  // 1 second period
+      // Green LED blinks quickly (on/off pattern)
+      // Faster blink for more responsiveness
+      unsigned long blinkPeriod = 300;  // 300ms period (was 1000ms)
       bool ledOn = (now / blinkPeriod) % 2 == 0;
 
       digitalWrite(PIN_LED_GREEN, ledOn ? HIGH : LOW);

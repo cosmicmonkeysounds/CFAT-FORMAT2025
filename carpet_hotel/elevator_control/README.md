@@ -81,15 +81,15 @@ That's it! No separate bridge script needed. Files are automatically discovered 
 The system features automatic LED animations controlled by the Python launcher:
 
 ### Stable Scene Mode
-- **GREEN LED blinks slowly** (1 second on, 1 second off)
+- **GREEN LED blinks quickly** (300ms on, 300ms off)
 - Yellow and Red LEDs are off
 - Indicates the system is ready and in a stable scene
 
 ### Transition Mode
-- **LEDs cycle**: RED → YELLOW → GREEN
+- **LEDs cycle rapidly**: RED → YELLOW → GREEN
 - Each LED lights up in sequence (on/off)
 - Indicates a scene transition is in progress
-- Default period: 400ms per LED
+- Default period: 150ms per LED (very fast!)
 
 ## Communication Protocol
 

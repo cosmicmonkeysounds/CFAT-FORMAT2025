@@ -743,7 +743,7 @@ class CarpetHotelLauncher:
             print("[Arduino] Initializing LED animations...")
             self.log("[Arduino] Initializing LED animations...")
             time.sleep(0.5)  # Give thread time to start
-            self.send_arduino_period(400)  # 400ms per LED in transition mode
+            self.send_arduino_period(150)  # 150ms per LED in transition mode (fast!)
             time.sleep(0.1)
             self.send_arduino_animation("STABLE")  # Start in stable mode
 
@@ -831,9 +831,9 @@ class CarpetHotelLauncher:
                                     print(f"[Arduino] DEBUG: OSC sent, current_scene updated to {self.current_scene}")
                                     self.log(f"[Arduino] DEBUG: OSC sent, current_scene updated to {self.current_scene}")
 
-                                    # Schedule return to stable mode after transition (3 seconds)
+                                    # Schedule return to stable mode after transition (1 second)
                                     def back_to_stable():
-                                        time.sleep(3.0)
+                                        time.sleep(1.0)  # Reduced from 3.0 to 1.0 for faster feedback
                                         if self.arduino_serial and self.arduino_running:
                                             self.send_arduino_animation("STABLE")
 
@@ -869,9 +869,9 @@ class CarpetHotelLauncher:
                                     print(f"[Arduino] DEBUG: OSC sent, current_scene updated to {self.current_scene}")
                                     self.log(f"[Arduino] DEBUG: OSC sent, current_scene updated to {self.current_scene}")
 
-                                    # Schedule return to stable mode after transition (3 seconds)
+                                    # Schedule return to stable mode after transition (1 second)
                                     def back_to_stable():
-                                        time.sleep(3.0)
+                                        time.sleep(1.0)  # Reduced from 3.0 to 1.0 for faster feedback
                                         if self.arduino_serial and self.arduino_running:
                                             self.send_arduino_animation("STABLE")
 
