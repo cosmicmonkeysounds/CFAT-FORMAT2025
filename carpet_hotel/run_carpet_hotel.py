@@ -51,9 +51,18 @@ except ImportError:
     print("Warning: screeninfo not installed. Screen detection will be limited.")
     print("  Install with: pip install screeninfo")
 
+try:
+    import serial
+    import serial.tools.list_ports
+    SERIAL_AVAILABLE = True
+except ImportError:
+    SERIAL_AVAILABLE = False
+    print("Warning: pyserial not installed. Arduino elevator control will not be available.")
+    print("  Install with: pip install pyserial")
+
 class CarpetHotelLauncher:
     def __init__(self, audio_device=None, enable_keyboard=True, enable_python_terminal=True,
-                 enable_osc_external=True, displays=None):
+                 enable_osc_external=True, displays=None, arduino_port="auto"):
         self.sc_process = None
         self.processing_process = None
         self.script_dir = Path(__file__).parent.absolute()
@@ -79,6 +88,17 @@ class CarpetHotelLauncher:
         self.sc_recv_port = 57121  # Receive from SuperCollider (if needed)
         self.current_state = "unknown"
         self.is_paused = False  # Track pause state
+
+        # Scene tracking for Arduino control
+        self.current_scene = 0
+        self.total_scenes = 9  # Scenes 0-8
+
+        # Arduino elevator control
+        self.arduino_serial = None
+        self.arduino_thread = None
+        self.arduino_port_config = arduino_port  # "auto" or specific port path
+        self.arduino_port = None  # Will be set during setup
+        self.arduino_running = False
 
         # Paths
         self.sc_script = self.script_dir / "carpet_hotel_audio.scd"
@@ -299,7 +319,8 @@ class CarpetHotelLauncher:
                             if "could not initialize audio" in line or "Server 'localhost' exited" in line:
                                 failure_marker = True
                     except Exception as e:
-                        print(f"[SC] Stream error: {e}")
+                        # print(f"[SC] Stream error: {e}")
+                        pass
 
                 # Start background thread to collect output
                 sc_thread = threading.Thread(target=collect_output, daemon=True)
@@ -461,18 +482,22 @@ class CarpetHotelLauncher:
     def setup_osc(self):
         """Setup OSC communication with Processing and SuperCollider."""
         if not OSC_AVAILABLE:
+            self.log("OSC setup skipped: python-osc not available")
             return
 
         if not (self.enable_python_terminal or self.enable_osc_external):
+            self.log("OSC setup skipped: no OSC-requiring features enabled")
             return
 
         self.log("\n=== Setting up OSC control ===")
 
         # Create OSC client to send to Processing
         self.osc_client = udp_client.SimpleUDPClient("127.0.0.1", self.processing_send_port)
+        self.log(f"✓ OSC client created: {self.osc_client}")
 
         # Create OSC client to send to SuperCollider
         self.sc_osc_client = udp_client.SimpleUDPClient("127.0.0.1", self.sc_send_port)
+        self.log(f"✓ SC OSC client created: {self.sc_osc_client}")
 
         # Create OSC server to receive from Processing
         dispatcher = Dispatcher()
@@ -481,6 +506,10 @@ class CarpetHotelLauncher:
         dispatcher.map("/carpet/scene", self.forward_to_sc)
         dispatcher.map("/carpet/transition", self.forward_to_sc)
         dispatcher.map("/carpet/volume", self.forward_to_sc)
+        # Arduino elevator LED control
+        dispatcher.map("/carpet/elevator/led/red", self.handle_elevator_led_red)
+        dispatcher.map("/carpet/elevator/led/yellow", self.handle_elevator_led_yellow)
+        dispatcher.map("/carpet/elevator/led/green", self.handle_elevator_led_green)
         self.osc_server = ThreadingOSCUDPServer(("127.0.0.1", self.processing_recv_port), dispatcher)
 
         # Start OSC server in background thread
@@ -492,47 +521,295 @@ class CarpetHotelLauncher:
         self.log(f"  SuperCollider: send={self.sc_send_port}")
         self.log(f"  Python is now the OSC bus (Processing ↔ Python ↔ SuperCollider)")
 
+        # Send a test message to Processing to verify connection
+        try:
+            self.log("DEBUG: Sending test OSC message to Processing...")
+            self.osc_client.send_message("/carpet/test", [])
+            self.log("DEBUG: Test message sent")
+        except Exception as e:
+            self.log(f"DEBUG: Error sending test message: {e}")
+
     def forward_to_sc(self, address, *args):
         """Forward OSC messages to SuperCollider."""
         if self.sc_osc_client and not self.is_paused:
             try:
                 self.sc_osc_client.send_message(address, args)
-                self.log(f"[OSC-FWD] {address} {args} → SuperCollider")
+                # self.log(f"[OSC-FWD] {address} {args} → SuperCollider")
             except Exception as e:
-                self.log(f"[OSC-ERR] Failed to forward to SC: {e}")
+                # self.log(f"[OSC-ERR] Failed to forward to SC: {e}")
+                pass
 
     def handle_processing_state(self, address, *args):
         """Handle state updates from Processing."""
         state = args[0] if args else "unknown"
         self.current_state = state
+
+        # Track current scene for Arduino control
         if state == "entering_scene":
-            scene = args[1] if len(args) > 1 else "?"
-            print(f"\n[Processing] Entered scene {scene}")
-        elif state == "entering_transition":
-            from_scene = args[1] if len(args) > 1 else "?"
-            to_scene = args[2] if len(args) > 2 else "?"
-            print(f"\n[Processing] Transitioning {from_scene} -> {to_scene}")
-        elif state == "transition_started":
-            from_scene = args[1] if len(args) > 1 else "?"
-            to_scene = args[2] if len(args) > 2 else "?"
-            print(f"\n[Processing] Transition started: {from_scene} -> {to_scene}")
-        elif state == "error":
-            error = args[1] if len(args) > 1 else "Unknown error"
-            print(f"\n[Processing] ERROR: {error}")
+            scene = args[1] if len(args) > 1 else None
+            if scene is not None:
+                try:
+                    self.current_scene = int(scene)
+                    self.log(f"[Scene] Now on scene {self.current_scene}")
+                except (ValueError, TypeError):
+                    pass
+        # if state == "entering_scene":
+        #     scene = args[1] if len(args) > 1 else "?"
+        #     print(f"\n[Processing] Entered scene {scene}")
+        # elif state == "entering_transition":
+        #     from_scene = args[1] if len(args) > 1 else "?"
+        #     to_scene = args[2] if len(args) > 2 else "?"
+        #     print(f"\n[Processing] Transitioning {from_scene} -> {to_scene}")
+        # elif state == "transition_started":
+        #     from_scene = args[1] if len(args) > 1 else "?"
+        #     to_scene = args[2] if len(args) > 2 else "?"
+        #     print(f"\n[Processing] Transition started: {from_scene} -> {to_scene}")
+        # elif state == "error":
+        #     error = args[1] if len(args) > 1 else "Unknown error"
+        #     print(f"\n[Processing] ERROR: {error}")
 
     def send_scene_command(self, scene):
         """Send scene transition command to Processing via OSC."""
         if not self.osc_client:
-            print("OSC control not enabled!")
+            # print("OSC control not enabled!")
             return False
 
         try:
             self.osc_client.send_message("/carpet/goto", scene)
-            print(f"[Python] Sent: goto scene {scene}")
+            # print(f"[Python] Sent: goto scene {scene}")
             return True
         except Exception as e:
-            print(f"Error sending OSC: {e}")
+            # print(f"Error sending OSC: {e}")
             return False
+
+    # ============================================================================
+    # ARDUINO ELEVATOR CONTROL
+    # ============================================================================
+
+    def find_arduino_port(self):
+        """Find the Arduino port automatically."""
+        if not SERIAL_AVAILABLE:
+            return None
+
+        ports = list(serial.tools.list_ports.comports())
+        for port in ports:
+            # Look for Arduino boards (including Nano with CH340/FTDI chips)
+            desc_lower = port.description.lower()
+            if any(keyword in desc_lower for keyword in ['arduino', 'adafruit', 'ch340', 'ch341', 'ftdi', 'nano']):
+                return port.device
+        return None
+
+    def setup_arduino(self):
+        """Setup Arduino elevator control via serial."""
+        print("\n=== Setting up Arduino elevator control ===", flush=True)
+        if not SERIAL_AVAILABLE:
+            print("Arduino control skipped: pyserial not installed", flush=True)
+            self.log("Arduino control skipped: pyserial not installed")
+            return False
+
+        if not self.enable_osc_external:
+            print("Arduino control skipped: enable_osc_external=False", flush=True)
+            return False
+
+        print("=== Setting up Arduino elevator control ===", flush=True)
+        self.log("\n=== Setting up Arduino elevator control ===")
+
+        # Determine Arduino port
+        if self.arduino_port_config == "auto":
+            print("Searching for Arduino (auto-detect)...")
+            self.arduino_port = self.find_arduino_port()
+            if not self.arduino_port:
+                print("⚠ No Arduino found (auto-detect) - elevator control disabled")
+                print("  Available ports:")
+                self.log("⚠ No Arduino found (auto-detect) - elevator control disabled")
+                self.log("  Available ports:")
+                for p in serial.tools.list_ports.comports():
+                    print(f"    {p.device}: {p.description}")
+                    self.log(f"    {p.device}: {p.description}")
+                return False
+            print(f"✓ Found Arduino at: {self.arduino_port}")
+        else:
+            # Use user-specified port
+            self.arduino_port = self.arduino_port_config
+            print(f"Using specified Arduino port: {self.arduino_port}")
+            self.log(f"Using specified Arduino port: {self.arduino_port}")
+
+        # Connect to Arduino (using same settings as test_elevator_arduino.py)
+        try:
+            self.log(f"Connecting to Arduino on {self.arduino_port}...")
+            self.arduino_serial = serial.Serial(self.arduino_port, 115200, timeout=1)
+            self.log(f"✓ Serial port opened: {self.arduino_serial}")
+            time.sleep(2)  # Wait for Arduino to reset
+
+            # Wait for READY message
+            self.log("Waiting for Arduino READY message...")
+            start_time = time.time()
+            while time.time() - start_time < 5:
+                if self.arduino_serial.in_waiting:
+                    line = self.arduino_serial.readline().decode('utf-8').strip()
+                    self.log(f"  Arduino: {line}")
+                    if line == "READY":
+                        self.log("✓ Arduino connected and ready")
+                        break
+
+            # Start monitoring thread
+            self.arduino_running = True
+            self.arduino_thread = threading.Thread(target=self.monitor_arduino, daemon=True)
+            self.arduino_thread.start()
+
+            self.log("✓ Arduino elevator control enabled")
+            self.log(f"  Button presses will trigger scene changes")
+            return True
+
+        except serial.SerialException as e:
+            self.log(f"⚠ Failed to connect to Arduino: {e}")
+            return False
+
+    def monitor_arduino(self):
+        """Monitor Arduino serial port for button presses."""
+        # Print to BOTH terminal and log
+        print("[Arduino] Monitor thread started")
+        self.log("[Arduino] Monitor thread started")
+        print(f"[Arduino] DEBUG: Serial port: {self.arduino_serial}")
+        self.log(f"[Arduino] DEBUG: Serial port: {self.arduino_serial}")
+        print(f"[Arduino] DEBUG: Serial port name: {self.arduino_serial.port}")
+        self.log(f"[Arduino] DEBUG: Serial port name: {self.arduino_serial.port}")
+        print(f"[Arduino] DEBUG: Serial is_open: {self.arduino_serial.is_open}")
+        self.log(f"[Arduino] DEBUG: Serial is_open: {self.arduino_serial.is_open}")
+        print(f"[Arduino] DEBUG: Serial baudrate: {self.arduino_serial.baudrate}")
+        self.log(f"[Arduino] DEBUG: Serial baudrate: {self.arduino_serial.baudrate}")
+        print(f"[Arduino] DEBUG: Serial timeout: {self.arduino_serial.timeout}")
+        self.log(f"[Arduino] DEBUG: Serial timeout: {self.arduino_serial.timeout}")
+        print(f"[Arduino] DEBUG: osc_client = {self.osc_client}")
+        self.log(f"[Arduino] DEBUG: osc_client = {self.osc_client}")
+        print(f"[Arduino] DEBUG: current_scene = {self.current_scene}, total_scenes = {self.total_scenes}")
+        self.log(f"[Arduino] DEBUG: current_scene = {self.current_scene}, total_scenes = {self.total_scenes}")
+
+        # Test read immediately
+        print("[Arduino] DEBUG: Checking for immediate data...")
+        self.log("[Arduino] DEBUG: Checking for immediate data...")
+        if self.arduino_serial.in_waiting:
+            print(f"[Arduino] DEBUG: {self.arduino_serial.in_waiting} bytes waiting immediately!")
+            self.log(f"[Arduino] DEBUG: {self.arduino_serial.in_waiting} bytes waiting immediately!")
+        else:
+            print("[Arduino] DEBUG: No data waiting immediately")
+            self.log("[Arduino] DEBUG: No data waiting immediately")
+
+        # Use exact same approach as test_elevator_arduino.py
+        loop_count = 0
+        while self.arduino_running and self.arduino_serial:
+            try:
+                loop_count += 1
+                if loop_count % 100 == 0:  # Log every 100 loops to show it's running
+                    self.log(f"[Arduino] Loop #{loop_count}, in_waiting={self.arduino_serial.in_waiting}")
+
+                # Check for button presses from Arduino (same as test script)
+                if self.arduino_serial.in_waiting:
+                    line = self.arduino_serial.readline().decode('utf-8').strip()
+                    print(f"[Arduino] Raw received: '{line}' (len={len(line)})")
+                    self.log(f"[Arduino] Raw received: '{line}' (len={len(line)})")
+
+                    if not line:
+                        continue
+
+                    if line == "READY":
+                        print("[Arduino] Received READY message")
+                        self.log("[Arduino] Received READY message")
+                        continue
+
+                    # Handle button presses - increment/decrement scene
+                    if line == "up":
+                        print(f"[Arduino] DEBUG: Handling UP - current_scene={self.current_scene}")
+                        next_scene = min(self.current_scene + 1, self.total_scenes - 1)
+                        print(f"[Arduino] DEBUG: Calculated next_scene={next_scene}")
+
+                        if next_scene != self.current_scene:
+                            print(f"[Arduino] UP button → scene {self.current_scene} → {next_scene}")
+                            self.log(f"[Arduino] UP button → scene {self.current_scene} → {next_scene}")
+                            if self.osc_client:
+                                print(f"[Arduino] DEBUG: Sending OSC /carpet/goto {next_scene}")
+                                try:
+                                    self.osc_client.send_message("/carpet/goto", next_scene)
+                                    # Update internal state immediately
+                                    self.current_scene = next_scene
+                                    print(f"[Arduino] DEBUG: OSC sent, current_scene updated to {self.current_scene}")
+                                    self.log(f"[Arduino] DEBUG: OSC sent, current_scene updated to {self.current_scene}")
+                                except Exception as e:
+                                    print(f"[Arduino] ERROR sending OSC: {e}")
+                                    self.log(f"[Arduino] ERROR sending OSC: {e}")
+                            else:
+                                print("[Arduino] ERROR: OSC client is None!")
+                                self.log("[Arduino] ERROR: OSC client is None!")
+                        else:
+                            print(f"[Arduino] UP button → already at max scene {self.current_scene}")
+
+                    elif line == "down":
+                        print(f"[Arduino] DEBUG: Handling DOWN - current_scene={self.current_scene}")
+                        prev_scene = max(self.current_scene - 1, 0)
+                        print(f"[Arduino] DEBUG: Calculated prev_scene={prev_scene}")
+
+                        if prev_scene != self.current_scene:
+                            print(f"[Arduino] DOWN button → scene {self.current_scene} → {prev_scene}")
+                            self.log(f"[Arduino] DOWN button → scene {self.current_scene} → {prev_scene}")
+                            if self.osc_client:
+                                print(f"[Arduino] DEBUG: Sending OSC /carpet/goto {prev_scene}")
+                                try:
+                                    self.osc_client.send_message("/carpet/goto", prev_scene)
+                                    # Update internal state immediately
+                                    self.current_scene = prev_scene
+                                    print(f"[Arduino] DEBUG: OSC sent, current_scene updated to {self.current_scene}")
+                                    self.log(f"[Arduino] DEBUG: OSC sent, current_scene updated to {self.current_scene}")
+                                except Exception as e:
+                                    print(f"[Arduino] ERROR sending OSC: {e}")
+                                    self.log(f"[Arduino] ERROR sending OSC: {e}")
+                            else:
+                                print("[Arduino] ERROR: OSC client is None!")
+                                self.log("[Arduino] ERROR: OSC client is None!")
+                        else:
+                            print(f"[Arduino] DOWN button → already at min scene {self.current_scene}")
+
+                    else:
+                        print(f"[Arduino] Unknown message: '{line}'")
+                        self.log(f"[Arduino] Unknown message: '{line}'")
+
+                time.sleep(0.01)  # Small delay to prevent CPU spinning
+
+            except Exception as e:
+                if self.arduino_running:  # Only log if we haven't deliberately shut down
+                    self.log(f"[Arduino] Error reading serial: {e}")
+                break
+
+        self.log("[Arduino] Monitor thread stopped")
+
+    def send_arduino_led(self, led_name, state):
+        """Send LED command to Arduino via serial."""
+        if not self.arduino_serial:
+            return
+
+        try:
+            cmd = f"{led_name.upper()}:{1 if state else 0}\n"
+            self.arduino_serial.write(cmd.encode())
+            self.log(f"[Arduino] LED command: {cmd.strip()}")
+        except Exception as e:
+            self.log(f"[Arduino] Error sending LED command: {e}")
+
+    def handle_elevator_led_red(self, address, *args):
+        """Handle red LED OSC message."""
+        if args:
+            state = int(args[0])
+            self.send_arduino_led("RED", state)
+
+    def handle_elevator_led_yellow(self, address, *args):
+        """Handle yellow LED OSC message."""
+        if args:
+            state = int(args[0])
+            self.send_arduino_led("YELLOW", state)
+
+    def handle_elevator_led_green(self, address, *args):
+        """Handle green LED OSC message."""
+        if args:
+            state = int(args[0])
+            self.send_arduino_led("GREEN", state)
 
     def interactive_control(self):
         """Interactive terminal for controlling scenes."""
@@ -622,8 +899,23 @@ class CarpetHotelLauncher:
             print(f"External OSC (Arduino): {'✓' if self.enable_osc_external else '✗'}")
             print(f"\nLog output is being written to: {self.log_file}")
             print("(Terminal output from SC/PROC is suppressed for clean interface)\n")
-            time.sleep(2)  # Give Processing time to start OSC
+            print("Waiting for Processing to initialize OSC...")
+            time.sleep(5)  # Give Processing more time to start OSC server
             self.setup_osc()
+            print("Waiting for OSC to stabilize...")
+            time.sleep(2)
+            print(f"\n[DEBUG] enable_osc_external = {self.enable_osc_external}")
+            if self.enable_osc_external:
+                print("[DEBUG] About to call setup_arduino()...")
+                try:
+                    self.setup_arduino()
+                    print("[DEBUG] setup_arduino() returned")
+                except Exception as e:
+                    print(f"[ERROR] Exception in setup_arduino(): {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print("[DEBUG] Skipping Arduino setup (enable_osc_external=False)")
             time.sleep(1)
 
         print("\n✓ Startup complete - GUI controls are active\n")
@@ -676,8 +968,23 @@ class CarpetHotelLauncher:
             print(f"External OSC (Arduino): {'✓' if self.enable_osc_external else '✗'}")
             print(f"\nLog output is being written to: {self.log_file}")
             print("(Terminal output from SC/PROC is suppressed for clean interface)\n")
-            time.sleep(2)  # Give Processing time to start OSC
+            print("Waiting for Processing to initialize OSC...")
+            time.sleep(5)  # Give Processing more time to start OSC server
             self.setup_osc()
+            print("Waiting for OSC to stabilize...")
+            time.sleep(2)
+            print(f"\n[DEBUG] enable_osc_external = {self.enable_osc_external}")
+            if self.enable_osc_external:
+                print("[DEBUG] About to call setup_arduino()...")
+                try:
+                    self.setup_arduino()
+                    print("[DEBUG] setup_arduino() returned")
+                except Exception as e:
+                    print(f"[ERROR] Exception in setup_arduino(): {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print("[DEBUG] Skipping Arduino setup (enable_osc_external=False)")
             time.sleep(1)
 
         # Enter interactive mode if Python terminal is enabled
@@ -835,6 +1142,21 @@ class CarpetHotelLauncher:
             except Exception as e:
                 print(f"  Warning: {e}")
 
+        # Stop Arduino
+        if self.arduino_serial:
+            try:
+                print("Stopping Arduino elevator control...")
+                self.arduino_running = False
+                # Turn off all LEDs before disconnecting
+                self.arduino_serial.write(b"RED:0\n")
+                self.arduino_serial.write(b"YELLOW:0\n")
+                self.arduino_serial.write(b"GREEN:0\n")
+                time.sleep(0.1)
+                self.arduino_serial.close()
+                print("✓ Arduino disconnected")
+            except Exception as e:
+                print(f"  Warning: {e}")
+
         # Reset process and client references
         self.sc_process = None
         self.processing_process = None
@@ -842,6 +1164,8 @@ class CarpetHotelLauncher:
         self.osc_server = None
         self.sc_osc_client = None
         self.sc_osc_server = None
+        self.arduino_serial = None
+        self.arduino_running = False
 
         print("\n✓ Shutdown complete\n")
 
@@ -902,7 +1226,8 @@ def load_settings():
         'enable_keyboard': True,
         'enable_python_terminal': True,
         'enable_osc_external': True,
-        'displays': [1, 2]
+        'displays': [1, 2],
+        'arduino_port': 'auto'
     }
 
     try:
@@ -922,6 +1247,8 @@ def save_settings(settings):
     try:
         with open(config_file, 'w') as f:
             json.dump(settings, f, indent=2)
+        print(f"✓ Settings saved to {config_file}")
+        print(f"  arduino_port: {settings.get('arduino_port', 'not set')}")
     except Exception as e:
         print(f"Warning: Could not save settings: {e}")
 
@@ -1199,12 +1526,100 @@ def guided_setup_gui():
         ttk.Label(page3, text="\n⚠ Python terminal and external OSC require 'python-osc'\nInstall with: pip install python-osc",
                   foreground='orange').pack(pady=10)
 
-    # ===== PAGE 4: Summary =====
+    # ===== PAGE 4: Arduino Port Selection =====
     page4 = ttk.Frame(notebook)
-    notebook.add(page4, text="4. Review")
+    notebook.add(page4, text="4. Arduino")
 
-    ttk.Label(page4, text="Configuration Summary", font=('Arial', 14, 'bold')).pack(pady=10)
-    summary_text = tk.Text(page4, height=15, width=60, wrap='word', font=('Courier', 10))
+    ttk.Label(page4, text="Arduino Elevator Control", font=('Arial', 14, 'bold')).pack(pady=10)
+    ttk.Label(page4, text="Select the USB port for your Arduino (if connected):").pack(pady=5)
+
+    # Arduino port selection variable
+    saved_arduino_port = config.get('arduino_port', 'auto')
+    arduino_port_var = tk.StringVar(value=saved_arduino_port)
+    arduino_custom_port = tk.StringVar(value="" if saved_arduino_port == "auto" else saved_arduino_port)
+
+    # Auto-detect option
+    ttk.Radiobutton(page4, text="Auto-detect Arduino (recommended)",
+                    variable=arduino_port_var, value="auto").pack(anchor='w', padx=40, pady=5)
+    ttk.Label(page4, text="    Automatically finds Adafruit/Arduino boards",
+              foreground='gray').pack(anchor='w', padx=60)
+
+    # Available ports list
+    ttk.Label(page4, text="\nAvailable Serial Ports:", font=('Arial', 10, 'bold')).pack(anchor='w', padx=40, pady=(15, 5))
+
+    ports_frame = ttk.Frame(page4)
+    ports_frame.pack(padx=40, pady=5, fill='x')
+
+    # Listbox for ports
+    ports_listbox_frame = ttk.Frame(ports_frame)
+    ports_listbox_frame.pack(side='left', fill='both', expand=True)
+
+    ports_listbox = tk.Listbox(ports_listbox_frame, height=6, font=('Courier', 12))
+    ports_listbox.pack(side='left', fill='both', expand=True)
+
+    ports_scrollbar = ttk.Scrollbar(ports_listbox_frame, orient='vertical', command=ports_listbox.yview)
+    ports_scrollbar.pack(side='right', fill='y')
+    ports_listbox.configure(yscrollcommand=ports_scrollbar.set)
+
+    # Refresh button
+    def refresh_ports():
+        ports_listbox.delete(0, tk.END)
+        if SERIAL_AVAILABLE:
+            try:
+                import serial.tools.list_ports
+                ports = list(serial.tools.list_ports.comports())
+                if ports:
+                    for port in ports:
+                        # Mark Arduino boards (including Nano with CH340/FTDI chips)
+                        desc_lower = port.description.lower()
+                        is_arduino = any(keyword in desc_lower for keyword in ['arduino', 'adafruit', 'ch340', 'ch341', 'ftdi', 'nano'])
+                        marker = " ⭐" if is_arduino else ""
+                        ports_listbox.insert(tk.END, f"{port.device}{marker}: {port.description}")
+                else:
+                    ports_listbox.insert(tk.END, "No serial ports found")
+            except Exception as e:
+                ports_listbox.insert(tk.END, f"Error: {e}")
+        else:
+            ports_listbox.insert(tk.END, "pyserial not installed")
+            ports_listbox.insert(tk.END, "Install with: pip install pyserial")
+
+    def on_port_select(event):
+        selection = ports_listbox.curselection()
+        if selection:
+            selected_text = ports_listbox.get(selection[0])
+            # Extract port name (everything before the colon)
+            port_name = selected_text.split(':')[0].replace(" ⭐", "").strip()
+            arduino_port_var.set("custom")
+            arduino_custom_port.set(port_name)
+
+    ports_listbox.bind('<<ListboxSelect>>', on_port_select)
+
+    refresh_button = ttk.Button(ports_frame, text="🔄 Refresh", command=refresh_ports)
+    refresh_button.pack(side='left', padx=(10, 0))
+
+    # Initial port list
+    refresh_ports()
+
+    # Manual entry option
+    ttk.Label(page4, text="\nOr enter manually:", font=('Arial', 10, 'bold')).pack(anchor='w', padx=40, pady=(15, 5))
+    custom_port_frame = ttk.Frame(page4)
+    custom_port_frame.pack(anchor='w', padx=40, pady=5)
+    ttk.Radiobutton(custom_port_frame, text="Custom port:",
+                    variable=arduino_port_var, value="custom").pack(side='left')
+    ttk.Entry(custom_port_frame, textvariable=arduino_custom_port, width=30).pack(side='left', padx=5)
+    ttk.Label(page4, text="    Example: /dev/cu.usbmodem14201 (macOS) or COM3 (Windows)",
+              foreground='gray').pack(anchor='w', padx=60)
+
+    if not SERIAL_AVAILABLE:
+        ttk.Label(page4, text="\n⚠ Arduino control requires 'pyserial'\nInstall with: pip install pyserial",
+                  foreground='orange').pack(pady=10)
+
+    # ===== PAGE 5: Summary =====
+    page5 = ttk.Frame(notebook)
+    notebook.add(page5, text="5. Review")
+
+    ttk.Label(page5, text="Configuration Summary", font=('Arial', 14, 'bold')).pack(pady=10)
+    summary_text = tk.Text(page5, height=15, width=60, wrap='word', font=('Courier', 10))
     summary_text.pack(pady=10, padx=20)
 
     def update_summary():
@@ -1249,12 +1664,21 @@ def guided_setup_gui():
         else:
             summary_text.insert('end', f"Input Methods:\n  NONE SELECTED!\n\n")
 
+        # Arduino port
+        if external_osc_var.get():
+            arduino_port = arduino_port_var.get()
+            if arduino_port == "auto":
+                summary_text.insert('end', f"Arduino Port:\n  Auto-detect\n\n")
+            else:
+                port_value = arduino_custom_port.get() or "Not specified"
+                summary_text.insert('end', f"Arduino Port:\n  {port_value}\n\n")
+
         summary_text.insert('end', "═" * 50 + "\n\n")
         summary_text.insert('end', "Click 'Start' to launch Carpet Hotel\nwith these settings.")
         summary_text.config(state='disabled')
 
     def on_page_changed(event):
-        if notebook.index(notebook.select()) == 3:  # Summary page
+        if notebook.index(notebook.select()) == 4:  # Summary page (now page 5, index 4)
             update_summary()
 
     notebook.bind('<<NotebookTabChanged>>', on_page_changed)
@@ -1272,7 +1696,7 @@ def guided_setup_gui():
     # Create button references that we'll update dynamically
     cancel_button = ttk.Button(button_frame, text="Quit")
     back_button = ttk.Button(button_frame, text="◀ Back", command=lambda: notebook.select(max(0, notebook.index(notebook.select()) - 1)))
-    next_button = ttk.Button(button_frame, text="Next ▶", command=lambda: notebook.select(min(3, notebook.index(notebook.select()) + 1)))
+    next_button = ttk.Button(button_frame, text="Next ▶", command=lambda: notebook.select(min(4, notebook.index(notebook.select()) + 1)))
     start_button = ttk.Button(button_frame, text="Start")
     stop_button = ttk.Button(button_frame, text="Stop")
     pause_button = ttk.Button(button_frame, text="Pause")
@@ -1390,6 +1814,12 @@ def guided_setup_gui():
         config['enable_python_terminal'] = python_terminal_var.get()
         config['enable_osc_external'] = external_osc_var.get()
 
+        # Arduino port
+        arduino_port = arduino_port_var.get()
+        if arduino_port == "custom":
+            arduino_port = arduino_custom_port.get() or "auto"
+        config['arduino_port'] = arduino_port
+
         # Validate: at least one control method must be enabled
         if not (config['enable_keyboard'] or config['enable_python_terminal'] or config['enable_osc_external']):
             messagebox.showerror("No Control Methods", "Please enable at least one input method.")
@@ -1413,7 +1843,8 @@ def guided_setup_gui():
             enable_keyboard=config['enable_keyboard'],
             enable_python_terminal=config['enable_python_terminal'],
             enable_osc_external=config['enable_osc_external'],
-            displays=config['displays']
+            displays=config['displays'],
+            arduino_port=config.get('arduino_port', 'auto')
         )
 
         # Update state
