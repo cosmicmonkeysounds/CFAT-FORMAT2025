@@ -15,6 +15,8 @@ Features:
 import serial
 import time
 import threading
+import math
+import random
 from typing import Optional
 from pythonosc import udp_client
 from pythonosc.dispatcher import Dispatcher
@@ -58,6 +60,11 @@ class CarpetHotelArduino:
 
         # Message callback for GUI logging
         self.message_callback = None
+
+        # LED Animation
+        self.animation_mode = "OFF"  # 'OFF', 'STABLE', 'TRANSITION_UP', 'TRANSITION_DOWN'
+        self.animation_thread: Optional[threading.Thread] = None
+        self.animation_running = False
 
     def set_message_callback(self, callback):
         """
@@ -103,6 +110,9 @@ class CarpetHotelArduino:
 
         # Start OSC server
         self.start_osc_server()
+
+        # Start LED animation thread
+        self.start_animation_thread()
 
         self.running = True
         print(f"✓ Arduino connected and ready")
@@ -258,31 +268,143 @@ class CarpetHotelArduino:
             self.log.error(f"Failed to set LED: {e}")
             self._notify(f"✗ LED error: {e}")
 
-    def set_led_animation_mode(self, mode: str):
+    def set_led_animation_mode(self, mode: str, direction: str = "up"):
         """
         Set LED animation mode.
 
         Args:
             mode: 'STABLE', 'TRANSITION', or 'OFF'
+            direction: 'up' or 'down' (for TRANSITION mode)
         """
-        self.log.info(f"LED animation mode: {mode}")
+        self.log.info(f"LED animation mode: {mode} (direction: {direction})")
 
-        # Map modes to LED states
+        # Update animation mode
         if mode == "STABLE":
-            # Green on, others off
-            self.set_led("red", 0)
-            self.set_led("yellow", 0)
-            self.set_led("green", 255)
+            self.animation_mode = "STABLE"
         elif mode == "TRANSITION":
-            # Yellow on (Python will handle blinking)
-            self.set_led("red", 0)
-            self.set_led("yellow", 255)
-            self.set_led("green", 0)
+            self.animation_mode = f"TRANSITION_{direction.upper()}"
         elif mode == "OFF":
-            # All off
+            self.animation_mode = "OFF"
+            # Turn off all LEDs
             self.set_led("red", 0)
             self.set_led("yellow", 0)
             self.set_led("green", 0)
+
+    def start_animation_thread(self):
+        """Start the LED animation thread."""
+        if self.animation_running:
+            return
+
+        self.animation_running = True
+        self.animation_thread = threading.Thread(target=self._animation_loop, daemon=True)
+        self.animation_thread.start()
+        self.log.info("LED animation thread started")
+
+    def _animation_loop(self):
+        """Main LED animation loop (runs in background thread)."""
+        start_time = time.time()
+
+        while self.animation_running and self.running:
+            elapsed = time.time() - start_time
+
+            if self.animation_mode == "STABLE":
+                self._animate_stable(elapsed)
+            elif self.animation_mode == "TRANSITION_UP":
+                self._animate_transition_up(elapsed)
+            elif self.animation_mode == "TRANSITION_DOWN":
+                self._animate_transition_down(elapsed)
+            elif self.animation_mode == "OFF":
+                # Do nothing, LEDs are already off
+                pass
+
+            time.sleep(0.05)  # 20 FPS animation
+
+    def _animate_stable(self, elapsed: float):
+        """
+        Stable animation: Slow sin-wave pulsing of green LED between 60% to 80%.
+
+        Args:
+            elapsed: Time elapsed since animation start (seconds)
+        """
+        # Very slow oscillation - 5 second period
+        period = 5.0
+        phase = (elapsed % period) / period * 2 * math.pi
+
+        # Sin wave oscillates between -1 and 1
+        # Map to 60% (153) to 80% (204)
+        min_brightness = int(255 * 0.60)  # 153
+        max_brightness = int(255 * 0.80)  # 204
+        brightness_range = max_brightness - min_brightness
+
+        # Calculate brightness using sin wave
+        sin_value = math.sin(phase)  # -1 to 1
+        normalized = (sin_value + 1) / 2  # 0 to 1
+        brightness = int(min_brightness + normalized * brightness_range)
+
+        # Set green LED, keep others off
+        self.set_led("red", 0)
+        self.set_led("yellow", 0)
+        self.set_led("green", brightness)
+
+    def _animate_transition_up(self, elapsed: float):
+        """
+        Transition UP animation: Flicker red → yellow → green quickly.
+        Random brightnesses: 0%-20% for "off", 80%-100% for "on".
+
+        Args:
+            elapsed: Time elapsed since animation start (seconds)
+        """
+        # Quick flicker - change every 100ms
+        flicker_period = 0.1
+        step = int(elapsed / flicker_period) % 3  # 0, 1, 2 (red, yellow, green)
+
+        # Random brightness for the active LED (80%-100%)
+        on_brightness = random.randint(int(255 * 0.80), 255)
+        # Random brightness for inactive LEDs (0%-20%)
+        off_brightness = random.randint(0, int(255 * 0.20))
+
+        if step == 0:  # Red
+            self.set_led("red", on_brightness)
+            self.set_led("yellow", off_brightness)
+            self.set_led("green", off_brightness)
+        elif step == 1:  # Yellow
+            self.set_led("red", off_brightness)
+            self.set_led("yellow", on_brightness)
+            self.set_led("green", off_brightness)
+        else:  # Green
+            self.set_led("red", off_brightness)
+            self.set_led("yellow", off_brightness)
+            self.set_led("green", on_brightness)
+
+    def _animate_transition_down(self, elapsed: float):
+        """
+        Transition DOWN animation: Flicker green → yellow → red quickly.
+        Random brightnesses: 0%-20% for "off", 80%-100% for "on".
+
+        Args:
+            elapsed: Time elapsed since animation start (seconds)
+        """
+        # Quick flicker - change every 100ms
+        flicker_period = 0.1
+        step = int(elapsed / flicker_period) % 3  # 0, 1, 2 (green, yellow, red)
+
+        # Random brightness for the active LED (80%-100%)
+        on_brightness = random.randint(int(255 * 0.80), 255)
+        # Random brightness for inactive LEDs (0%-20%)
+        off_brightness = random.randint(0, int(255 * 0.20))
+
+        if step == 0:  # Green
+            self.set_led("red", off_brightness)
+            self.set_led("yellow", off_brightness)
+            self.set_led("green", on_brightness)
+        elif step == 1:  # Yellow
+            self.set_led("red", off_brightness)
+            self.set_led("yellow", on_brightness)
+            self.set_led("green", off_brightness)
+        else:  # Red
+            self.set_led("red", on_brightness)
+            self.set_led("yellow", off_brightness)
+            self.set_led("green", off_brightness)
 
     def run_forever(self):
         """
@@ -311,6 +433,11 @@ class CarpetHotelArduino:
     def disconnect(self):
         """Disconnect and cleanup resources."""
         self.running = False
+        self.animation_running = False
+
+        # Wait for animation thread to stop
+        if self.animation_thread and self.animation_thread.is_alive():
+            self.animation_thread.join(timeout=1)
 
         if self.osc_server:
             self.osc_server.shutdown()

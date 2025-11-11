@@ -260,6 +260,10 @@ class CarpetHotelCore:
 
     def _handle_elevator_up(self, address, *args):
         """Handle UP button press from Arduino."""
+        # Trigger transition animation (UP direction)
+        if self.arduino and self.arduino_running:
+            self.arduino.set_led_animation_mode("TRANSITION", direction="up")
+
         # Increment scene
         max_scene = self.get_max_scene()
         self.current_scene = (self.current_scene + 1) % (max_scene + 1)
@@ -271,8 +275,20 @@ class CarpetHotelCore:
             processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
             processing_client.send_message("/carpet/goto", [self.current_scene])
 
+        # After a delay, switch to stable animation (transition takes ~2 seconds)
+        import threading
+        def switch_to_stable():
+            time.sleep(2.0)  # Wait for transition to complete
+            if self.arduino and self.arduino_running:
+                self.arduino.set_led_animation_mode("STABLE")
+        threading.Thread(target=switch_to_stable, daemon=True).start()
+
     def _handle_elevator_down(self, address, *args):
         """Handle DOWN button press from Arduino."""
+        # Trigger transition animation (DOWN direction)
+        if self.arduino and self.arduino_running:
+            self.arduino.set_led_animation_mode("TRANSITION", direction="down")
+
         # Decrement scene
         max_scene = self.get_max_scene()
         self.current_scene = (self.current_scene - 1) % (max_scene + 1)
@@ -283,6 +299,14 @@ class CarpetHotelCore:
         if self.pde_running:
             processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
             processing_client.send_message("/carpet/goto", [self.current_scene])
+
+        # After a delay, switch to stable animation (transition takes ~2 seconds)
+        import threading
+        def switch_to_stable():
+            time.sleep(2.0)  # Wait for transition to complete
+            if self.arduino and self.arduino_running:
+                self.arduino.set_led_animation_mode("STABLE")
+        threading.Thread(target=switch_to_stable, daemon=True).start()
 
     def get_max_scene(self) -> int:
         """Calculate maximum scene index based on video files and displays."""
@@ -444,6 +468,11 @@ class CarpetHotelCore:
             self.arduino_running = True
             # Start background thread to poll serial messages
             self._start_arduino_polling()
+
+            # Set initial LED animation to stable
+            time.sleep(0.5)  # Give Arduino time to initialize
+            self.arduino.set_led_animation_mode("STABLE")
+
             return True
 
         return False
