@@ -14,10 +14,12 @@ Features:
 
 import subprocess
 import time
+import threading
 from typing import Optional, List, Dict
 from pathlib import Path
 
 from utils import find_processing_java, ProcessWrapper, get_app_dir, detect_displays, get_data_dir
+from logger import get_logger
 
 
 class CarpetHotelProcessing:
@@ -43,6 +45,13 @@ class CarpetHotelProcessing:
         # Use process_name_pattern to kill all Processing instances
         self.process = ProcessWrapper("Processing", process_name_pattern="Processing.app")
         self.initialized = False
+
+        # Output monitoring
+        self._output_thread = None
+        self._output_running = False
+
+        # Logger
+        self.log = get_logger("Processing", verbose=False)
 
     def start(self) -> bool:
         """
@@ -91,15 +100,18 @@ class CarpetHotelProcessing:
         if not self.process.start(cmd):
             return False
 
+        # Start output monitoring thread (CRITICAL - prevents buffer blocking)
+        self._start_output_monitor()
+
         # Give Processing time to start
         time.sleep(2)
 
         if not self.process.is_alive():
-            print("✗ Processing process died")
+            self.log.error("Processing process died")
             return False
 
         self.initialized = True
-        print("✓ Processing video engine ready")
+        self.log.success("Processing video engine ready")
         return True
 
     def _get_video_files(self) -> List[Path]:
@@ -122,7 +134,61 @@ class CarpetHotelProcessing:
             True if stopped successfully
         """
         self.initialized = False
+
+        # Stop output monitoring thread
+        self._output_running = False
+        if self._output_thread and self._output_thread.is_alive():
+            self._output_thread.join(timeout=1)
+
         return self.process.stop()
+
+    def _start_output_monitor(self):
+        """
+        Start thread to monitor and drain Processing stdout/stderr.
+
+        CRITICAL: Processing writes to stdout. If we don't read it, the buffer
+        fills up and Processing blocks, causing the entire system to freeze.
+        """
+        if self._output_running:
+            return
+
+        self._output_running = True
+        self._output_thread = threading.Thread(
+            target=self._monitor_output,
+            daemon=True
+        )
+        self._output_thread.start()
+
+    def _monitor_output(self):
+        """
+        Monitor Processing output and drain buffer.
+
+        Reads stdout continuously to prevent buffer from filling.
+        Only logs important messages to keep console clean.
+        """
+        if not self.process.process or not self.process.process.stdout:
+            return
+
+        important_keywords = ["error", "exception", "warning", "failed"]
+
+        while self._output_running and self.process.is_alive():
+            try:
+                # Non-blocking read with timeout
+                line = self.process.read_output(timeout=0.1)
+
+                if line:
+                    # Only log important messages
+                    line_lower = line.lower()
+                    if any(keyword in line_lower for keyword in important_keywords):
+                        self.log.warning(line)
+                    # Silently drain all other output to prevent blocking
+
+            except Exception as e:
+                if self._output_running:  # Only log if we're still supposed to be running
+                    self.log.debug(f"Output monitor error: {e}")
+                break
+
+            time.sleep(0.01)  # Small delay to prevent CPU spinning
 
     def is_running(self) -> bool:
         """
