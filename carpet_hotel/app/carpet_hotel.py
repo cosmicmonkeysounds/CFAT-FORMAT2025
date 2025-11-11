@@ -66,6 +66,10 @@ class CarpetHotelCore:
         self._monitor_thread = None
         self._monitor_running = False
 
+        # Arduino serial polling
+        self._arduino_thread = None
+        self._arduino_running = False
+
         # OSC communication
         self.osc_server = None
         self.osc_thread = None
@@ -95,6 +99,11 @@ class CarpetHotelCore:
 
     def _cleanup(self):
         """Cleanup handler called on exit."""
+        # Stop Arduino polling thread
+        self._arduino_running = False
+        if self._arduino_thread and self._arduino_thread.is_alive():
+            self._arduino_thread.join(timeout=1)
+
         # Stop monitoring thread
         self._monitor_running = False
         if self._monitor_thread and self._monitor_thread.is_alive():
@@ -137,6 +146,27 @@ class CarpetHotelCore:
                 daemon=True
             )
             self._monitor_thread.start()
+
+    def _poll_arduino_serial(self):
+        """Poll Arduino serial messages continuously."""
+        while self._arduino_running:
+            if self.arduino and self.arduino_running:
+                try:
+                    self.arduino.process_serial_messages()
+                except Exception as e:
+                    self.log.error(f"Arduino serial error: {e}")
+            time.sleep(0.01)  # 10ms poll rate (same as Arduino standalone)
+
+    def _start_arduino_polling(self):
+        """Start Arduino serial polling thread."""
+        if not self._arduino_running:
+            self._arduino_running = True
+            self._arduino_thread = threading.Thread(
+                target=self._poll_arduino_serial,
+                daemon=True
+            )
+            self._arduino_thread.start()
+            self.log.debug("Arduino serial polling started")
 
     # ========================================================================
     # OSC Communication (Brain manages all state and routing)
@@ -263,6 +293,17 @@ class CarpetHotelCore:
 
         if self.supercollider.start():
             self.sc_running = True
+
+            # Setup OSC if not already done
+            if not self.osc_server and OSC_AVAILABLE:
+                self.setup_osc()
+
+            # Send initial scene/volume to SC immediately (independent startup)
+            if self.osc_server:
+                self.log.success("SuperCollider ready - sending initial state...")
+                time.sleep(1)  # Give SC time to init OSC
+                self.send_initial_scene()
+
             return True
 
         return False
@@ -315,12 +356,6 @@ class CarpetHotelCore:
             if not self.osc_server and OSC_AVAILABLE:
                 self.setup_osc()
 
-            # If both Processing and SC are running, send initial scene
-            if self.sc_running and self.osc_server:
-                self.log.success("Both systems ready - starting audio...")
-                time.sleep(2)  # Give Processing time to init OSC
-                self.send_initial_scene()
-
             # Start monitoring thread to detect unexpected exits
             self._start_monitoring()
             return True
@@ -361,6 +396,8 @@ class CarpetHotelCore:
 
         if self.arduino.connect():
             self.arduino_running = True
+            # Start background thread to poll serial messages
+            self._start_arduino_polling()
             return True
 
         return False
@@ -375,6 +412,12 @@ class CarpetHotelCore:
         if not self.arduino_running or not self.arduino:
             return True
 
+        # Stop polling thread first
+        self._arduino_running = False
+        if self._arduino_thread and self._arduino_thread.is_alive():
+            self._arduino_thread.join(timeout=1)
+
+        # Disconnect Arduino
         self.arduino.disconnect()
         self.arduino_running = False
         return True

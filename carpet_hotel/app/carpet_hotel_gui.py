@@ -377,17 +377,18 @@ class CarpetHotelGUI:
                                                   state='readonly', width=40)
         self.audio_device_dropdown.pack(side='left', padx=5)
 
-        # Sample rate dropdown
-        rate_frame = ttk.Frame(config_frame)
-        rate_frame.pack(fill='x', pady=5)
+        # Volume control
+        volume_frame = ttk.Frame(config_frame)
+        volume_frame.pack(fill='x', pady=5)
 
-        ttk.Label(rate_frame, text="Sample Rate:", width=15).pack(side='left', padx=5)
-        self.sample_rate_var = tk.StringVar(value="48000")
-        self.sample_rate_dropdown = ttk.Combobox(rate_frame,
-                                                 textvariable=self.sample_rate_var,
-                                                 state='readonly', width=40)
-        self.sample_rate_dropdown['values'] = [44100, 48000, 88200, 96000, 176400, 192000]
-        self.sample_rate_dropdown.pack(side='left', padx=5)
+        ttk.Label(volume_frame, text="Master Volume:", width=15).pack(side='left', padx=5)
+        self.volume_var = tk.DoubleVar(value=0.7)
+        self.volume_slider = tk.Scale(volume_frame, from_=0.0, to=1.0, resolution=0.01,
+                                      orient='horizontal', variable=self.volume_var,
+                                      command=self.on_volume_change, length=300)
+        self.volume_slider.pack(side='left', padx=5)
+        self.volume_label = ttk.Label(volume_frame, text="70%", width=6)
+        self.volume_label.pack(side='left', padx=5)
 
         # Log output
         ttk.Label(tab, text="Log Output:", font=('Arial', 10, 'bold')).pack(anchor='w', padx=20, pady=(10,0))
@@ -400,6 +401,25 @@ class CarpetHotelGUI:
         devices = ["Default"] + devices
         self.audio_device_dropdown['values'] = devices
         self.log_to_widget(self.audio_log, f"Found {len(devices)} audio devices")
+
+    def on_volume_change(self, value):
+        """Handle volume slider change."""
+        volume = float(value)
+        # Update label
+        self.volume_label.config(text=f"{int(volume * 100)}%")
+
+        # Update core state
+        if self.core:
+            self.core.master_volume = volume
+
+        # Send to SuperCollider if running
+        if self.audio_running and OSC_AVAILABLE:
+            try:
+                client = udp_client.SimpleUDPClient("127.0.0.1", 57120)
+                client.send_message("/carpet/volume", [volume])
+                self.log_to_widget(self.audio_log, f"Volume: {int(volume * 100)}%")
+            except Exception as e:
+                self.log_to_widget(self.audio_log, f"✗ Error setting volume: {e}")
 
     def start_audio(self):
         """Start SuperCollider audio system."""
@@ -670,9 +690,9 @@ class CarpetHotelGUI:
         btn_frame = ttk.Frame(elevator_frame)
         btn_frame.pack()
 
-        ttk.Button(btn_frame, text="▲ UP", command=lambda: self.send_osc_command('/carpet/elevator/up', []),
+        ttk.Button(btn_frame, text="▲ UP", command=self.scene_up,
                   width=15).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="▼ DOWN", command=lambda: self.send_osc_command('/carpet/elevator/down', []),
+        ttk.Button(btn_frame, text="▼ DOWN", command=self.scene_down,
                   width=15).pack(side='left', padx=5)
 
         # Scene Selection
@@ -761,6 +781,20 @@ class CarpetHotelGUI:
 
         except Exception as e:
             self.log_to_widget(self.command_log, f"✗ Error: {e}")
+
+    def scene_up(self):
+        """Increment scene and send goto command."""
+        current = int(self.scene_var.get())
+        new_scene = (current + 1) % 9  # Wrap around at 9 scenes (0-8)
+        self.scene_var.set(str(new_scene))
+        self.send_osc_command('/carpet/goto', [new_scene])
+
+    def scene_down(self):
+        """Decrement scene and send goto command."""
+        current = int(self.scene_var.get())
+        new_scene = (current - 1) % 9  # Wrap around at 9 scenes (0-8)
+        self.scene_var.set(str(new_scene))
+        self.send_osc_command('/carpet/goto', [new_scene])
 
     def set_led(self, color: str, value: int):
         """Set individual LED."""
