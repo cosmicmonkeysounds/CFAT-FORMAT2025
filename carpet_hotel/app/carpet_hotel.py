@@ -193,12 +193,14 @@ class CarpetHotelCore:
         self.sc_client = udp_client.SimpleUDPClient("127.0.0.1", self.sc_send_port)
         self.log.success(f"OSC client → SuperCollider (port {self.sc_send_port})")
 
-        # Create OSC server to receive from Processing
+        # Create OSC server to receive from Processing and Arduino
         dispatcher = Dispatcher()
         dispatcher.map("/carpet/scene", self._handle_scene)
         dispatcher.map("/carpet/transition", self._handle_transition)
         dispatcher.map("/carpet/volume", self._handle_volume)
         dispatcher.map("/carpet/state", self._handle_state)
+        dispatcher.map("/carpet/elevator/up", self._handle_elevator_up)
+        dispatcher.map("/carpet/elevator/down", self._handle_elevator_down)
 
         self.osc_server = ThreadingOSCUDPServer(
             ("127.0.0.1", self.processing_recv_port),
@@ -255,6 +257,50 @@ class CarpetHotelCore:
         if len(args) >= 1:
             state = args[0]
             self.log.debug(f"Processing state: {state}")
+
+    def _handle_elevator_up(self, address, *args):
+        """Handle UP button press from Arduino."""
+        # Increment scene
+        max_scene = self.get_max_scene()
+        self.current_scene = (self.current_scene + 1) % (max_scene + 1)
+
+        self.log.info(f"Arduino UP → Scene {self.current_scene}")
+
+        # Send goto command to Processing
+        if self.pde_running:
+            processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
+            processing_client.send_message("/carpet/goto", [self.current_scene])
+
+    def _handle_elevator_down(self, address, *args):
+        """Handle DOWN button press from Arduino."""
+        # Decrement scene
+        max_scene = self.get_max_scene()
+        self.current_scene = (self.current_scene - 1) % (max_scene + 1)
+
+        self.log.info(f"Arduino DOWN → Scene {self.current_scene}")
+
+        # Send goto command to Processing
+        if self.pde_running:
+            processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
+            processing_client.send_message("/carpet/goto", [self.current_scene])
+
+    def get_max_scene(self) -> int:
+        """Calculate maximum scene index based on video files and displays."""
+        num_clips = self.get_num_video_clips()
+
+        # Formula: max_scene = num_clips - num_displays
+        # - 1 display, 10 clips: max_scene = 10 - 1 = 9 (scenes 0-9)
+        # - 2 displays, 10 clips: max_scene = 10 - 2 = 8 (scenes 0-8)
+        max_scene = num_clips - self.num_displays
+
+        return max(0, max_scene)
+
+    def get_num_video_clips(self) -> int:
+        """Count number of video files in data folder."""
+        from pathlib import Path
+        data_dir = Path(__file__).parent.parent / "data"
+        video_files = list(data_dir.glob("*.mp4"))
+        return len(video_files)
 
     def send_initial_scene(self):
         """Send initial scene to SuperCollider to start audio."""

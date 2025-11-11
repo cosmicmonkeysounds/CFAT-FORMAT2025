@@ -24,6 +24,7 @@ from carpet_hotel_scd import CarpetHotelSuperCollider
 from carpet_hotel_pde import CarpetHotelProcessing
 from carpet_hotel_arduino import CarpetHotelArduino
 from utils import detect_displays, detect_serial_ports
+from settings_manager import SettingsManager, DEFAULT_SETTINGS
 
 # Check for OSC
 try:
@@ -45,6 +46,9 @@ class CarpetHotelGUI:
         # Core instance
         self.core = CarpetHotelCore()
 
+        # Settings manager
+        self.settings = SettingsManager()
+
         # Component running states
         self.video_running = False
         self.audio_running = False
@@ -65,6 +69,12 @@ class CarpetHotelGUI:
 
         # Start status polling
         self._poll_status()
+
+        # Load saved settings and apply them
+        self.load_settings()
+
+        # Handle window close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def create_gui(self):
         """Create all GUI elements."""
@@ -412,6 +422,9 @@ class CarpetHotelGUI:
         if self.core:
             self.core.master_volume = volume
 
+        # Save setting
+        self.settings.set("master_volume", volume)
+
         # Send to SuperCollider if running
         if self.audio_running and OSC_AVAILABLE:
             try:
@@ -704,11 +717,12 @@ class CarpetHotelGUI:
 
         ttk.Label(scene_select_frame, text="Go to Scene:", width=12).pack(side='left', padx=5)
 
-        # Dropdown for scenes 0-8 (9 scenes total based on 9 videos)
+        # Dropdown for scenes (dynamically calculated based on video files and displays)
         self.scene_var = tk.StringVar(value="0")
-        scene_dropdown = ttk.Combobox(scene_select_frame, textvariable=self.scene_var,
-                                     state='readonly', width=10, values=list(range(9)))
-        scene_dropdown.pack(side='left', padx=5)
+        self.scene_dropdown = ttk.Combobox(scene_select_frame, textvariable=self.scene_var,
+                                           state='readonly', width=10)
+        self.scene_dropdown.pack(side='left', padx=5)
+        self.update_scene_dropdown()  # Populate with correct number of scenes
 
         ttk.Button(scene_select_frame, text="Go",
                   command=lambda: self.send_osc_command('/carpet/goto', [int(self.scene_var.get())]),
@@ -782,17 +796,29 @@ class CarpetHotelGUI:
         except Exception as e:
             self.log_to_widget(self.command_log, f"✗ Error: {e}")
 
+    def update_scene_dropdown(self):
+        """Update scene dropdown based on current display configuration."""
+        max_scene = self.core.get_max_scene()
+        num_scenes = max_scene + 1
+        self.scene_dropdown['values'] = list(range(num_scenes))
+
+        # Log if command_log exists (may be called during initialization)
+        if hasattr(self, 'command_log'):
+            self.log_to_widget(self.command_log, f"Scenes available: {num_scenes} (0-{max_scene})")
+
     def scene_up(self):
         """Increment scene and send goto command."""
+        max_scene = self.core.get_max_scene()
         current = int(self.scene_var.get())
-        new_scene = (current + 1) % 9  # Wrap around at 9 scenes (0-8)
+        new_scene = (current + 1) % (max_scene + 1)
         self.scene_var.set(str(new_scene))
         self.send_osc_command('/carpet/goto', [new_scene])
 
     def scene_down(self):
         """Decrement scene and send goto command."""
+        max_scene = self.core.get_max_scene()
         current = int(self.scene_var.get())
-        new_scene = (current - 1) % 9  # Wrap around at 9 scenes (0-8)
+        new_scene = (current - 1) % (max_scene + 1)
         self.scene_var.set(str(new_scene))
         self.send_osc_command('/carpet/goto', [new_scene])
 
@@ -931,12 +957,50 @@ class CarpetHotelGUI:
         # Schedule next poll in 500ms
         self.root.after(500, self._poll_status)
 
+    # ========================================================================
+    # SETTINGS PERSISTENCE
+    # ========================================================================
+
+    def load_settings(self):
+        """Load saved settings and apply to GUI."""
+        # Apply saved volume
+        volume = self.settings.get("master_volume", DEFAULT_SETTINGS["master_volume"])
+        self.volume_var.set(volume)
+        self.volume_label.config(text=f"{int(volume * 100)}%")
+        self.core.master_volume = volume
+
+        # Apply saved serial port
+        serial_port = self.settings.get("serial_port", DEFAULT_SETTINGS["serial_port"])
+        if serial_port:
+            self.serial_port_var.set(serial_port)
+
+        # Apply saved displays
+        displays = self.settings.get("displays", DEFAULT_SETTINGS["displays"])
+        if displays:
+            self.core.num_displays = len(displays)
+            # Update scene dropdown based on displays
+            self.root.after(100, self.update_scene_dropdown)
+
+        print(f"✓ Settings loaded: volume={int(volume*100)}%, displays={displays}, port={serial_port}")
+
+    def save_settings(self):
+        """Save current GUI settings."""
+        self.settings.update({
+            "master_volume": self.volume_var.get(),
+            "serial_port": self.serial_port_var.get(),
+            "displays": self.active_displays,  # Save active displays
+        })
+        self.settings.save()
+
     def run(self):
         """Run the GUI main loop."""
         self.root.mainloop()
 
     def on_closing(self):
         """Handle window closing."""
+        # Save settings
+        self.save_settings()
+
         if self.core.is_running():
             if messagebox.askokcancel("Quit", "Systems are running. Stop all and quit?"):
                 print("\nStopping all systems before exit...")

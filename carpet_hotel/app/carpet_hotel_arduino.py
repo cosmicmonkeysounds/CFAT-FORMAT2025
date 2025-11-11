@@ -31,7 +31,7 @@ class CarpetHotelArduino:
 
     def __init__(self, serial_port: Optional[str] = None,
                  osc_send_host: str = "127.0.0.1",
-                 osc_send_port: int = 12000,
+                 osc_send_port: int = 12001,  # Send to Python core, not Processing
                  osc_recv_port: int = 12002):
         """
         Initialize Arduino manager.
