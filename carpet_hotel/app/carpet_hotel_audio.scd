@@ -64,9 +64,6 @@ s.waitForBoot({
     "Audio server ready!".postln;
     ("Sample rate: " ++ s.sampleRate ++ " Hz").postln;
 
-    // Path to audio files (relative to this script)
-    audioPath = (thisProcess.nowExecutingPath.dirname +/+ "../data/").standardizePath;
-
     // Initialize
     floors = Dictionary.new;
     players = Dictionary.new;
@@ -74,6 +71,10 @@ s.waitForBoot({
 
     "=== CARPET HOTEL AUDIO ENGINE ===".postln;
     "Loading audio files...".postln;
+
+    // Path to audio files (relative to this script)
+    audioPath = (thisProcess.nowExecutingPath.dirname +/+ "../data/").standardizePath;
+    ("Searching in: " ++ audioPath).postln;
 
     // Load all carpet audio files
     (1..numFloors).do({ |i|

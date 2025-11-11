@@ -34,6 +34,7 @@ app/
 │
 ├── logs/                       # Logs (auto-generated)
 ├── tests/                      # Test utilities
+│   └── video_test.pde          # Processing video test
 ├── elevator_control/           # Arduino code (optional)
 └── venv/                       # Python virtualenv (auto-generated)
 ```
@@ -53,17 +54,19 @@ app/
 
 **Key Features:**
 - Launches and monitors SC/Processing processes
+- Passes video/audio file lists to Processing/SC (prevents crashes from file discovery)
 - Forwards OSC between components
 - Implements pause/resume by blocking OSC forwarding
-- GUI control panel with setup wizard
-- Arduino LED animations
+- GUI control panel with 6-page setup wizard (including Testing tab)
+- 60FPS LED animation system with state-based interrupts
 
 ### Processing Video Engine (`carpet_hotel.pde`)
 
 **Role:** Multi-window video playback with transitions
 
 **Features:**
-- Auto-loads videos from `../data/`
+- Receives video file list from Python via `--video=` arguments (prevents crashes)
+- Fallback: scans `../data/` if no args provided
 - Multi-display support
 - Smooth scrolling transitions with shader effects
 - Configurable via `configs/transition_config.txt`
@@ -74,22 +77,26 @@ app/
 - `F` - Toggle fullscreen
 - `1-9` - Jump to scene (test mode only)
 
-**File Paths:**
-- Videos: `dataPath("")` → `../data/`
-- Config: `sketchPath("configs/transition_config.txt")`
+**Command Line Args:**
+- `--video=/path/to/video.mp4` - Video file (multiple, passed by Python)
+- `--test-mode` - Enable keyboard control
+- `--osc-control` - Enable OSC control
+- `--displays=1,2,3` - Display numbers
 
 ### SuperCollider Audio Engine (`carpet_hotel_audio.scd`)
 
 **Role:** Multi-channel audio mixing with crossfades
 
 **Features:**
-- Auto-loads audio from `../data/`
+- Receives audio file list from Python via command-line args (prevents crashes)
+- Fallback: scans `../data/` if no args provided
 - Equal-power mixing for multiple floors
 - Smooth crossfades (sine/cosine curves)
 - Looping playback
 
-**File Path:**
-- Audio: `(thisProcess.nowExecutingPath.dirname +/+ "../data/").standardizePath`
+**Command Line Args:**
+- First arg (optional): audio device name
+- Remaining args: audio file paths (`.wav`, `.aiff`, `.mp3`)
 
 ---
 
@@ -149,6 +156,17 @@ python3 run_carpet_hotel.py --test-mode
 python3 run_carpet_hotel.py --displays=1,2,3
 ```
 
+### Testing
+
+**GUI Testing Tab** (recommended):
+1. Start the application: `python3 run_carpet_hotel.py`
+2. Navigate to page "5. Testing"
+3. Test elevator buttons (Up/Down)
+4. Test individual LEDs (Red/Yellow/Green on/off)
+5. Test LED animation modes (OFF/STABLE/TRANSITION)
+
+**Note:** System must be running for testing to work.
+
 ### Debugging
 
 ```bash
@@ -170,9 +188,6 @@ processing-java --sketch=$(pwd) --run -- --test-mode
 
 # SuperCollider only
 sclang carpet_hotel_audio.scd
-
-# Arduino bridge
-python3 tests/test_elevator_arduino.py
 ```
 
 ---

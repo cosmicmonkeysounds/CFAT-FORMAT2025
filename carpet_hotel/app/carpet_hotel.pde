@@ -514,7 +514,46 @@ class SharedState {
   }
 
   void findCarpetMedia() {
-    println("\nSearching for media in: " + parent.dataPath(""));
+    // Check if video files were passed as command-line arguments
+    ArrayList<String> videoArgs = new ArrayList<String>();
+    for (String arg : args) {
+      if (arg.startsWith("--video=")) {
+        String videoPath = arg.substring("--video=".length());
+        videoArgs.add(videoPath);
+      }
+    }
+
+    if (videoArgs.size() > 0) {
+      // Use video files passed from Python
+      println("\nLoading " + videoArgs.size() + " video file(s) from Python:");
+
+      // Build maps of floor number -> full path
+      java.util.HashMap<Integer, String> videoMap = new java.util.HashMap<Integer, String>();
+      java.util.TreeSet<Integer> allFloorNumbers = new java.util.TreeSet<Integer>();
+
+      for (String videoPath : videoArgs) {
+        // Extract filename from full path
+        String filename = new File(videoPath).getName();
+        int floorNum = extractNumber(filename);
+        videoMap.put(floorNum, videoPath);
+        allFloorNumbers.add(floorNum);
+        println("  Floor " + floorNum + ": " + filename);
+      }
+
+      // Add to videoNames in sorted order
+      for (int floorNum : allFloorNumbers) {
+        String videoPath = videoMap.get(floorNum);
+        videoNames.add(videoPath);
+        audioNames.add(null); // Audio is handled by SuperCollider
+      }
+
+      println("✓ Loaded " + videoNames.size() + " video(s)");
+      return;
+    }
+
+    // Fallback: scan data folder (for backwards compatibility)
+    println("\nNo videos passed from Python, scanning data folder...");
+    println("Searching for media in: " + parent.dataPath(""));
 
     File dataFolder = new File(parent.dataPath(""));
     if (!dataFolder.exists() || !dataFolder.isDirectory()) {
@@ -614,9 +653,16 @@ class Floor {
     this.audioName = audioFile;
     this.floorNumber = number;
 
-    // Load video
+    // Load video - check if it's a full path or just a filename
     if (videoFile != null) {
-      video = new Movie(parent, videoFile);
+      File f = new File(videoFile);
+      if (f.exists() && f.isFile()) {
+        // Full path provided (from Python)
+        video = new Movie(parent, videoFile);
+      } else {
+        // Just filename, use dataPath()
+        video = new Movie(parent, parent.dataPath(videoFile));
+      }
       video.loop();
       video.play();
     }

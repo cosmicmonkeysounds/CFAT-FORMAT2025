@@ -278,20 +278,15 @@ class CarpetHotelLauncher:
 
             try:
                 # Launch sclang with the audio script
-                # sclang will execute the .scd file and keep running
+                # Simple approach: just pass audio device as arg, let SC scan data/ directory
                 self.log("  Starting SuperCollider audio engine...")
 
-                # Build command with optional audio device argument and audio files
+                # Build command
                 cmd = [self.sclang_path, str(self.sc_script)]
+
+                # Add audio device as argument if specified
                 if self.audio_device:
                     cmd.append(self.audio_device)
-
-                # Add audio files as arguments
-                audio_files = self.get_audio_files()
-                if audio_files:
-                    self.log(f"  Passing {len(audio_files)} audio file(s) to SuperCollider")
-                    for audio_file in audio_files:
-                        cmd.append(audio_file)
 
                 self.sc_process = subprocess.Popen(
                     cmd,
@@ -306,13 +301,14 @@ class CarpetHotelLauncher:
                 success_marker = False
                 failure_marker = False
                 start_time = time.time()
-                timeout = 15  # seconds
+                timeout = 30  # seconds (increased for class library compilation)
 
                 # Create a list to collect output
                 output_lines = []
 
                 def collect_output():
                     nonlocal success_marker, failure_marker
+                    sc_booted = False  # Track if SC itself has booted
                     try:
                         for line in iter(self.sc_process.stdout.readline, ''):
                             if not line:
@@ -324,11 +320,17 @@ class CarpetHotelLauncher:
                             with open(self.log_file, 'a') as f:
                                 f.write(message + "\n")
 
-                            # Check for success/failure markers
-                            if "Audio engine ready!" in line or "Listening for OSC" in line:
-                                success_marker = True
-                            if "could not initialize audio" in line or "Server 'localhost' exited" in line:
-                                failure_marker = True
+                            # Track SC boot
+                            if "Welcome to SuperCollider" in line:
+                                sc_booted = True
+                                self.log("  SuperCollider class library loaded, executing script...")
+
+                            # Check for success markers (only after SC booted)
+                            if sc_booted:
+                                if "Audio engine ready!" in line or "Listening for OSC" in line or "Audio server ready!" in line or "CARPET HOTEL" in line:
+                                    success_marker = True
+                                if "could not initialize audio" in line or "Server 'localhost' exited" in line or "ERROR: Audio device" in line:
+                                    failure_marker = True
                     except Exception as e:
                         # print(f"[SC] Stream error: {e}")
                         pass
@@ -916,58 +918,62 @@ class CarpetHotelLauncher:
         self.log(f"[Arduino] LED animation mode: {self.led_animation_mode}")
 
     def led_animation_loop(self):
-        """Thread that controls LED animations by sending direct LED commands."""
-        print("[Arduino] LED animation thread started")
-        self.log("[Arduino] LED animation thread started")
+        """Thread that controls LED animations with 60FPS tick system."""
+        print("[Arduino] LED animation thread started (60 FPS)")
+        self.log("[Arduino] LED animation thread started (60 FPS)")
 
-        transition_index = 0  # 0=RED, 1=YELLOW, 2=GREEN
-        stable_on = True  # For blinking
-        last_update = time.time()
+        # Animation state
+        frame = 0  # Frame counter
+        fps = 60
+        frame_time = 1.0 / fps  # ~16.67ms per frame
+
+        # Pattern state
+        stable_blink_frames = int(0.15 * fps)  # 150ms = 9 frames at 60fps
+        transition_cycle_frames = int(0.1 * fps)  # 100ms = 6 frames at 60fps
+
+        # LED state cache to avoid redundant serial writes
+        led_state = {"RED": None, "YELLOW": None, "GREEN": None}
+
+        def set_led_if_changed(led_name, new_state):
+            """Only send LED command if state actually changed."""
+            if led_state[led_name] != new_state:
+                self.send_arduino_led(led_name, new_state)
+                led_state[led_name] = new_state
 
         while self.led_animation_running and self.arduino_serial:
-            try:
-                current_time = time.time()
+            loop_start = time.time()
 
+            try:
                 if self.led_animation_mode == "OFF":
-                    # Turn all LEDs off
-                    self.send_arduino_led("RED", False)
-                    self.send_arduino_led("YELLOW", False)
-                    self.send_arduino_led("GREEN", False)
-                    time.sleep(0.1)
+                    # All LEDs off
+                    set_led_if_changed("RED", False)
+                    set_led_if_changed("YELLOW", False)
+                    set_led_if_changed("GREEN", False)
+                    frame = 0  # Reset frame counter when OFF
 
                 elif self.led_animation_mode == "STABLE":
-                    # Green LED blinks quickly (150ms on/off)
-                    if current_time - last_update >= 0.15:  # 150ms
-                        stable_on = not stable_on
-                        self.send_arduino_led("RED", False)
-                        self.send_arduino_led("YELLOW", False)
-                        self.send_arduino_led("GREEN", stable_on)
-                        last_update = current_time
-                    time.sleep(0.01)
+                    # Green LED blinks at 150ms intervals
+                    blink_on = (frame // stable_blink_frames) % 2 == 0
+                    set_led_if_changed("RED", False)
+                    set_led_if_changed("YELLOW", False)
+                    set_led_if_changed("GREEN", blink_on)
 
                 elif self.led_animation_mode == "TRANSITION":
-                    # Cycle through RED -> YELLOW -> GREEN rapidly (100ms each)
-                    if current_time - last_update >= 0.1:  # 100ms per LED
-                        # Turn off all LEDs
-                        self.send_arduino_led("RED", False)
-                        self.send_arduino_led("YELLOW", False)
-                        self.send_arduino_led("GREEN", False)
+                    # Cycle through RED -> YELLOW -> GREEN at 100ms intervals
+                    cycle_position = (frame // transition_cycle_frames) % 3
+                    set_led_if_changed("RED", cycle_position == 0)
+                    set_led_if_changed("YELLOW", cycle_position == 1)
+                    set_led_if_changed("GREEN", cycle_position == 2)
 
-                        # Turn on current LED
-                        if transition_index == 0:
-                            self.send_arduino_led("RED", True)
-                        elif transition_index == 1:
-                            self.send_arduino_led("YELLOW", True)
-                        elif transition_index == 2:
-                            self.send_arduino_led("GREEN", True)
-
-                        transition_index = (transition_index + 1) % 3
-                        last_update = current_time
-                    time.sleep(0.01)
+                frame += 1
 
             except Exception as e:
                 self.log(f"[Arduino] LED animation error: {e}")
-                time.sleep(0.1)
+
+            # Sleep for remaining frame time to maintain 60 FPS
+            elapsed = time.time() - loop_start
+            sleep_time = max(0, frame_time - elapsed)
+            time.sleep(sleep_time)
 
         # Turn off all LEDs when thread stops
         try:
@@ -1302,6 +1308,9 @@ class CarpetHotelLauncher:
         if self.sc_process:
             try:
                 print("Stopping SuperCollider...")
+                # Close stdin to signal shutdown
+                if self.sc_process.stdin:
+                    self.sc_process.stdin.close()
                 self.sc_process.terminate()
                 self.sc_process.wait(timeout=5)
                 print("✓ SuperCollider stopped")
@@ -1820,12 +1829,102 @@ def guided_setup_gui():
         ttk.Label(page4, text="\n⚠ Arduino control requires 'pyserial'\nInstall with: pip install pyserial",
                   foreground='orange').pack(pady=10)
 
-    # ===== PAGE 5: Summary =====
+    # ===== PAGE 5: Testing =====
     page5 = ttk.Frame(notebook)
-    notebook.add(page5, text="5. Review")
+    notebook.add(page5, text="5. Testing")
 
-    ttk.Label(page5, text="Configuration Summary", font=('Arial', 14, 'bold')).pack(pady=10)
-    summary_text = tk.Text(page5, height=15, width=60, wrap='word', font=('Courier', 10))
+    ttk.Label(page5, text="Test Controls", font=('Arial', 14, 'bold')).pack(pady=10)
+    ttk.Label(page5, text="Test elevator controls and LEDs (Arduino must be connected)").pack(pady=5)
+
+    # Elevator button testing
+    elevator_frame = ttk.LabelFrame(page5, text="Elevator Buttons", padding=10)
+    elevator_frame.pack(fill='x', padx=20, pady=10)
+
+    def test_up_button():
+        """Send Up button press."""
+        if launcher_instance[0] and launcher_instance[0].osc_client:
+            launcher_instance[0].send_osc("/carpet/elevator/up")
+            status_label.config(text="Sent: Up button", foreground='blue')
+            print("[TEST] Sent /carpet/elevator/up")
+        else:
+            status_label.config(text="Not running - start first!", foreground='red')
+
+    def test_down_button():
+        """Send Down button press."""
+        if launcher_instance[0] and launcher_instance[0].osc_client:
+            launcher_instance[0].send_osc("/carpet/elevator/down")
+            status_label.config(text="Sent: Down button", foreground='blue')
+            print("[TEST] Sent /carpet/elevator/down")
+        else:
+            status_label.config(text="Not running - start first!", foreground='red')
+
+    btn_frame = ttk.Frame(elevator_frame)
+    btn_frame.pack()
+    ttk.Button(btn_frame, text="⬆ Up", command=test_up_button, width=15).pack(side='left', padx=5)
+    ttk.Button(btn_frame, text="⬇ Down", command=test_down_button, width=15).pack(side='left', padx=5)
+
+    # LED testing
+    led_frame = ttk.LabelFrame(page5, text="LED Controls", padding=10)
+    led_frame.pack(fill='x', padx=20, pady=10)
+
+    def test_led(led_name, state):
+        """Send LED command to Arduino."""
+        if launcher_instance[0] and launcher_instance[0].arduino_serial:
+            launcher_instance[0].send_arduino_led(led_name, state)
+            status_label.config(text=f"LED {led_name}: {'ON' if state else 'OFF'}", foreground='blue')
+            print(f"[TEST] LED {led_name}: {'ON' if state else 'OFF'}")
+        else:
+            status_label.config(text="Arduino not connected!", foreground='red')
+
+    # Red LED
+    red_frame = ttk.Frame(led_frame)
+    red_frame.pack(fill='x', pady=5)
+    ttk.Label(red_frame, text="Red LED:", width=12).pack(side='left')
+    ttk.Button(red_frame, text="ON", command=lambda: test_led("RED", True), width=10).pack(side='left', padx=2)
+    ttk.Button(red_frame, text="OFF", command=lambda: test_led("RED", False), width=10).pack(side='left', padx=2)
+
+    # Yellow LED
+    yellow_frame = ttk.Frame(led_frame)
+    yellow_frame.pack(fill='x', pady=5)
+    ttk.Label(yellow_frame, text="Yellow LED:", width=12).pack(side='left')
+    ttk.Button(yellow_frame, text="ON", command=lambda: test_led("YELLOW", True), width=10).pack(side='left', padx=2)
+    ttk.Button(yellow_frame, text="OFF", command=lambda: test_led("YELLOW", False), width=10).pack(side='left', padx=2)
+
+    # Green LED
+    green_frame = ttk.Frame(led_frame)
+    green_frame.pack(fill='x', pady=5)
+    ttk.Label(green_frame, text="Green LED:", width=12).pack(side='left')
+    ttk.Button(green_frame, text="ON", command=lambda: test_led("GREEN", True), width=10).pack(side='left', padx=2)
+    ttk.Button(green_frame, text="OFF", command=lambda: test_led("GREEN", False), width=10).pack(side='left', padx=2)
+
+    # Animation mode testing
+    anim_frame = ttk.LabelFrame(page5, text="LED Animation Mode", padding=10)
+    anim_frame.pack(fill='x', padx=20, pady=10)
+
+    def set_animation_mode(mode):
+        """Set LED animation mode."""
+        if launcher_instance[0]:
+            launcher_instance[0].set_led_animation_mode(mode)
+            status_label.config(text=f"Animation mode: {mode}", foreground='blue')
+            print(f"[TEST] Animation mode: {mode}")
+        else:
+            status_label.config(text="Not running - start first!", foreground='red')
+
+    anim_btn_frame = ttk.Frame(anim_frame)
+    anim_btn_frame.pack()
+    ttk.Button(anim_btn_frame, text="OFF", command=lambda: set_animation_mode("OFF"), width=12).pack(side='left', padx=5)
+    ttk.Button(anim_btn_frame, text="STABLE", command=lambda: set_animation_mode("STABLE"), width=12).pack(side='left', padx=5)
+    ttk.Button(anim_btn_frame, text="TRANSITION", command=lambda: set_animation_mode("TRANSITION"), width=12).pack(side='left', padx=5)
+
+    ttk.Label(page5, text="Note: Start the system first (page 6) to enable testing",
+              foreground='gray', font=('Arial', 9)).pack(pady=10)
+
+    # ===== PAGE 6: Summary =====
+    page6 = ttk.Frame(notebook)
+    notebook.add(page6, text="6. Review")
+
+    ttk.Label(page6, text="Configuration Summary", font=('Arial', 14, 'bold')).pack(pady=10)
+    summary_text = tk.Text(page6, height=15, width=60, wrap='word', font=('Courier', 10))
     summary_text.pack(pady=10, padx=20)
 
     def update_summary():
@@ -1884,7 +1983,7 @@ def guided_setup_gui():
         summary_text.config(state='disabled')
 
     def on_page_changed(event):
-        if notebook.index(notebook.select()) == 4:  # Summary page (now page 5, index 4)
+        if notebook.index(notebook.select()) == 5:  # Summary page (now page 6, index 5)
             update_summary()
 
     notebook.bind('<<NotebookTabChanged>>', on_page_changed)
@@ -1902,7 +2001,7 @@ def guided_setup_gui():
     # Create button references that we'll update dynamically
     cancel_button = ttk.Button(button_frame, text="Quit")
     back_button = ttk.Button(button_frame, text="◀ Back", command=lambda: notebook.select(max(0, notebook.index(notebook.select()) - 1)))
-    next_button = ttk.Button(button_frame, text="Next ▶", command=lambda: notebook.select(min(4, notebook.index(notebook.select()) + 1)))
+    next_button = ttk.Button(button_frame, text="Next ▶", command=lambda: notebook.select(min(5, notebook.index(notebook.select()) + 1)))
     start_button = ttk.Button(button_frame, text="Start")
     stop_button = ttk.Button(button_frame, text="Stop")
     pause_button = ttk.Button(button_frame, text="Pause")
@@ -1933,12 +2032,14 @@ def guided_setup_gui():
         notebook.tab(0, state='disabled')
         notebook.tab(1, state='disabled')
         notebook.tab(2, state='disabled')
+        notebook.tab(3, state='disabled')
 
     def enable_config_ui():
         """Enable configuration UI when stopped."""
         notebook.tab(0, state='normal')
         notebook.tab(1, state='normal')
         notebook.tab(2, state='normal')
+        notebook.tab(3, state='normal')
 
     def run_launcher_thread():
         """Run launcher in background thread."""
