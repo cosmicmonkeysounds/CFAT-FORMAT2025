@@ -186,7 +186,7 @@ echo "  Launching Carpet Hotel"
 echo "========================================================"
 echo ""
 
-# Run the main script with all arguments passed through
-python3 app/run_carpet_hotel.py "$@"
+# Run the GUI control panel
+python3 app/carpet_hotel_gui.py
 
 # Note: We stay in the venv, but it will be deactivated when the script exits

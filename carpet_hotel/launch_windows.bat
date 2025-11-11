@@ -243,7 +243,7 @@ echo   Launching Carpet Hotel
 echo ========================================================
 echo.
 
-REM Run the main script with all arguments passed through
-python app\run_carpet_hotel.py %*
+REM Run the GUI control panel
+python app\carpet_hotel_gui.py
 
 REM Note: The venv will be deactivated when the script exits

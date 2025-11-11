@@ -41,7 +41,7 @@ class TestSuite:
         self.script_dir = Path(__file__).parent.parent.absolute()
         self.data_dir = self.script_dir.parent / 'data'
         self.sc_script = self.script_dir / 'carpet_hotel_audio.scd'
-        self.processing_sketch = self.script_dir / 'carpet_hotel.pde'
+        self.processing_sketch = self.script_dir / 'carpet_hotel_video.pde'
 
         # Find sclang
         self.sclang_path = '/Applications/SuperCollider.app/Contents/MacOS/sclang'
@@ -102,6 +102,13 @@ class TestSuite:
             return False
         print_pass(f"Found {len(video_files)} video files")
 
+        # Check for expected video files (carpet_2 through carpet_10)
+        expected_videos = set([f"carpet_{i}.mp4" for i in range(2, 11)])
+        found_videos = set([vf.name for vf in video_files])
+        missing_videos = expected_videos - found_videos
+        if missing_videos:
+            print_warn(f"  Missing expected videos: {', '.join(sorted(missing_videos))}")
+
         # Find audio files
         audio_files = list(self.data_dir.glob('carpet_*.wav')) + list(self.data_dir.glob('carpet_*.aiff'))
         audio_files.sort()
@@ -113,6 +120,20 @@ class TestSuite:
             print_warn("No audio files found")
         else:
             print_pass(f"Found {len(audio_files)} audio files")
+
+        # Check for expected audio files (carpet_1 through carpet_10)
+        expected_audios = set([f"carpet_{i}.wav" for i in range(1, 11)])
+        found_audios = set([af.name for af in audio_files])
+        missing_audios = expected_audios - found_audios
+        if missing_audios:
+            print_warn(f"  Missing expected audios: {', '.join(sorted(missing_audios))}")
+
+        # Verify video/audio pairing
+        # Note: carpet_1 has no video (intentional), so we expect 10 audio, 9 video
+        if len(audio_files) == 10 and len(video_files) == 9:
+            print_pass("Expected file count: 10 audio files, 9 video files")
+        else:
+            print_warn(f"Unexpected file count: {len(audio_files)} audio, {len(video_files)} video (expected 10 audio, 9 video)")
 
         return True
 
