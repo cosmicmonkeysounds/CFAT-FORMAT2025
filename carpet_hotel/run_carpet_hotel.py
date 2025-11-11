@@ -257,7 +257,8 @@ class CarpetHotelLauncher:
         # Kill any existing SuperCollider processes first
         self.log("  Ensuring no SuperCollider processes are running...")
         self.kill_all_supercollider()
-        time.sleep(1)
+        self.log("  Waiting 5 seconds for processes to terminate...")
+        time.sleep(5)
 
         # Try up to 3 times with progressive delays
         max_attempts = 3
@@ -277,10 +278,17 @@ class CarpetHotelLauncher:
                 # sclang will execute the .scd file and keep running
                 self.log("  Starting SuperCollider audio engine...")
 
-                # Build command with optional audio device argument
+                # Build command with optional audio device argument and audio files
                 cmd = [self.sclang_path, str(self.sc_script)]
                 if self.audio_device:
                     cmd.append(self.audio_device)
+
+                # Add audio files as arguments
+                audio_files = self.get_audio_files()
+                if audio_files:
+                    self.log(f"  Passing {len(audio_files)} audio file(s) to SuperCollider")
+                    for audio_file in audio_files:
+                        cmd.append(audio_file)
 
                 self.sc_process = subprocess.Popen(
                     cmd,
@@ -330,6 +338,8 @@ class CarpetHotelLauncher:
                 while time.time() - start_time < timeout:
                     if success_marker:
                         self.log("✓ SuperCollider audio engine launched successfully")
+                        self.log("  Waiting 5 seconds for audio server to fully initialize...")
+                        time.sleep(5)
                         self.log("  Audio server booted and ready for OSC")
                         return True
                     if failure_marker or self.sc_process.poll() is not None:
@@ -393,6 +403,13 @@ class CarpetHotelLauncher:
             if self.displays:
                 displays_str = ','.join(map(str, self.displays))
                 cmd.append(f'--displays={displays_str}')
+
+            # Add video files as arguments
+            video_files = self.get_video_files()
+            if video_files:
+                self.log(f"  Passing {len(video_files)} video file(s) to Processing")
+                for video_file in video_files:
+                    cmd.append(f'--video={video_file}')
 
             self.processing_process = subprocess.Popen(
                 cmd,
@@ -586,8 +603,8 @@ class CarpetHotelLauncher:
     # ARDUINO ELEVATOR CONTROL
     # ============================================================================
 
-    def count_video_files(self):
-        """Count video files in the data directory to determine number of scenes."""
+    def get_video_files(self):
+        """Get list of video files in the data directory."""
         import os
         import glob
 
@@ -595,16 +612,44 @@ class CarpetHotelLauncher:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         data_dir = os.path.join(script_dir, 'data')
 
-        # Count video files (mp4, mov, avi, etc.)
+        # Find video files (mp4, mov, avi, etc.)
         video_extensions = ['*.mp4', '*.mov', '*.avi', '*.m4v']
         video_files = []
         for ext in video_extensions:
             pattern = os.path.join(data_dir, ext)
             video_files.extend(glob.glob(pattern))
 
+        # Sort files to ensure consistent ordering
+        video_files.sort()
+        return video_files
+
+    def get_audio_files(self):
+        """Get list of audio files in the data directory."""
+        import os
+        import glob
+
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(script_dir, 'data')
+
+        # Find audio files (wav, aiff, mp3, etc.)
+        audio_extensions = ['*.wav', '*.aiff', '*.aif', '*.mp3', '*.m4a']
+        audio_files = []
+        for ext in audio_extensions:
+            pattern = os.path.join(data_dir, ext)
+            audio_files.extend(glob.glob(pattern))
+
+        # Sort files to ensure consistent ordering
+        audio_files.sort()
+        return audio_files
+
+    def count_video_files(self):
+        """Count video files in the data directory to determine number of scenes."""
+        video_files = self.get_video_files()
         num_videos = len(video_files)
+
         if num_videos == 0:
-            print(f"[WARNING] No video files found in {data_dir}, using default of 9 scenes")
+            print(f"[WARNING] No video files found in data directory, using default of 9 scenes")
             return 9  # Default fallback
 
         print(f"[INFO] Found {num_videos} video file(s) in data directory → {num_videos} scenes")
@@ -657,6 +702,19 @@ class CarpetHotelLauncher:
             self.arduino_port = self.arduino_port_config
             print(f"Using specified Arduino port: {self.arduino_port}")
             self.log(f"Using specified Arduino port: {self.arduino_port}")
+
+        # Close any existing serial connections to this port
+        print(f"Closing any existing connections to {self.arduino_port}...")
+        self.log(f"Closing any existing connections to {self.arduino_port}...")
+        try:
+            # Try to identify and kill processes using the serial port
+            if self.platform == 'Darwin' or self.platform == 'Linux':
+                # Kill any processes using the serial port
+                subprocess.run(['fuser', '-k', self.arduino_port],
+                              capture_output=True, timeout=2)
+                time.sleep(0.5)
+        except Exception as e:
+            self.log(f"  (Could not check for existing connections: {e})")
 
         # Connect to Arduino (using same settings as test_elevator_arduino.py)
         try:
@@ -1368,7 +1426,8 @@ def guided_setup_gui():
         'enable_keyboard': saved_settings.get('enable_keyboard', True),
         'enable_python_terminal': saved_settings.get('enable_python_terminal', True),
         'enable_osc_external': saved_settings.get('enable_osc_external', True),
-        'displays': saved_settings.get('displays', [1, 2])
+        'displays': saved_settings.get('displays', [1, 2]),
+        'arduino_port': saved_settings.get('arduino_port', 'auto')
     }
 
     current_page = [0]  # Use list to allow modification in nested functions
@@ -1627,8 +1686,12 @@ def guided_setup_gui():
 
     # Arduino port selection variable
     saved_arduino_port = config.get('arduino_port', 'auto')
-    arduino_port_var = tk.StringVar(value=saved_arduino_port)
-    arduino_custom_port = tk.StringVar(value="" if saved_arduino_port == "auto" else saved_arduino_port)
+    if saved_arduino_port == "auto":
+        arduino_port_var = tk.StringVar(value="auto")
+        arduino_custom_port = tk.StringVar(value="")
+    else:
+        arduino_port_var = tk.StringVar(value="custom")
+        arduino_custom_port = tk.StringVar(value=saved_arduino_port)
 
     # Auto-detect option
     ttk.Radiobutton(page4, text="Auto-detect Arduino (recommended)",

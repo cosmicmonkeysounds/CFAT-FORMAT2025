@@ -4,17 +4,20 @@
  * Hardware:
  * - Pin A0: DOWN button (momentary, normally-closed)
  * - Pin A1: UP button (momentary, normally-closed)
- * - Pin D3: GREEN LED (PWM capable)
- * - Pin D5: YELLOW LED (PWM capable)
- * - Pin D6: RED LED (PWM capable)
+ * - Pin D2: GREEN LED
+ * - Pin D3: YELLOW LED
+ * - Pin D4: RED LED
  *
  * Serial Protocol:
  * - Sends: "up" or "down" when buttons are pressed
  * - Receives:
- *   - "ANIM:STABLE" - Green LED pulses gently (50-100% PWM)
+ *   - "ANIM:STABLE" - Green LED blinks slowly (1 sec on/off)
  *   - "ANIM:TRANSITION" - Cycle RED->YELLOW->GREEN
  *   - "ANIM:OFF" - All LEDs off
  *   - "PERIOD:xxx" - Set transition animation period in ms
+ *   - "RED:1" / "RED:0" - Direct LED control (disables animations)
+ *   - "YELLOW:1" / "YELLOW:0" - Direct LED control
+ *   - "GREEN:1" / "GREEN:0" - Direct LED control
  */
 
 #include <string.h>
@@ -153,9 +156,9 @@ private:
 // Pin definitions
 const int PIN_BUTTON_DOWN = A0;
 const int PIN_BUTTON_UP = A1;
-const int PIN_LED_GREEN = 3;   // PWM
-const int PIN_LED_YELLOW = 5;  // PWM
-const int PIN_LED_RED = 6;     // PWM
+const int PIN_LED_GREEN = 2;
+const int PIN_LED_YELLOW = 3;
+const int PIN_LED_RED = 4;
 
 // Buttons using MomentarySwitch class
 MomentarySwitch buttonDown(PIN_BUTTON_DOWN, false, PULLUP_UP, 50);
@@ -273,9 +276,9 @@ void parseCommand(char* command) {
     } else if (strcmp(valueStr, "OFF") == 0) {
       currentMode = ANIM_OFF;
       // Turn all LEDs off
-      analogWrite(PIN_LED_RED, 0);
-      analogWrite(PIN_LED_YELLOW, 0);
-      analogWrite(PIN_LED_GREEN, 0);
+      digitalWrite(PIN_LED_RED, LOW);
+      digitalWrite(PIN_LED_YELLOW, LOW);
+      digitalWrite(PIN_LED_GREEN, LOW);
     }
   }
   // Handle period setting
@@ -302,11 +305,11 @@ void parseCommand(char* command) {
     // Set LED directly and disable animation mode
     currentMode = ANIM_OFF;
     if (strcmp(cmdName, "RED") == 0) {
-      analogWrite(PIN_LED_RED, state ? 255 : 0);
+      digitalWrite(PIN_LED_RED, state ? HIGH : LOW);
     } else if (strcmp(cmdName, "YELLOW") == 0) {
-      analogWrite(PIN_LED_YELLOW, state ? 255 : 0);
+      digitalWrite(PIN_LED_YELLOW, state ? HIGH : LOW);
     } else if (strcmp(cmdName, "GREEN") == 0) {
-      analogWrite(PIN_LED_GREEN, state ? 255 : 0);
+      digitalWrite(PIN_LED_GREEN, state ? HIGH : LOW);
     }
   }
 }
@@ -320,22 +323,14 @@ void updateAnimations() {
       break;
 
     case ANIM_STABLE: {
-      // Green LED pulses between 50% and 100% brightness
-      // Use a sine wave for smooth pulsing
-      pulsePhase += 0.05;  // Adjust speed here (lower = slower)
-      if (pulsePhase > 6.283185) {  // 2*PI
-        pulsePhase = 0.0;
-      }
+      // Green LED blinks slowly (on/off pattern)
+      // Since PWM doesn't work, use simple on/off blinking
+      unsigned long blinkPeriod = 1000;  // 1 second period
+      bool ledOn = (now / blinkPeriod) % 2 == 0;
 
-      // Calculate brightness: 50% + 50% * (sin + 1) / 2
-      // sin ranges from -1 to 1, so (sin+1)/2 ranges from 0 to 1
-      float sinVal = sin(pulsePhase);
-      float brightness = 0.5 + 0.5 * ((sinVal + 1.0) / 2.0);
-      int pwmValue = (int)(brightness * 255);
-
-      analogWrite(PIN_LED_GREEN, pwmValue);
-      analogWrite(PIN_LED_YELLOW, 0);
-      analogWrite(PIN_LED_RED, 0);
+      digitalWrite(PIN_LED_GREEN, ledOn ? HIGH : LOW);
+      digitalWrite(PIN_LED_YELLOW, LOW);
+      digitalWrite(PIN_LED_RED, LOW);
       break;
     }
 
@@ -345,10 +340,10 @@ void updateAnimations() {
         lastAnimUpdate = now;
         transitionState = (transitionState + 1) % 3;
 
-        // Turn on current LED, turn off others
-        analogWrite(PIN_LED_RED, (transitionState == 0) ? 255 : 0);
-        analogWrite(PIN_LED_YELLOW, (transitionState == 1) ? 255 : 0);
-        analogWrite(PIN_LED_GREEN, (transitionState == 2) ? 255 : 0);
+        // Turn on current LED, turn off others (using digitalWrite)
+        digitalWrite(PIN_LED_RED, (transitionState == 0) ? HIGH : LOW);
+        digitalWrite(PIN_LED_YELLOW, (transitionState == 1) ? HIGH : LOW);
+        digitalWrite(PIN_LED_GREEN, (transitionState == 2) ? HIGH : LOW);
       }
       break;
   }

@@ -10,9 +10,9 @@ This system provides a hardware elevator control panel that integrates directly 
   - DOWN button → Pin A0
   - UP button → Pin A1
 - **3 LEDs** with appropriate resistors (typically 220Ω-330Ω)
-  - GREEN LED → Pin D3 (PWM)
-  - YELLOW LED → Pin D5 (PWM)
-  - RED LED → Pin D6 (PWM)
+  - GREEN LED → Pin D2
+  - YELLOW LED → Pin D3
+  - RED LED → Pin D4
 
 ### Wiring
 ```
@@ -21,10 +21,10 @@ Buttons:
   Pin A1 ----[Button]---- GND
   (Internal pull-up resistors are enabled in code)
 
-LEDs (all PWM-capable pins for animations):
-  Pin D3 ----[330Ω]----[GREEN LED]---- GND
-  Pin D5 ----[330Ω]----[YELLOW LED]---- GND
-  Pin D6 ----[330Ω]----[RED LED]---- GND
+LEDs:
+  Pin D2 ----[330Ω]----[GREEN LED]---- GND
+  Pin D3 ----[330Ω]----[YELLOW LED]---- GND
+  Pin D4 ----[330Ω]----[RED LED]---- GND
 ```
 
 ## Installation
@@ -71,21 +71,23 @@ The launcher will:
 - Connect via serial
 - Convert button presses to OSC messages
 - Forward LED control messages from Processing to the Arduino
+- Discover video files in `data/` and pass them to Processing
+- Discover audio files in `data/` and pass them to SuperCollider
 
-That's it! No separate bridge script needed.
+That's it! No separate bridge script needed. Files are automatically discovered and passed as command-line arguments.
 
 ## LED Animations
 
 The system features automatic LED animations controlled by the Python launcher:
 
 ### Stable Scene Mode
-- **GREEN LED pulses gently** (50%-100% brightness using PWM)
+- **GREEN LED blinks slowly** (1 second on, 1 second off)
 - Yellow and Red LEDs are off
 - Indicates the system is ready and in a stable scene
 
 ### Transition Mode
 - **LEDs cycle**: RED → YELLOW → GREEN
-- Each LED lights up in sequence
+- Each LED lights up in sequence (on/off)
 - Indicates a scene transition is in progress
 - Default period: 400ms per LED
 
@@ -98,10 +100,13 @@ The system features automatic LED animations controlled by the Python launcher:
 - `down` - DOWN button pressed
 
 **Received by Arduino:**
-- `ANIM:STABLE` - Start stable mode (green pulse)
+- `ANIM:STABLE` - Start stable mode (green blinks slowly)
 - `ANIM:TRANSITION` - Start transition animation (RGB cycle)
 - `ANIM:OFF` - Turn off all LEDs
 - `PERIOD:xxx` - Set transition period in milliseconds
+- `RED:1` / `RED:0` - Direct LED control (disables animations)
+- `YELLOW:1` / `YELLOW:0` - Direct LED control
+- `GREEN:1` / `GREEN:0` - Direct LED control
 
 ### OSC Protocol (Python ↔ Processing)
 

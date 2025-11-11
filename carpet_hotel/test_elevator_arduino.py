@@ -70,8 +70,13 @@ def test_elevator_control(port=None):
         print("\nArduino connected!")
         print("\nTest controls:")
         print("  Press UP or DOWN buttons on the hardware")
-        print("  Type 'r', 'y', or 'g' to toggle RED, YELLOW, or GREEN LEDs")
-        print("  Type 'q' to quit")
+        print("\n  Direct LED Control:")
+        print("    'r', 'y', or 'g' - toggle RED, YELLOW, or GREEN LEDs")
+        print("\n  Animation Tests:")
+        print("    '1' - STABLE animation (green blinks slowly)")
+        print("    '2' - TRANSITION animation (RGB cycle)")
+        print("    '0' - OFF (turn off all LEDs)")
+        print("\n  'q' - quit")
         print("\n" + "="*50 + "\n")
 
         # LED states
@@ -108,6 +113,18 @@ def test_elevator_control(port=None):
                         cmd = f"GREEN:{1 if led_states['GREEN'] else 0}\n"
                         ser.write(cmd.encode())
                         print(f"LED command sent: {cmd.strip()}")
+                    elif key == '1':
+                        cmd = "ANIM:STABLE\n"
+                        ser.write(cmd.encode())
+                        print(f"Animation command sent: {cmd.strip()}")
+                    elif key == '2':
+                        cmd = "ANIM:TRANSITION\n"
+                        ser.write(cmd.encode())
+                        print(f"Animation command sent: {cmd.strip()}")
+                    elif key == '0':
+                        cmd = "ANIM:OFF\n"
+                        ser.write(cmd.encode())
+                        print(f"Animation command sent: {cmd.strip()}")
 
             time.sleep(0.01)  # Small delay to prevent CPU spinning
 
