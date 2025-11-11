@@ -18,6 +18,8 @@ from pathlib import Path
 import signal
 import atexit
 import sys
+import threading
+import time
 
 # Import wrapper modules
 from carpet_hotel_scd import CarpetHotelSuperCollider
@@ -47,6 +49,10 @@ class CarpetHotelCore:
         self.pde_running = False
         self.arduino_running = False
 
+        # Process monitoring
+        self._monitor_thread = None
+        self._monitor_running = False
+
         # Register cleanup handlers
         atexit.register(self._cleanup)
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -60,9 +66,41 @@ class CarpetHotelCore:
 
     def _cleanup(self):
         """Cleanup handler called on exit."""
+        # Stop monitoring thread
+        self._monitor_running = False
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            self._monitor_thread.join(timeout=1)
+
         if self.is_running():
             print("\nCleaning up running processes...")
             self.stop_all()
+
+    def _monitor_processes(self):
+        """Monitor processes and update state when they exit."""
+        while self._monitor_running:
+            # Check Processing
+            if self.pde_running and self.processing:
+                if not self.processing.is_running():
+                    print("\n⚠ Processing exited unexpectedly")
+                    self.pde_running = False
+                    self.processing = None
+
+            # Check SuperCollider
+            if self.sc_running and self.supercollider:
+                # SC doesn't have is_running check yet, could add if needed
+                pass
+
+            time.sleep(0.5)  # Check every 500ms
+
+    def _start_monitoring(self):
+        """Start process monitoring thread."""
+        if not self._monitor_running:
+            self._monitor_running = True
+            self._monitor_thread = threading.Thread(
+                target=self._monitor_processes,
+                daemon=True
+            )
+            self._monitor_thread.start()
 
     def start_supercollider(self) -> bool:
         """
@@ -125,6 +163,8 @@ class CarpetHotelCore:
 
         if self.processing.start():
             self.pde_running = True
+            # Start monitoring thread to detect unexpected exits
+            self._start_monitoring()
             return True
 
         return False

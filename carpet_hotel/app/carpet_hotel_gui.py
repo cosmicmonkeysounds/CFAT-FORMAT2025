@@ -63,6 +63,9 @@ class CarpetHotelGUI:
         self.refresh_audio_devices()
         self.refresh_serial_ports()
 
+        # Start status polling
+        self._poll_status()
+
     def create_gui(self):
         """Create all GUI elements."""
         # Create notebook for tabs
@@ -834,6 +837,35 @@ class CarpetHotelGUI:
         widget.insert(tk.END, message + "\n")
         widget.see(tk.END)
         widget.config(state='disabled')
+
+    def _poll_status(self):
+        """Poll core status and update GUI if state changes."""
+        # Check video/Processing status
+        if self.video_running != self.core.pde_running:
+            if self.video_running and not self.core.pde_running:
+                # Processing stopped unexpectedly
+                self.log_to_widget(self.video_log, "✗ Processing exited")
+            self.video_running = self.core.pde_running
+            self.update_video_ui(self.video_running)
+
+        # Check audio/SuperCollider status
+        if self.audio_running != self.core.sc_running:
+            if self.audio_running and not self.core.sc_running:
+                # SC stopped unexpectedly
+                self.log_to_widget(self.audio_log, "✗ SuperCollider exited")
+            self.audio_running = self.core.sc_running
+            self.update_audio_ui(self.audio_running)
+
+        # Check Arduino status
+        if self.hardware_running != self.core.arduino_running:
+            if self.hardware_running and not self.core.arduino_running:
+                # Arduino disconnected unexpectedly
+                self.log_to_widget(self.hardware_log, "✗ Arduino disconnected")
+            self.hardware_running = self.core.arduino_running
+            self.update_hardware_ui(self.hardware_running)
+
+        # Schedule next poll in 500ms
+        self.root.after(500, self._poll_status)
 
     def run(self):
         """Run the GUI main loop."""
