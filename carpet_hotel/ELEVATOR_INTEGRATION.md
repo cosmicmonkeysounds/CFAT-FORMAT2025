@@ -6,35 +6,49 @@ The Arduino elevator control panel has been **fully integrated** into the main `
 
 ### Arduino Code (`elevator_control/elevator_control.ino`)
 - ✓ Optimized to use char buffers instead of String objects (no heap fragmentation)
-- ✓ Reads 2 buttons (pins 22, 23) with debouncing
-- ✓ Controls 3 LEDs (pins 49, 11, 12)
+- ✓ Reads 2 buttons (pins A0, A1) with debouncing
+- ✓ Controls 3 LEDs (pins D2, D3, D4)
 - ✓ Sends simple serial messages: "up", "down"
-- ✓ Receives LED commands: "RED:1", "YELLOW:0", etc.
+- ✓ Receives direct LED commands: "RED:1", "YELLOW:0", etc.
+- ✓ **All animation logic removed** - Arduino is now a "dumb" LED controller
 
 ### Python Launcher Integration (`run_carpet_hotel.py`)
 - ✓ Added pyserial import with availability check
 - ✓ Added Arduino state variables to __init__
 - ✓ Added `setup_arduino()` method to auto-detect and connect
 - ✓ Added `monitor_arduino()` thread to read button presses
-- ✓ Added OSC handlers for LED control messages
-- ✓ Added `send_arduino_led()` to forward LED commands via serial
-- ✓ Added Arduino cleanup to shutdown routine
+- ✓ **Added `led_animation_loop()` thread to control LED animations**
+- ✓ **Added `set_led_animation_mode()` to switch animation modes**
+- ✓ Added `send_arduino_led()` to send direct LED commands via serial
+- ✓ Added OSC handlers for LED control messages (legacy support)
+- ✓ Added Arduino cleanup to shutdown routine (stops LED thread gracefully)
 - ✓ Integrated Arduino setup into main run() flow
 
 ### Communication Flow
 
 ```
-Arduino (Serial) → Python Launcher (OSC) → Processing/SuperCollider
+Arduino (Serial) ↔ Python Launcher (OSC) ↔ Processing/SuperCollider
 
 Button Press:
   Arduino: sends "up" via serial
-  Python: receives "up", sends /carpet/elevator/up via OSC
-  Processing: receives OSC message, can trigger scene change
+  Python: receives "up", sets LED mode to "TRANSITION"
+  Python: sends /carpet/elevator/up via OSC
+  Processing: receives OSC message, triggers scene change
+  Python: after 1 sec, sets LED mode back to "STABLE"
 
-LED Control:
+LED Animation (Python → Arduino):
+  Python LED thread: continuously monitors led_animation_mode
+  - STABLE: blinks GREEN LED at 150ms intervals
+  - TRANSITION: cycles RED→YELLOW→GREEN at 100ms per LED
+  - OFF: turns all LEDs off
+  Python: sends direct commands "RED:1\n", "GREEN:0\n", etc.
+  Arduino: receives commands, turns LEDs on/off immediately
+
+Legacy LED Control (Processing → Python → Arduino):
   Processing: sends /carpet/elevator/led/red [1] via OSC
   Python: receives OSC, sends "RED:1\n" via serial
   Arduino: receives "RED:1", turns on red LED
+  Note: This overrides animations until mode changes
 ```
 
 ## Usage
@@ -129,3 +143,8 @@ The original `elevator_osc_bridge.py` is still available for standalone testing,
 5. **OSC Bus Architecture**: Python launcher is central hub for all OSC communication
 6. **Graceful Degradation**: System works fine without Arduino connected
 7. **Efficient Arduino Code**: No memory fragmentation from String objects
+8. **Python-Controlled Animations**: LED animations managed by Python thread for:
+   - Easier timing adjustments without re-uploading Arduino code
+   - More complex animation patterns possible
+   - Better synchronization with scene transitions
+   - Simpler, more reliable Arduino firmware

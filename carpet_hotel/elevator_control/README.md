@@ -78,18 +78,20 @@ That's it! No separate bridge script needed. Files are automatically discovered 
 
 ## LED Animations
 
-The system features automatic LED animations controlled by the Python launcher:
+The system features automatic LED animations **fully controlled by the Python launcher**:
 
 ### Stable Scene Mode
-- **GREEN LED blinks quickly** (300ms on, 300ms off)
+- **GREEN LED blinks quickly** (150ms on, 150ms off)
 - Yellow and Red LEDs are off
 - Indicates the system is ready and in a stable scene
 
 ### Transition Mode
-- **LEDs cycle rapidly**: RED → YELLOW → GREEN
+- **LEDs cycle very rapidly**: RED → YELLOW → GREEN
 - Each LED lights up in sequence (on/off)
 - Indicates a scene transition is in progress
-- Default period: 150ms per LED (very fast!)
+- Period: 100ms per LED (very fast!)
+
+**Note:** The Arduino simply receives direct LED on/off commands from Python. All animation timing and logic is handled by the Python launcher in a dedicated thread.
 
 ## Communication Protocol
 
@@ -100,13 +102,11 @@ The system features automatic LED animations controlled by the Python launcher:
 - `down` - DOWN button pressed
 
 **Received by Arduino:**
-- `ANIM:STABLE` - Start stable mode (green blinks slowly)
-- `ANIM:TRANSITION` - Start transition animation (RGB cycle)
-- `ANIM:OFF` - Turn off all LEDs
-- `PERIOD:xxx` - Set transition period in milliseconds
-- `RED:1` / `RED:0` - Direct LED control (disables animations)
-- `YELLOW:1` / `YELLOW:0` - Direct LED control
-- `GREEN:1` / `GREEN:0` - Direct LED control
+- `RED:1` / `RED:0` - Turn RED LED on/off
+- `YELLOW:1` / `YELLOW:0` - Turn YELLOW LED on/off
+- `GREEN:1` / `GREEN:0` - Turn GREEN LED on/off
+
+**Note:** The Arduino only handles direct LED control. LED animations are managed entirely by the Python launcher.
 
 ### OSC Protocol (Python ↔ Processing)
 

@@ -99,6 +99,9 @@ class CarpetHotelLauncher:
         self.arduino_port_config = arduino_port  # "auto" or specific port path
         self.arduino_port = None  # Will be set during setup
         self.arduino_running = False
+        self.led_animation_thread = None
+        self.led_animation_mode = "OFF"  # OFF, STABLE, TRANSITION
+        self.led_animation_running = False
 
         # Paths
         self.sc_script = self.script_dir / "carpet_hotel_audio.scd"
@@ -739,13 +742,14 @@ class CarpetHotelLauncher:
             self.arduino_thread = threading.Thread(target=self.monitor_arduino, daemon=True)
             self.arduino_thread.start()
 
-            # Initialize LED animations
-            print("[Arduino] Initializing LED animations...")
-            self.log("[Arduino] Initializing LED animations...")
-            time.sleep(0.5)  # Give thread time to start
-            self.send_arduino_period(150)  # 150ms per LED in transition mode (fast!)
-            time.sleep(0.1)
-            self.send_arduino_animation("STABLE")  # Start in stable mode
+            # Start LED animation thread
+            print("[Arduino] Starting LED animation thread...")
+            self.log("[Arduino] Starting LED animation thread...")
+            self.led_animation_running = True
+            self.led_animation_thread = threading.Thread(target=self.led_animation_loop, daemon=True)
+            self.led_animation_thread.start()
+            time.sleep(0.2)  # Give thread time to start
+            self.set_led_animation_mode("STABLE")  # Start in stable mode
 
             print("✓ Arduino elevator control enabled")
             self.log("✓ Arduino elevator control enabled")
@@ -820,7 +824,7 @@ class CarpetHotelLauncher:
                             self.log(f"[Arduino] UP button → scene {self.current_scene} → {next_scene}")
 
                             # Start transition animation
-                            self.send_arduino_animation("TRANSITION")
+                            self.set_led_animation_mode("TRANSITION")
 
                             if self.osc_client:
                                 print(f"[Arduino] DEBUG: Sending OSC /carpet/goto {next_scene}")
@@ -835,7 +839,7 @@ class CarpetHotelLauncher:
                                     def back_to_stable():
                                         time.sleep(1.0)  # Reduced from 3.0 to 1.0 for faster feedback
                                         if self.arduino_serial and self.arduino_running:
-                                            self.send_arduino_animation("STABLE")
+                                            self.set_led_animation_mode("STABLE")
 
                                     threading.Thread(target=back_to_stable, daemon=True).start()
 
@@ -858,7 +862,7 @@ class CarpetHotelLauncher:
                             self.log(f"[Arduino] DOWN button → scene {self.current_scene} → {prev_scene}")
 
                             # Start transition animation
-                            self.send_arduino_animation("TRANSITION")
+                            self.set_led_animation_mode("TRANSITION")
 
                             if self.osc_client:
                                 print(f"[Arduino] DEBUG: Sending OSC /carpet/goto {prev_scene}")
@@ -873,7 +877,7 @@ class CarpetHotelLauncher:
                                     def back_to_stable():
                                         time.sleep(1.0)  # Reduced from 3.0 to 1.0 for faster feedback
                                         if self.arduino_serial and self.arduino_running:
-                                            self.send_arduino_animation("STABLE")
+                                            self.set_led_animation_mode("STABLE")
 
                                     threading.Thread(target=back_to_stable, daemon=True).start()
 
@@ -899,39 +903,80 @@ class CarpetHotelLauncher:
 
         self.log("[Arduino] Monitor thread stopped")
 
-    def send_arduino_animation(self, mode):
-        """Send animation command to Arduino via serial.
+    def set_led_animation_mode(self, mode):
+        """Set LED animation mode (OFF, STABLE, TRANSITION).
 
         Args:
-            mode: "STABLE", "TRANSITION", or "OFF"
+            mode: "OFF", "STABLE", or "TRANSITION"
         """
-        if not self.arduino_serial:
-            return
+        self.led_animation_mode = mode.upper()
+        print(f"[Arduino] LED animation mode: {self.led_animation_mode}")
+        self.log(f"[Arduino] LED animation mode: {self.led_animation_mode}")
 
+    def led_animation_loop(self):
+        """Thread that controls LED animations by sending direct LED commands."""
+        print("[Arduino] LED animation thread started")
+        self.log("[Arduino] LED animation thread started")
+
+        transition_index = 0  # 0=RED, 1=YELLOW, 2=GREEN
+        stable_on = True  # For blinking
+        last_update = time.time()
+
+        while self.led_animation_running and self.arduino_serial:
+            try:
+                current_time = time.time()
+
+                if self.led_animation_mode == "OFF":
+                    # Turn all LEDs off
+                    self.send_arduino_led("RED", False)
+                    self.send_arduino_led("YELLOW", False)
+                    self.send_arduino_led("GREEN", False)
+                    time.sleep(0.1)
+
+                elif self.led_animation_mode == "STABLE":
+                    # Green LED blinks quickly (150ms on/off)
+                    if current_time - last_update >= 0.15:  # 150ms
+                        stable_on = not stable_on
+                        self.send_arduino_led("RED", False)
+                        self.send_arduino_led("YELLOW", False)
+                        self.send_arduino_led("GREEN", stable_on)
+                        last_update = current_time
+                    time.sleep(0.01)
+
+                elif self.led_animation_mode == "TRANSITION":
+                    # Cycle through RED -> YELLOW -> GREEN rapidly (100ms each)
+                    if current_time - last_update >= 0.1:  # 100ms per LED
+                        # Turn off all LEDs
+                        self.send_arduino_led("RED", False)
+                        self.send_arduino_led("YELLOW", False)
+                        self.send_arduino_led("GREEN", False)
+
+                        # Turn on current LED
+                        if transition_index == 0:
+                            self.send_arduino_led("RED", True)
+                        elif transition_index == 1:
+                            self.send_arduino_led("YELLOW", True)
+                        elif transition_index == 2:
+                            self.send_arduino_led("GREEN", True)
+
+                        transition_index = (transition_index + 1) % 3
+                        last_update = current_time
+                    time.sleep(0.01)
+
+            except Exception as e:
+                self.log(f"[Arduino] LED animation error: {e}")
+                time.sleep(0.1)
+
+        # Turn off all LEDs when thread stops
         try:
-            cmd = f"ANIM:{mode.upper()}\n"
-            self.arduino_serial.write(cmd.encode())
-            print(f"[Arduino] Animation: {cmd.strip()}")
-            self.log(f"[Arduino] Animation: {cmd.strip()}")
-        except Exception as e:
-            self.log(f"[Arduino] Error sending animation command: {e}")
+            self.send_arduino_led("RED", False)
+            self.send_arduino_led("YELLOW", False)
+            self.send_arduino_led("GREEN", False)
+        except:
+            pass
 
-    def send_arduino_period(self, period_ms):
-        """Send animation period to Arduino via serial.
-
-        Args:
-            period_ms: Period in milliseconds
-        """
-        if not self.arduino_serial:
-            return
-
-        try:
-            cmd = f"PERIOD:{period_ms}\n"
-            self.arduino_serial.write(cmd.encode())
-            print(f"[Arduino] Period: {cmd.strip()}")
-            self.log(f"[Arduino] Period: {cmd.strip()}")
-        except Exception as e:
-            self.log(f"[Arduino] Error sending period command: {e}")
+        print("[Arduino] LED animation thread stopped")
+        self.log("[Arduino] LED animation thread stopped")
 
     def send_arduino_led(self, led_name, state):
         """Send LED command to Arduino via serial (legacy - now using animations)."""
@@ -1298,10 +1343,14 @@ class CarpetHotelLauncher:
         if self.arduino_serial:
             try:
                 print("Stopping Arduino elevator control...")
+                # Stop LED animation thread first
+                if self.led_animation_thread:
+                    self.led_animation_running = False
+                    self.led_animation_thread.join(timeout=1.0)
+                # Turn off all LEDs before disconnecting
+                self.set_led_animation_mode("OFF")
+                time.sleep(0.2)
                 self.arduino_running = False
-                # Turn off all LED animations before disconnecting
-                self.send_arduino_animation("OFF")
-                time.sleep(0.1)
                 self.arduino_serial.close()
                 print("✓ Arduino disconnected")
             except Exception as e:

@@ -10,14 +10,9 @@
  *
  * Serial Protocol:
  * - Sends: "up" or "down" when buttons are pressed
- * - Receives:
- *   - "ANIM:STABLE" - Green LED blinks slowly (1 sec on/off)
- *   - "ANIM:TRANSITION" - Cycle RED->YELLOW->GREEN
- *   - "ANIM:OFF" - All LEDs off
- *   - "PERIOD:xxx" - Set transition animation period in ms
- *   - "RED:1" / "RED:0" - Direct LED control (disables animations)
- *   - "YELLOW:1" / "YELLOW:0" - Direct LED control
- *   - "GREEN:1" / "GREEN:0" - Direct LED control
+ * - Receives: "RED:1" / "RED:0", "YELLOW:1" / "YELLOW:0", "GREEN:1" / "GREEN:0"
+ *
+ * Note: LED animations are controlled by Python, not by Arduino
  */
 
 #include <string.h>
@@ -164,18 +159,7 @@ const int PIN_LED_RED = 4;
 MomentarySwitch buttonDown(PIN_BUTTON_DOWN, false, PULLUP_UP, 50);
 MomentarySwitch buttonUp(PIN_BUTTON_UP, false, PULLUP_UP, 50);
 
-// Animation modes
-enum AnimMode {
-  ANIM_OFF,
-  ANIM_STABLE,      // Green pulses
-  ANIM_TRANSITION   // Cycle RED->YELLOW->GREEN
-};
-
-AnimMode currentMode = ANIM_OFF;
-unsigned long transitionPeriod = 150;  // ms per LED in transition (was 500, now 150 for faster cycling)
-unsigned long lastAnimUpdate = 0;
-int transitionState = 0;  // 0=RED, 1=YELLOW, 2=GREEN
-float pulsePhase = 0.0;   // 0.0 to 2*PI for stable pulse
+// No animation logic - Python controls LEDs directly
 
 // Serial buffer - fixed size, no dynamic allocation
 const int CMD_BUFFER_SIZE = 32;
@@ -222,9 +206,6 @@ void loop() {
 
   // Process serial commands
   processSerial();
-
-  // Update LED animations
-  updateAnimations();
 }
 
 void processSerial() {
@@ -259,92 +240,23 @@ void parseCommand(char* command) {
     return;  // Invalid command format
   }
 
-  // Split into command name and value
-  *colon = '\0';  // Null terminate the command name
-  char* cmdName = command;
-  char* valueStr = colon + 1;
+  // Split into LED name and state
+  *colon = '\0';  // Null terminate the LED name
+  char* ledName = command;
+  char* stateStr = colon + 1;
 
-  // Handle animation commands
-  if (strcmp(cmdName, "ANIM") == 0) {
-    if (strcmp(valueStr, "STABLE") == 0) {
-      currentMode = ANIM_STABLE;
-      pulsePhase = 0.0;
-    } else if (strcmp(valueStr, "TRANSITION") == 0) {
-      currentMode = ANIM_TRANSITION;
-      transitionState = 0;
-      lastAnimUpdate = millis();
-    } else if (strcmp(valueStr, "OFF") == 0) {
-      currentMode = ANIM_OFF;
-      // Turn all LEDs off
-      digitalWrite(PIN_LED_RED, LOW);
-      digitalWrite(PIN_LED_YELLOW, LOW);
-      digitalWrite(PIN_LED_GREEN, LOW);
-    }
+  // Parse state (1, 0, ON, OFF)
+  bool state = false;
+  if (strcmp(stateStr, "1") == 0 || strcmp(stateStr, "ON") == 0) {
+    state = true;
   }
-  // Handle period setting
-  else if (strcmp(cmdName, "PERIOD") == 0) {
-    // Parse period value
-    unsigned long period = 0;
-    for (int i = 0; valueStr[i] != '\0'; i++) {
-      if (valueStr[i] >= '0' && valueStr[i] <= '9') {
-        period = period * 10 + (valueStr[i] - '0');
-      }
-    }
-    if (period > 0) {
-      transitionPeriod = period;
-    }
-  }
-  // Handle direct LED control (for testing)
-  else if (strcmp(cmdName, "RED") == 0 || strcmp(cmdName, "YELLOW") == 0 || strcmp(cmdName, "GREEN") == 0) {
-    // Parse state (1, 0, ON, OFF)
-    bool state = false;
-    if (strcmp(valueStr, "1") == 0 || strcmp(valueStr, "ON") == 0) {
-      state = true;
-    }
 
-    // Set LED directly and disable animation mode
-    currentMode = ANIM_OFF;
-    if (strcmp(cmdName, "RED") == 0) {
-      digitalWrite(PIN_LED_RED, state ? HIGH : LOW);
-    } else if (strcmp(cmdName, "YELLOW") == 0) {
-      digitalWrite(PIN_LED_YELLOW, state ? HIGH : LOW);
-    } else if (strcmp(cmdName, "GREEN") == 0) {
-      digitalWrite(PIN_LED_GREEN, state ? HIGH : LOW);
-    }
-  }
-}
-
-void updateAnimations() {
-  unsigned long now = millis();
-
-  switch (currentMode) {
-    case ANIM_OFF:
-      // Nothing to do - LEDs are already off
-      break;
-
-    case ANIM_STABLE: {
-      // Green LED blinks quickly (on/off pattern)
-      // Faster blink for more responsiveness
-      unsigned long blinkPeriod = 300;  // 300ms period (was 1000ms)
-      bool ledOn = (now / blinkPeriod) % 2 == 0;
-
-      digitalWrite(PIN_LED_GREEN, ledOn ? HIGH : LOW);
-      digitalWrite(PIN_LED_YELLOW, LOW);
-      digitalWrite(PIN_LED_RED, LOW);
-      break;
-    }
-
-    case ANIM_TRANSITION:
-      // Cycle through RED -> YELLOW -> GREEN
-      if (now - lastAnimUpdate >= transitionPeriod) {
-        lastAnimUpdate = now;
-        transitionState = (transitionState + 1) % 3;
-
-        // Turn on current LED, turn off others (using digitalWrite)
-        digitalWrite(PIN_LED_RED, (transitionState == 0) ? HIGH : LOW);
-        digitalWrite(PIN_LED_YELLOW, (transitionState == 1) ? HIGH : LOW);
-        digitalWrite(PIN_LED_GREEN, (transitionState == 2) ? HIGH : LOW);
-      }
-      break;
+  // Set LED directly
+  if (strcmp(ledName, "RED") == 0) {
+    digitalWrite(PIN_LED_RED, state ? HIGH : LOW);
+  } else if (strcmp(ledName, "YELLOW") == 0) {
+    digitalWrite(PIN_LED_YELLOW, state ? HIGH : LOW);
+  } else if (strcmp(ledName, "GREEN") == 0) {
+    digitalWrite(PIN_LED_GREEN, state ? HIGH : LOW);
   }
 }
