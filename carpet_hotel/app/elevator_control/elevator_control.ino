@@ -152,13 +152,13 @@ private:
 // Pin definitions
 const int PIN_BUTTON_DOWN = A0;
 const int PIN_BUTTON_UP = A1;
-const int PIN_LED_GREEN = A2;   // PWM capable
+const int PIN_LED_GREEN = A4;   // PWM capable (swapped with RED)
 const int PIN_LED_YELLOW = A3;  // PWM capable
-const int PIN_LED_RED = A4;     // PWM capable
+const int PIN_LED_RED = A2;     // PWM capable (swapped with GREEN)
 
-// Buttons using MomentarySwitch class
-MomentarySwitch buttonDown(PIN_BUTTON_DOWN, PULLUP_UP, 50);
-MomentarySwitch buttonUp(PIN_BUTTON_UP, PULLUP_UP, 50);
+// Buttons using MomentarySwitch class (normally-closed switches)
+MomentarySwitch buttonDown(PIN_BUTTON_DOWN, false, PULLUP_UP, 50);
+MomentarySwitch buttonUp(PIN_BUTTON_UP, false, PULLUP_UP, 50);
 
 // No animation logic - Python controls LEDs directly
 

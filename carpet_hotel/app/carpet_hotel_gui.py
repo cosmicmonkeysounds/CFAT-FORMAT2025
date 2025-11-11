@@ -501,11 +501,46 @@ class CarpetHotelGUI:
         port_frame.pack(fill='x', pady=5)
 
         ttk.Label(port_frame, text="Serial Port:", width=15).pack(side='left', padx=5)
-        self.serial_port_var = tk.StringVar(value="Auto-detect")
+        self.serial_port_var = tk.StringVar(value="")
         self.serial_port_dropdown = ttk.Combobox(port_frame,
                                                 textvariable=self.serial_port_var,
                                                 state='readonly', width=40)
         self.serial_port_dropdown.pack(side='left', padx=5)
+
+        # LED Controls
+        led_frame = ttk.LabelFrame(tab, text="LED Control", padding=10)
+        led_frame.pack(fill='x', padx=20, pady=10)
+
+        # Individual LEDs
+        ttk.Label(led_frame, text="Individual LEDs:", font=('Arial', 10, 'bold')).pack(anchor='w', pady=(5,2))
+        led_btn_frame = ttk.Frame(led_frame)
+        led_btn_frame.pack(fill='x', pady=5)
+
+        for color in [('Red', 'red'), ('Yellow', 'yellow'), ('Green', 'green')]:
+            frame = ttk.Frame(led_btn_frame)
+            frame.pack(side='left', padx=10)
+            ttk.Label(frame, text=f"{color[0]}:", width=8).pack(side='left')
+            ttk.Button(frame, text="ON",
+                      command=lambda c=color[1]: self.set_led(c, 255),
+                      width=6).pack(side='left', padx=2)
+            ttk.Button(frame, text="OFF",
+                      command=lambda c=color[1]: self.set_led(c, 0),
+                      width=6).pack(side='left', padx=2)
+
+        # LED Animations
+        ttk.Label(led_frame, text="LED Animations:", font=('Arial', 10, 'bold')).pack(anchor='w', pady=(10,2))
+        anim_frame = ttk.Frame(led_frame)
+        anim_frame.pack(fill='x', pady=5)
+
+        ttk.Button(anim_frame, text="Stable Mode",
+                  command=lambda: self.set_led_animation('STABLE'),
+                  width=15).pack(side='left', padx=5)
+        ttk.Button(anim_frame, text="Transition Mode",
+                  command=lambda: self.set_led_animation('TRANSITION'),
+                  width=15).pack(side='left', padx=5)
+        ttk.Button(anim_frame, text="Off",
+                  command=lambda: self.set_led_animation('OFF'),
+                  width=15).pack(side='left', padx=5)
 
         # Log output
         ttk.Label(tab, text="Log Output:", font=('Arial', 10, 'bold')).pack(anchor='w', padx=20, pady=(10,0))
@@ -515,7 +550,7 @@ class CarpetHotelGUI:
     def refresh_serial_ports(self):
         """Refresh serial port detection."""
         ports = detect_serial_ports()
-        port_labels = ["Auto-detect"]
+        port_labels = []
 
         for port in ports:
             label = f"{port['device']}"
@@ -525,6 +560,13 @@ class CarpetHotelGUI:
             port_labels.append(label)
 
         self.serial_port_dropdown['values'] = port_labels
+
+        # Auto-select first Arduino port if found
+        for i, label in enumerate(port_labels):
+            if "[Arduino]" in label:
+                self.serial_port_var.set(label)
+                break
+
         self.log_to_widget(self.hardware_log, f"Found {len(ports)} serial ports")
 
     def connect_hardware(self):
@@ -533,11 +575,12 @@ class CarpetHotelGUI:
             return
 
         port = self.serial_port_var.get()
-        if port == "Auto-detect":
-            port = None
-        else:
-            # Extract just the device path
-            port = port.split()[0]
+        if not port:
+            self.log_to_widget(self.hardware_log, "✗ Please select a serial port")
+            return
+
+        # Extract just the device path
+        port = port.split()[0]
 
         self.log_to_widget(self.hardware_log, "Connecting to Arduino...")
 
@@ -595,17 +638,21 @@ class CarpetHotelGUI:
     # ========================================================================
 
     def create_command_tab(self, notebook):
-        """Create Command/OSC control tab."""
+        """Create Control tab."""
         tab = ttk.Frame(notebook)
-        notebook.add(tab, text="Command")
+        notebook.add(tab, text="Control")
 
         # Header
-        ttk.Label(tab, text="System Commands",
+        ttk.Label(tab, text="System Control",
                  font=('Arial', 16, 'bold')).pack(pady=10)
 
-        # Create scrollable frame for controls
-        canvas = tk.Canvas(tab)
-        scrollbar = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+        # Main container frame
+        container_frame = ttk.Frame(tab)
+        container_frame.pack(fill='both', expand=True, padx=20, pady=5)
+
+        # Controls frame (scrollable)
+        canvas = tk.Canvas(container_frame)
+        scrollbar = ttk.Scrollbar(container_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
         scrollable_frame.bind(
@@ -647,41 +694,6 @@ class CarpetHotelGUI:
                   command=lambda: self.send_osc_command('/carpet/goto', [int(self.scene_var.get())]),
                   width=10).pack(side='left', padx=5)
 
-        # LED Controls
-        led_frame = ttk.LabelFrame(scrollable_frame, text="LED Control", padding=10)
-        led_frame.pack(fill='x', padx=20, pady=5)
-
-        # Individual LEDs
-        ttk.Label(led_frame, text="Individual LEDs:", font=('Arial', 10, 'bold')).pack(anchor='w', pady=(5,2))
-        led_btn_frame = ttk.Frame(led_frame)
-        led_btn_frame.pack(fill='x', pady=5)
-
-        for color in [('Red', 'red'), ('Yellow', 'yellow'), ('Green', 'green')]:
-            frame = ttk.Frame(led_btn_frame)
-            frame.pack(side='left', padx=10)
-            ttk.Label(frame, text=f"{color[0]}:", width=8).pack(side='left')
-            ttk.Button(frame, text="ON",
-                      command=lambda c=color[1]: self.send_osc_command(f'/carpet/led/{c}', [1]),
-                      width=6).pack(side='left', padx=2)
-            ttk.Button(frame, text="OFF",
-                      command=lambda c=color[1]: self.send_osc_command(f'/carpet/led/{c}', [0]),
-                      width=6).pack(side='left', padx=2)
-
-        # LED Animations
-        ttk.Label(led_frame, text="LED Animations:", font=('Arial', 10, 'bold')).pack(anchor='w', pady=(10,2))
-        anim_frame = ttk.Frame(led_frame)
-        anim_frame.pack(fill='x', pady=5)
-
-        ttk.Button(anim_frame, text="Stable Mode",
-                  command=lambda: self.set_led_animation('STABLE'),
-                  width=15).pack(side='left', padx=5)
-        ttk.Button(anim_frame, text="Transition Mode",
-                  command=lambda: self.set_led_animation('TRANSITION'),
-                  width=15).pack(side='left', padx=5)
-        ttk.Button(anim_frame, text="Off",
-                  command=lambda: self.set_led_animation('OFF'),
-                  width=15).pack(side='left', padx=5)
-
         # Raw OSC Command section
         osc_frame = ttk.LabelFrame(scrollable_frame, text="Custom OSC Command", padding=10)
         osc_frame.pack(fill='x', padx=20, pady=5)
@@ -704,16 +716,16 @@ class CarpetHotelGUI:
         ttk.Label(osc_frame, text='Example: /carpet/volume 0.5  or  /carpet/scene 0 2 0',
                  foreground='gray', font=('Arial', 9)).pack(anchor='w', padx=5)
 
-        # Pack canvas and scrollbar
-        canvas.pack(side="left", fill="both", expand=True, padx=(20,0), pady=5)
-        scrollbar.pack(side="right", fill="y", pady=5, padx=(0,20))
+        # Pack canvas and scrollbar in container
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
-        # Command log at bottom
+        # Command log below controls
         log_frame = ttk.Frame(tab)
-        log_frame.pack(fill='both', expand=True, padx=20, pady=(0,10))
+        log_frame.pack(fill='x', padx=20, pady=(10,10))
 
-        ttk.Label(log_frame, text="Command Log:", font=('Arial', 10, 'bold')).pack(anchor='w')
-        self.command_log = scrolledtext.ScrolledText(log_frame, height=6, width=80, state='disabled')
+        ttk.Label(log_frame, text="Control Log:", font=('Arial', 10, 'bold')).pack(anchor='w')
+        self.command_log = scrolledtext.ScrolledText(log_frame, height=8, width=80, state='disabled')
         self.command_log.pack(fill='both', expand=True)
 
     def send_osc_command(self, address: str, args: list):
@@ -750,16 +762,27 @@ class CarpetHotelGUI:
         except Exception as e:
             self.log_to_widget(self.command_log, f"✗ Error: {e}")
 
+    def set_led(self, color: str, value: int):
+        """Set individual LED."""
+        if self.hardware_running and self.core.arduino:
+            try:
+                self.core.arduino.set_led(color, value)
+                self.log_to_widget(self.hardware_log, f"→ LED {color.upper()}: {value}")
+            except Exception as e:
+                self.log_to_widget(self.hardware_log, f"✗ Error: {e}")
+        else:
+            self.log_to_widget(self.hardware_log, "✗ Arduino not connected")
+
     def set_led_animation(self, mode: str):
         """Set LED animation mode."""
         if self.hardware_running and self.core.arduino:
             try:
                 self.core.arduino.set_led_animation_mode(mode)
-                self.log_to_widget(self.command_log, f"→ LED mode: {mode}")
+                self.log_to_widget(self.hardware_log, f"→ LED mode: {mode}")
             except Exception as e:
-                self.log_to_widget(self.command_log, f"✗ Error: {e}")
+                self.log_to_widget(self.hardware_log, f"✗ Error: {e}")
         else:
-            self.log_to_widget(self.command_log, "✗ Arduino not connected")
+            self.log_to_widget(self.hardware_log, "✗ Arduino not connected")
 
     def send_raw_osc(self):
         """Send raw OSC command from user input."""
