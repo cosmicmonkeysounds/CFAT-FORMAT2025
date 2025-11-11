@@ -10,9 +10,9 @@ This system provides a hardware elevator control panel that integrates directly 
   - DOWN button → Pin A0
   - UP button → Pin A1
 - **3 LEDs** with appropriate resistors (typically 220Ω-330Ω)
-  - GREEN LED → Pin D2
-  - YELLOW LED → Pin D3
-  - RED LED → Pin D4
+  - GREEN LED → Pin D3 (PWM)
+  - YELLOW LED → Pin D5 (PWM)
+  - RED LED → Pin D6 (PWM)
 
 ### Wiring
 ```
@@ -21,10 +21,10 @@ Buttons:
   Pin A1 ----[Button]---- GND
   (Internal pull-up resistors are enabled in code)
 
-LEDs:
-  Pin D2 ----[330Ω]----[GREEN LED]---- GND
-  Pin D3 ----[330Ω]----[YELLOW LED]---- GND
-  Pin D4 ----[330Ω]----[RED LED]---- GND
+LEDs (all PWM-capable pins for animations):
+  Pin D3 ----[330Ω]----[GREEN LED]---- GND
+  Pin D5 ----[330Ω]----[YELLOW LED]---- GND
+  Pin D6 ----[330Ω]----[RED LED]---- GND
 ```
 
 ## Installation
@@ -74,23 +74,47 @@ The launcher will:
 
 That's it! No separate bridge script needed.
 
-## OSC Communication Protocol
+## LED Animations
 
-### Messages SENT (Button Presses → Processing)
+The system features automatic LED animations controlled by the Python launcher:
+
+### Stable Scene Mode
+- **GREEN LED pulses gently** (50%-100% brightness using PWM)
+- Yellow and Red LEDs are off
+- Indicates the system is ready and in a stable scene
+
+### Transition Mode
+- **LEDs cycle**: RED → YELLOW → GREEN
+- Each LED lights up in sequence
+- Indicates a scene transition is in progress
+- Default period: 400ms per LED
+
+## Communication Protocol
+
+### Serial Protocol (Arduino ↔ Python)
+
+**Sent by Arduino:**
+- `up` - UP button pressed
+- `down` - DOWN button pressed
+
+**Received by Arduino:**
+- `ANIM:STABLE` - Start stable mode (green pulse)
+- `ANIM:TRANSITION` - Start transition animation (RGB cycle)
+- `ANIM:OFF` - Turn off all LEDs
+- `PERIOD:xxx` - Set transition period in milliseconds
+
+### OSC Protocol (Python ↔ Processing)
+
+**Sent to Processing (port 12000):**
 - `/carpet/elevator/up` - UP button pressed
 - `/carpet/elevator/down` - DOWN button pressed
 
-### Messages RECEIVED (LED Control from Processing)
-- `/carpet/elevator/led/red [0 or 1]` - Control RED LED
-- `/carpet/elevator/led/yellow [0 or 1]` - Control YELLOW LED
-- `/carpet/elevator/led/green [0 or 1]` - Control GREEN LED
-
-### Default Configuration
+**Default Configuration:**
 - **Serial**: 115200 baud (Arduino ↔ Python)
-- **OSC**: Port 12000 (Python ↔ Processing)
+- **OSC**: Port 12000 (Python → Processing)
 - **OSC**: Port 12001 (Processing → Python)
-- Button presses are sent as OSC to Processing
-- LED commands are received via OSC from Processing
+- Button presses trigger scene changes
+- LED animations indicate system state automatically
 
 ## Integration with carpet_hotel
 
@@ -121,46 +145,13 @@ void oscEvent(OscMessage msg) {
 }
 ```
 
-### 2. Send LED Commands (from Processing)
+### 2. LED Status Indicators
 
-```java
-import netP5.*;
+LED animations are **automatically controlled** by the Python launcher based on scene state:
+- **Stable scenes**: Green LED pulses gently
+- **Scene transitions**: LEDs cycle RED → YELLOW → GREEN
 
-NetAddress pythonLauncher;
-
-void setup() {
-  pythonLauncher = new NetAddress("127.0.0.1", 12001);
-}
-
-void controlElevatorLEDs(int red, int yellow, int green) {
-  OscMessage msg;
-
-  msg = new OscMessage("/carpet/elevator/led/red");
-  msg.add(red);
-  oscP5.send(msg, pythonLauncher);
-
-  msg = new OscMessage("/carpet/elevator/led/yellow");
-  msg.add(yellow);
-  oscP5.send(msg, pythonLauncher);
-
-  msg = new OscMessage("/carpet/elevator/led/green");
-  msg.add(green);
-  oscP5.send(msg, pythonLauncher);
-}
-
-// Example: Set status based on state
-void updateElevatorStatus() {
-  if (isTransitioning) {
-    controlElevatorLEDs(0, 1, 0);  // Yellow during transition
-  } else if (isReady) {
-    controlElevatorLEDs(0, 0, 1);  // Green when ready
-  } else {
-    controlElevatorLEDs(1, 0, 0);  // Red when busy
-  }
-}
-```
-
-**Note**: Send LED commands to port 12001 (the Python launcher's receive port), not directly to the Arduino. The Python launcher will forward them via serial.
+No additional code needed in Processing - the launcher handles LED feedback automatically when scenes change via `/carpet/goto` commands.
 
 ## Testing
 

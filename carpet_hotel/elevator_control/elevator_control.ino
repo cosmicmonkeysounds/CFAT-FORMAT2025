@@ -4,13 +4,17 @@
  * Hardware:
  * - Pin A0: DOWN button (momentary, normally-closed)
  * - Pin A1: UP button (momentary, normally-closed)
- * - Pin D2: GREEN LED
- * - Pin D3: YELLOW LED
- * - Pin D4: RED LED
+ * - Pin D3: GREEN LED (PWM capable)
+ * - Pin D5: YELLOW LED (PWM capable)
+ * - Pin D6: RED LED (PWM capable)
  *
  * Serial Protocol:
  * - Sends: "up" or "down" when buttons are pressed
- * - Receives: "RED:1" or "RED:0", "YELLOW:1" or "YELLOW:0", "GREEN:1" or "GREEN:0"
+ * - Receives:
+ *   - "ANIM:STABLE" - Green LED pulses gently (50-100% PWM)
+ *   - "ANIM:TRANSITION" - Cycle RED->YELLOW->GREEN
+ *   - "ANIM:OFF" - All LEDs off
+ *   - "PERIOD:xxx" - Set transition animation period in ms
  */
 
 #include <string.h>
@@ -149,18 +153,26 @@ private:
 // Pin definitions
 const int PIN_BUTTON_DOWN = A0;
 const int PIN_BUTTON_UP = A1;
-const int PIN_LED_GREEN = 2;
-const int PIN_LED_YELLOW = 3;
-const int PIN_LED_RED = 4;
+const int PIN_LED_GREEN = 3;   // PWM
+const int PIN_LED_YELLOW = 5;  // PWM
+const int PIN_LED_RED = 6;     // PWM
 
 // Buttons using MomentarySwitch class
 MomentarySwitch buttonDown(PIN_BUTTON_DOWN, false, PULLUP_UP, 50);
 MomentarySwitch buttonUp(PIN_BUTTON_UP, false, PULLUP_UP, 50);
 
-// LED states
-bool ledRedState = false;
-bool ledYellowState = false;
-bool ledGreenState = false;
+// Animation modes
+enum AnimMode {
+  ANIM_OFF,
+  ANIM_STABLE,      // Green pulses
+  ANIM_TRANSITION   // Cycle RED->YELLOW->GREEN
+};
+
+AnimMode currentMode = ANIM_OFF;
+unsigned long transitionPeriod = 500;  // ms per LED in transition
+unsigned long lastAnimUpdate = 0;
+int transitionState = 0;  // 0=RED, 1=YELLOW, 2=GREEN
+float pulsePhase = 0.0;   // 0.0 to 2*PI for stable pulse
 
 // Serial buffer - fixed size, no dynamic allocation
 const int CMD_BUFFER_SIZE = 32;
@@ -208,8 +220,8 @@ void loop() {
   // Process serial commands
   processSerial();
 
-  // Update LED states
-  updateLEDs();
+  // Update LED animations
+  updateAnimations();
 }
 
 void processSerial() {
@@ -244,29 +256,82 @@ void parseCommand(char* command) {
     return;  // Invalid command format
   }
 
-  // Split into LED name and state
-  *colon = '\0';  // Null terminate the LED name
-  char* ledName = command;
-  char* stateStr = colon + 1;
+  // Split into command name and value
+  *colon = '\0';  // Null terminate the command name
+  char* cmdName = command;
+  char* valueStr = colon + 1;
 
-  // Parse state (1, 0, ON, OFF)
-  bool state = false;
-  if (strcmp(stateStr, "1") == 0 || strcmp(stateStr, "ON") == 0) {
-    state = true;
+  // Handle animation commands
+  if (strcmp(cmdName, "ANIM") == 0) {
+    if (strcmp(valueStr, "STABLE") == 0) {
+      currentMode = ANIM_STABLE;
+      pulsePhase = 0.0;
+    } else if (strcmp(valueStr, "TRANSITION") == 0) {
+      currentMode = ANIM_TRANSITION;
+      transitionState = 0;
+      lastAnimUpdate = millis();
+    } else if (strcmp(valueStr, "OFF") == 0) {
+      currentMode = ANIM_OFF;
+      // Turn all LEDs off
+      analogWrite(PIN_LED_RED, 0);
+      analogWrite(PIN_LED_YELLOW, 0);
+      analogWrite(PIN_LED_GREEN, 0);
+    }
   }
-
-  // Set LED state based on name
-  if (strcmp(ledName, "RED") == 0) {
-    ledRedState = state;
-  } else if (strcmp(ledName, "YELLOW") == 0) {
-    ledYellowState = state;
-  } else if (strcmp(ledName, "GREEN") == 0) {
-    ledGreenState = state;
+  // Handle period setting
+  else if (strcmp(cmdName, "PERIOD") == 0) {
+    // Parse period value
+    unsigned long period = 0;
+    for (int i = 0; valueStr[i] != '\0'; i++) {
+      if (valueStr[i] >= '0' && valueStr[i] <= '9') {
+        period = period * 10 + (valueStr[i] - '0');
+      }
+    }
+    if (period > 0) {
+      transitionPeriod = period;
+    }
   }
 }
 
-void updateLEDs() {
-  digitalWrite(PIN_LED_RED, ledRedState ? HIGH : LOW);
-  digitalWrite(PIN_LED_YELLOW, ledYellowState ? HIGH : LOW);
-  digitalWrite(PIN_LED_GREEN, ledGreenState ? HIGH : LOW);
+void updateAnimations() {
+  unsigned long now = millis();
+
+  switch (currentMode) {
+    case ANIM_OFF:
+      // Nothing to do - LEDs are already off
+      break;
+
+    case ANIM_STABLE: {
+      // Green LED pulses between 50% and 100% brightness
+      // Use a sine wave for smooth pulsing
+      pulsePhase += 0.05;  // Adjust speed here (lower = slower)
+      if (pulsePhase > 6.283185) {  // 2*PI
+        pulsePhase = 0.0;
+      }
+
+      // Calculate brightness: 50% + 50% * (sin + 1) / 2
+      // sin ranges from -1 to 1, so (sin+1)/2 ranges from 0 to 1
+      float sinVal = sin(pulsePhase);
+      float brightness = 0.5 + 0.5 * ((sinVal + 1.0) / 2.0);
+      int pwmValue = (int)(brightness * 255);
+
+      analogWrite(PIN_LED_GREEN, pwmValue);
+      analogWrite(PIN_LED_YELLOW, 0);
+      analogWrite(PIN_LED_RED, 0);
+      break;
+    }
+
+    case ANIM_TRANSITION:
+      // Cycle through RED -> YELLOW -> GREEN
+      if (now - lastAnimUpdate >= transitionPeriod) {
+        lastAnimUpdate = now;
+        transitionState = (transitionState + 1) % 3;
+
+        // Turn on current LED, turn off others
+        analogWrite(PIN_LED_RED, (transitionState == 0) ? 255 : 0);
+        analogWrite(PIN_LED_YELLOW, (transitionState == 1) ? 255 : 0);
+        analogWrite(PIN_LED_GREEN, (transitionState == 2) ? 255 : 0);
+      }
+      break;
+  }
 }
