@@ -136,7 +136,7 @@ fi
 
 # 6. Create Python virtual environment
 print_status "Setting up Python virtual environment..."
-VENV_DIR="$SCRIPT_DIR/venv"
+VENV_DIR="$SCRIPT_DIR/app/venv"
 
 if [ ! -d "$VENV_DIR" ]; then
     print_warning "Creating virtual environment..."
@@ -154,8 +154,8 @@ print_success "Virtual environment activated"
 # 8. Install Python dependencies
 print_status "Installing Python dependencies..."
 pip3 install --upgrade pip > /dev/null 2>&1
-if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
-    pip3 install -r "$SCRIPT_DIR/requirements.txt" > /dev/null 2>&1
+if [ -f "$SCRIPT_DIR/app/requirements.txt" ]; then
+    pip3 install -r "$SCRIPT_DIR/app/requirements.txt" > /dev/null 2>&1
     print_success "Dependencies installed from requirements.txt"
 else
     print_warning "requirements.txt not found, skipping dependency installation"
@@ -187,6 +187,6 @@ echo "========================================================"
 echo ""
 
 # Run the main script with all arguments passed through
-python3 run_carpet_hotel.py "$@"
+python3 app/run_carpet_hotel.py "$@"
 
 # Note: We stay in the venv, but it will be deactivated when the script exits

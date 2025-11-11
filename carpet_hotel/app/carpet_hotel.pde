@@ -74,7 +74,7 @@ void setup() {
   println("\nInput modes:");
   println("  Test mode (keyboard): " + (TEST_MODE ? "ENABLED" : "disabled"));
   println("  OSC control (Python): " + (OSC_CONTROL_MODE ? "ENABLED" : "disabled"));
-  println("\nTIP: Edit 'transition_config.txt' to customize transition effects");
+  println("\nTIP: Edit 'configs/transition_config.txt' to customize transition effects");
   println("\nCONTROLS:");
   if (TEST_MODE) {
     println("  1-9: Switch to scene");
@@ -264,9 +264,9 @@ class TransitionConfig {
   int motionBlurAlphaDivisor = 2;
 
   void loadFromFile(PApplet parent) {
-    String[] lines = parent.loadStrings(parent.sketchPath("transition_config.txt"));
+    String[] lines = parent.loadStrings(parent.sketchPath("configs/transition_config.txt"));
     if (lines == null) {
-      println("Could not load transition_config.txt, using defaults");
+      println("Could not load configs/transition_config.txt, using defaults");
       return;
     }
 

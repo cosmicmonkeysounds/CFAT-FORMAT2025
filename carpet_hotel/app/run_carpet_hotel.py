@@ -106,7 +106,7 @@ class CarpetHotelLauncher:
         # Paths
         self.sc_script = self.script_dir / "carpet_hotel_audio.scd"
         self.processing_sketch = self.script_dir / "carpet_hotel.pde"
-        self.log_file = self.script_dir / "carpet_hotel.log"
+        self.log_file = self.script_dir / "logs" / "carpet_hotel.log"
 
         # Initialize log file (wipe existing content)
         self.init_log_file()
@@ -611,9 +611,10 @@ class CarpetHotelLauncher:
         import os
         import glob
 
-        # Get the directory where this script is located
+        # Get the directory where this script is located (app/)
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        data_dir = os.path.join(script_dir, 'data')
+        # data/ is in parent directory (carpet_hotel/)
+        data_dir = os.path.join(os.path.dirname(script_dir), 'data')
 
         # Find video files (mp4, mov, avi, etc.)
         video_extensions = ['*.mp4', '*.mov', '*.avi', '*.m4v']
@@ -631,9 +632,10 @@ class CarpetHotelLauncher:
         import os
         import glob
 
-        # Get the directory where this script is located
+        # Get the directory where this script is located (app/)
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        data_dir = os.path.join(script_dir, 'data')
+        # data/ is in parent directory (carpet_hotel/)
+        data_dir = os.path.join(os.path.dirname(script_dir), 'data')
 
         # Find audio files (wav, aiff, mp3, etc.)
         audio_extensions = ['*.wav', '*.aiff', '*.aif', '*.mp3', '*.m4a']
@@ -1419,7 +1421,7 @@ def detect_screens():
 
 def load_settings():
     """Load last saved settings from config file."""
-    config_file = Path(__file__).parent / ".carpet_hotel_config.json"
+    config_file = Path(__file__).parent / "configs" / ".carpet_hotel_config.json"
     default_settings = {
         'audio_device': None,
         'enable_keyboard': True,
@@ -1442,7 +1444,7 @@ def load_settings():
 
 def save_settings(settings):
     """Save settings to config file."""
-    config_file = Path(__file__).parent / ".carpet_hotel_config.json"
+    config_file = Path(__file__).parent / "configs" / ".carpet_hotel_config.json"
     try:
         with open(config_file, 'w') as f:
             json.dump(settings, f, indent=2)

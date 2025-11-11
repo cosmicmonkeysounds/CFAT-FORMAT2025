@@ -184,7 +184,7 @@ REM 4. Create Python virtual environment
 REM ============================================================================
 echo [*] Setting up Python virtual environment...
 
-set VENV_DIR=%SCRIPT_DIR%\venv
+set VENV_DIR=%SCRIPT_DIR%\app\venv
 
 if not exist "%VENV_DIR%" (
     echo [!] Creating virtual environment...
@@ -206,8 +206,8 @@ REM 6. Install Python dependencies
 REM ============================================================================
 echo [*] Installing Python dependencies...
 python -m pip install --upgrade pip >nul 2>&1
-if exist "%SCRIPT_DIR%\requirements.txt" (
-    python -m pip install -r "%SCRIPT_DIR%\requirements.txt" >nul 2>&1
+if exist "%SCRIPT_DIR%\app\requirements.txt" (
+    python -m pip install -r "%SCRIPT_DIR%\app\requirements.txt" >nul 2>&1
     echo [+] Dependencies installed from requirements.txt
 ) else (
     echo [!] requirements.txt not found, skipping dependency installation
@@ -244,6 +244,6 @@ echo ========================================================
 echo.
 
 REM Run the main script with all arguments passed through
-python run_carpet_hotel.py %*
+python app\run_carpet_hotel.py %*
 
 REM Note: The venv will be deactivated when the script exits

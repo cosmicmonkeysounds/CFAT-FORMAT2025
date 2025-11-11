@@ -64,8 +64,8 @@ s.waitForBoot({
     "Audio server ready!".postln;
     ("Sample rate: " ++ s.sampleRate ++ " Hz").postln;
 
-    // Path to audio files
-    audioPath = "~/Documents/CFAT2025/carpets/carpet_hotel/data/".standardizePath;
+    // Path to audio files (relative to this script)
+    audioPath = (thisProcess.nowExecutingPath.dirname +/+ "../data/").standardizePath;
 
     // Initialize
     floors = Dictionary.new;
