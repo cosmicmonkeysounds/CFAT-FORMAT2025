@@ -942,10 +942,11 @@ class CarpetHotelGUI:
         self.send_osc_command('/carpet/goto', [new_scene])
 
     def set_led(self, color: str, value: int):
-        """Set individual LED."""
-        if self.hardware_running and self.core.arduino:
+        """Set individual LED (from GUI button - bypasses animation temporarily)."""
+        if self.hardware_running and self.core.arduino and self.core.arduino.broker:
             try:
-                self.core.arduino.set_led(color, value)
+                # Use broker for thread-safe write
+                self.core.arduino.broker.write_led(color, value)
                 self.log_to_widget(self.hardware_log, f"→ LED {color.upper()}: {value}")
             except Exception as e:
                 self.log_to_widget(self.hardware_log, f"✗ Error: {e}")

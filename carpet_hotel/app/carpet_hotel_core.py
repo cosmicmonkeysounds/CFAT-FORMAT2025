@@ -148,14 +148,11 @@ class CarpetHotelCore:
             self._monitor_thread.start()
 
     def _poll_arduino_serial(self):
-        """Poll Arduino serial messages continuously."""
+        """Keep Arduino polling thread alive (broker handles serial I/O)."""
+        # SerialBroker handles serial I/O in its own threads
+        # This thread just needs to stay alive
         while self._arduino_running:
-            if self.arduino and self.arduino_running:
-                try:
-                    self.arduino.process_serial_messages()
-                except Exception as e:
-                    self.log.error(f"Arduino serial error: {e}")
-            time.sleep(0.01)  # 10ms poll rate (same as Arduino standalone)
+            time.sleep(0.1)
 
     def _start_arduino_polling(self):
         """Start Arduino serial polling thread."""

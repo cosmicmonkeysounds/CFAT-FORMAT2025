@@ -241,10 +241,22 @@ void movieEvent(Movie m) {
 
 
 void exit() {
+  println("\n=== SHUTTING DOWN ===");
   if (sharedState != null) {
     sharedState.cleanup();
   }
+
+  // Dispose OSC
+  if (oscP5 != null) {
+    oscP5.dispose();
+    println("OSC disposed");
+  }
+
+  // Give time for cleanup
+  delay(100);
+
   super.exit();
+  System.exit(0);  // Force exit
 }
 
 /**

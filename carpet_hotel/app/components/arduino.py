@@ -12,7 +12,6 @@ Features:
 - Auto-detection of Arduino port
 """
 
-import serial
 import time
 import threading
 import math
@@ -24,6 +23,7 @@ from pythonosc.osc_server import ThreadingOSCUDPServer
 
 from components.utils.utils import find_arduino_port, detect_serial_ports
 from components.logger import get_logger
+from components.serial_broker import SerialBroker
 
 
 class CarpetHotelArduino:
@@ -49,7 +49,9 @@ class CarpetHotelArduino:
         self.osc_send_port = osc_send_port
         self.osc_recv_port = osc_recv_port
 
-        self.serial_conn: Optional[serial.Serial] = None
+        # Serial broker (single source of truth for serial I/O)
+        self.broker: Optional[SerialBroker] = None
+
         self.osc_client: Optional[udp_client.SimpleUDPClient] = None
         self.osc_server: Optional[ThreadingOSCUDPServer] = None
         self.osc_thread: Optional[threading.Thread] = None
@@ -99,13 +101,17 @@ class CarpetHotelArduino:
                     print(f"  {port['device']}: {port['description']}")
                 return False
 
-        # Connect to serial
-        if not self.setup_serial():
+        # Create and connect serial broker
+        self.broker = SerialBroker(self.serial_port)
+        if not self.broker.connect():
             return False
+
+        # Register callback for incoming serial messages
+        self.broker.register_message_callback(self._handle_serial_message)
 
         # Setup OSC
         if not self.setup_osc():
-            self.cleanup_serial()
+            self.broker.disconnect()
             return False
 
         # Start OSC server
@@ -118,35 +124,32 @@ class CarpetHotelArduino:
         print(f"✓ Arduino connected and ready")
         return True
 
-    def setup_serial(self) -> bool:
+    def _handle_serial_message(self, message: str):
         """
-        Setup serial connection to Arduino.
+        Handle incoming serial message from broker.
 
-        Returns:
-            True if successful
+        Args:
+            message: Message from Arduino
         """
-        try:
-            print(f"Connecting to Arduino on {self.serial_port}...")
-            self.serial_conn = serial.Serial(self.serial_port, 115200, timeout=0.1)
-            time.sleep(2)  # Wait for Arduino to reset
+        # Convert serial messages to OSC (Arduino sends uppercase UP/DOWN)
+        message_upper = message.upper()
 
-            # Wait for READY message
-            print("Waiting for Arduino READY message...")
-            start_time = time.time()
-            while time.time() - start_time < 5:
-                if self.serial_conn.in_waiting:
-                    line = self.serial_conn.readline().decode('utf-8').strip()
-                    print(f"  Arduino: {line}")
-                    if line == "READY":
-                        print("✓ Arduino serial connected")
-                        return True
+        if message_upper == "UP":
+            if self.osc_client:
+                self.osc_client.send_message("/carpet/elevator/up", [])
+            self.log.success("Button UP pressed")
+            self._notify("✓ Button UP pressed")
 
-            print("⚠ Arduino did not send READY message, but continuing...")
-            return True
+        elif message_upper == "DOWN":
+            if self.osc_client:
+                self.osc_client.send_message("/carpet/elevator/down", [])
+            self.log.success("Button DOWN pressed")
+            self._notify("✓ Button DOWN pressed")
 
-        except serial.SerialException as e:
-            print(f"✗ Could not connect to Arduino: {e}")
-            return False
+        else:
+            # Unknown message - might be debug output
+            if message:  # Ignore empty lines
+                self.log.debug(f"Arduino: {message}")
 
     def setup_osc(self) -> bool:
         """
@@ -191,54 +194,25 @@ class CarpetHotelArduino:
 
     def handle_led_red(self, address, *args):
         """Handle red LED OSC message."""
-        if args and self.serial_conn:
+        if args and self.broker:
             state = int(args[0])
-            cmd = f"RED:{state}\n"
-            self.serial_conn.write(cmd.encode())
-            print(f"[OSC→Serial] {address} {state} → Arduino: {cmd.strip()}")
+            self.broker.write_led("red", state)
+            print(f"[OSC→Serial] {address} {state} → Arduino RED")
 
     def handle_led_yellow(self, address, *args):
         """Handle yellow LED OSC message."""
-        if args and self.serial_conn:
+        if args and self.broker:
             state = int(args[0])
-            cmd = f"YELLOW:{state}\n"
-            self.serial_conn.write(cmd.encode())
-            print(f"[OSC→Serial] {address} {state} → Arduino: {cmd.strip()}")
+            self.broker.write_led("yellow", state)
+            print(f"[OSC→Serial] {address} {state} → Arduino YELLOW")
 
     def handle_led_green(self, address, *args):
         """Handle green LED OSC message."""
-        if args and self.serial_conn:
+        if args and self.broker:
             state = int(args[0])
-            cmd = f"GREEN:{state}\n"
-            self.serial_conn.write(cmd.encode())
-            print(f"[OSC→Serial] {address} {state} → Arduino: {cmd.strip()}")
+            self.broker.write_led("green", state)
+            print(f"[OSC→Serial] {address} {state} → Arduino GREEN")
 
-    def process_serial_messages(self):
-        """Process messages from Arduino serial (call in loop)."""
-        if not self.serial_conn or not self.serial_conn.in_waiting:
-            return
-
-        try:
-            line = self.serial_conn.readline().decode('utf-8').strip()
-            if not line or line == "READY":
-                return
-
-            # Convert serial messages to OSC (Arduino sends uppercase UP/DOWN)
-            line_upper = line.upper()
-            if line_upper == "UP":
-                self.osc_client.send_message("/carpet/elevator/up", [])
-                self.log.success("Button UP pressed")
-                self._notify("✓ Button UP pressed")
-            elif line_upper == "DOWN":
-                self.osc_client.send_message("/carpet/elevator/down", [])
-                self.log.success("Button DOWN pressed")
-                self._notify("✓ Button DOWN pressed")
-            else:
-                self.log.warning(f"Unknown message: {line}")
-                self._notify(f"⚠ Unknown: {line}")
-
-        except Exception as e:
-            self.log.error(f"Error processing serial: {e}")
 
     def set_led(self, color: str, value: int):
         """
@@ -248,25 +222,20 @@ class CarpetHotelArduino:
             color: 'red', 'yellow', or 'green'
             value: 0-255 (PWM brightness), or 0/1 for legacy compatibility
         """
-        if not self.serial_conn:
-            self.log.error("Arduino not connected")
+        if not self.broker:
+            print(f"[Arduino] WARNING: set_led({color}, {value}) called but broker is None!")
+            return
+
+        if not self.broker.is_connected():
+            print(f"[Arduino] WARNING: set_led({color}, {value}) called but broker not connected!")
             return
 
         # Convert legacy 0/1 to 0/255
         if value == 1:
             value = 255
 
-        # Clamp to valid range
-        value = max(0, min(255, value))
-
-        cmd = f"{color.upper()}:{value}\n"
-        try:
-            self.serial_conn.write(cmd.encode())
-            self.log.debug(f"LED {color.upper()} → {value}")
-            self._notify(f"LED {color.upper()}: {value}")
-        except Exception as e:
-            self.log.error(f"Failed to set LED: {e}")
-            self._notify(f"✗ LED error: {e}")
+        # Use broker for thread-safe write
+        self.broker.write_led(color, value)
 
     def set_led_animation_mode(self, mode: str, direction: str = "up"):
         """
@@ -298,14 +267,21 @@ class CarpetHotelArduino:
         self.animation_running = True
         self.animation_thread = threading.Thread(target=self._animation_loop, daemon=True)
         self.animation_thread.start()
-        self.log.info("LED animation thread started")
+        print("✓ LED animation thread started")
 
     def _animation_loop(self):
         """Main LED animation loop (runs in background thread)."""
+        print("[Animation] Loop started")
         start_time = time.time()
+        last_mode = None
 
         while self.animation_running and self.running:
             elapsed = time.time() - start_time
+
+            # Log mode changes
+            if self.animation_mode != last_mode:
+                print(f"[Animation] Mode changed: {last_mode} → {self.animation_mode}")
+                last_mode = self.animation_mode
 
             if self.animation_mode == "STABLE":
                 self._animate_stable(elapsed)
@@ -318,6 +294,8 @@ class CarpetHotelArduino:
                 pass
 
             time.sleep(0.05)  # 20 FPS animation
+
+        print("[Animation] Loop stopped")
 
     def _animate_stable(self, elapsed: float):
         """
@@ -340,6 +318,10 @@ class CarpetHotelArduino:
         sin_value = math.sin(phase)  # -1 to 1
         normalized = (sin_value + 1) / 2  # 0 to 1
         brightness = int(min_brightness + normalized * brightness_range)
+
+        # Debug output (once per second)
+        if int(elapsed) % 5 == 0 and (elapsed % 5) < 0.1:
+            print(f"[Animation] STABLE - Green brightness: {brightness}")
 
         # Set green LED, keep others off
         self.set_led("red", 0)
@@ -408,8 +390,8 @@ class CarpetHotelArduino:
 
     def run_forever(self):
         """
-        Run processing loop forever (blocking).
-        Call process_serial_messages() in a loop.
+        Run forever (blocking).
+        Broker handles serial I/O in background threads.
         """
         print("\n" + "="*60)
         print("Arduino Bridge Running")
@@ -422,8 +404,7 @@ class CarpetHotelArduino:
 
         try:
             while self.running:
-                self.process_serial_messages()
-                time.sleep(0.01)  # 10ms loop
+                time.sleep(0.1)  # Just keep alive
 
         except KeyboardInterrupt:
             print("\n\nShutting down...")
@@ -443,21 +424,9 @@ class CarpetHotelArduino:
             self.osc_server.shutdown()
             print("✓ OSC server stopped")
 
-        self.cleanup_serial()
-
-    def cleanup_serial(self):
-        """Cleanup serial connection."""
-        if self.serial_conn and self.serial_conn.is_open:
-            # Turn off all LEDs
-            try:
-                self.serial_conn.write(b"RED:0\n")
-                self.serial_conn.write(b"YELLOW:0\n")
-                self.serial_conn.write(b"GREEN:0\n")
-            except:
-                pass
-
-            self.serial_conn.close()
-            print("✓ Serial connection closed")
+        # Disconnect broker (handles LED cleanup and serial close)
+        if self.broker:
+            self.broker.disconnect()
 
 
 def main():

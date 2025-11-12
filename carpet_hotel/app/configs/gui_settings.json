@@ -10,7 +10,9 @@
         1117
       ],
       "main": false
-    },
+    }
+  ],
+  "inactive_displays": [
     {
       "index": 0,
       "name": "Display 1 [Primary]",
@@ -21,7 +23,6 @@
       "main": true
     }
   ],
-  "inactive_displays": [],
   "enable_keyboard": true,
   "serial_port": "/dev/cu.usbserial-21140 - USB2.0-Serial",
   "window_width": 1000,
