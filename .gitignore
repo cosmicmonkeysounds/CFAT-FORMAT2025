@@ -246,3 +246,4 @@ tmp/
 temp/
 *.tmp
 media-generator/.github
+carpet_hotel/tests/data/carpet1.mp4
