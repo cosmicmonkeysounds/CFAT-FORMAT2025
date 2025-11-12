@@ -326,21 +326,28 @@ class CarpetHotelArduino:
 
     def _animate_stable(self, elapsed: float):
         """
-        Stable animation: Slow pulsing of green LED (0 and 127 for dimmer look).
+        Stable animation: Slow gentle sinwave pulse of green LED between 127-200.
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
         """
-        # Simple on/off pulsing - 1 second period
-        period = 1.0
-        phase = (elapsed % period) / period  # 0.0 to 1.0
+        # Slow gentle breathing - 3 second period
+        period = 3.0
+        phase = (elapsed % period) / period * 2 * math.pi  # 0 to 2π
 
-        # Simple threshold: on for first half, off for second half
-        brightness = 127 if phase < 0.5 else 0
+        # Sin wave oscillates between -1 and 1
+        # Map to 127 (min) to 200 (max)
+        min_brightness = 127
+        max_brightness = 200
+        brightness_range = max_brightness - min_brightness
+
+        sin_value = math.sin(phase)  # -1 to 1
+        normalized = (sin_value + 1) / 2  # 0 to 1
+        brightness = int(min_brightness + normalized * brightness_range)
 
         # Debug output (frequently at first, then less often)
         if elapsed < 5.0 or (int(elapsed) % 5 == 0 and (elapsed % 5) < 0.1):
-            self.log.debug(f"STABLE animation - Green: {brightness}, elapsed: {elapsed:.1f}s, phase: {phase:.2f}")
+            self.log.debug(f"STABLE animation - Green: {brightness}, elapsed: {elapsed:.1f}s")
             print(f"[Animation] STABLE - Green brightness: {brightness}, elapsed: {elapsed:.1f}s")
 
         # Set green LED, keep others off
@@ -350,53 +357,69 @@ class CarpetHotelArduino:
 
     def _animate_transition_up(self, elapsed: float):
         """
-        Transition UP animation: Flicker red → yellow → green quickly.
-        Using 0 and 127 for dimmer look.
+        Transition UP animation: Sinwave propagating red → yellow → green.
+        Faster wave that travels through the colors in sequence.
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
         """
-        # Quick flicker - change every 100ms
-        flicker_period = 0.1
-        step = int(elapsed / flicker_period) % 3  # 0, 1, 2 (red, yellow, green)
+        # Fast wave - 0.6 second period (faster than stable)
+        period = 0.6
+        wave_phase = (elapsed % period) / period * 2 * math.pi  # 0 to 2π
 
-        if step == 0:  # Red
-            self.set_led("red", 127)
-            self.set_led("yellow", 0)
-            self.set_led("green", 0)
-        elif step == 1:  # Yellow
-            self.set_led("red", 0)
-            self.set_led("yellow", 127)
-            self.set_led("green", 0)
-        else:  # Green
-            self.set_led("red", 0)
-            self.set_led("yellow", 0)
-            self.set_led("green", 127)
+        # Create 3 waves offset by 120 degrees (2π/3) to create propagation effect
+        # Red leads, then yellow, then green
+        red_phase = wave_phase
+        yellow_phase = wave_phase - (2 * math.pi / 3)
+        green_phase = wave_phase - (4 * math.pi / 3)
+
+        # Calculate brightness for each LED using sine wave
+        # Map from 0 to 200 (skip very dim values for visibility)
+        def phase_to_brightness(phase):
+            sin_value = math.sin(phase)  # -1 to 1
+            normalized = (sin_value + 1) / 2  # 0 to 1
+            return int(normalized * 200)
+
+        red_brightness = phase_to_brightness(red_phase)
+        yellow_brightness = phase_to_brightness(yellow_phase)
+        green_brightness = phase_to_brightness(green_phase)
+
+        self.set_led("red", red_brightness)
+        self.set_led("yellow", yellow_brightness)
+        self.set_led("green", green_brightness)
 
     def _animate_transition_down(self, elapsed: float):
         """
-        Transition DOWN animation: Flicker green → yellow → red quickly.
-        Using 0 and 127 for dimmer look.
+        Transition DOWN animation: Sinwave propagating green → yellow → red.
+        Faster wave that travels through the colors in reverse sequence.
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
         """
-        # Quick flicker - change every 100ms
-        flicker_period = 0.1
-        step = int(elapsed / flicker_period) % 3  # 0, 1, 2 (green, yellow, red)
+        # Fast wave - 0.6 second period (faster than stable)
+        period = 0.6
+        wave_phase = (elapsed % period) / period * 2 * math.pi  # 0 to 2π
 
-        if step == 0:  # Green
-            self.set_led("red", 0)
-            self.set_led("yellow", 0)
-            self.set_led("green", 127)
-        elif step == 1:  # Yellow
-            self.set_led("red", 0)
-            self.set_led("yellow", 127)
-            self.set_led("green", 0)
-        else:  # Red
-            self.set_led("red", 127)
-            self.set_led("yellow", 0)
-            self.set_led("green", 0)
+        # Create 3 waves offset by 120 degrees (2π/3) to create propagation effect
+        # Green leads, then yellow, then red (reverse of UP)
+        green_phase = wave_phase
+        yellow_phase = wave_phase - (2 * math.pi / 3)
+        red_phase = wave_phase - (4 * math.pi / 3)
+
+        # Calculate brightness for each LED using sine wave
+        # Map from 0 to 200 (skip very dim values for visibility)
+        def phase_to_brightness(phase):
+            sin_value = math.sin(phase)  # -1 to 1
+            normalized = (sin_value + 1) / 2  # 0 to 1
+            return int(normalized * 200)
+
+        red_brightness = phase_to_brightness(red_phase)
+        yellow_brightness = phase_to_brightness(yellow_phase)
+        green_brightness = phase_to_brightness(green_phase)
+
+        self.set_led("red", red_brightness)
+        self.set_led("yellow", yellow_brightness)
+        self.set_led("green", green_brightness)
 
     def run_forever(self):
         """
