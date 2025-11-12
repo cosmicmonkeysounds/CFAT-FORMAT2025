@@ -271,15 +271,19 @@ class CarpetHotelArduino:
     def start_animation_thread(self):
         """Start the LED animation thread."""
         if self.animation_running:
+            self.log.warning("Animation thread already running")
             return
 
+        self.log.info("Starting LED animation thread...")
         self.animation_running = True
         self.animation_thread = threading.Thread(target=self._animation_loop, daemon=True)
         self.animation_thread.start()
+        self.log.success("LED animation thread started")
         print("✓ LED animation thread started")
 
     def _animation_loop(self):
         """Main LED animation loop (runs in background thread)."""
+        self.log.info("Animation loop starting")
         print("[Animation] Loop started")
         print(f"[Animation] Initial state: running={self.running}, animation_running={self.animation_running}, broker_connected={self.broker.is_connected() if self.broker else False}")
         start_time = time.time()
@@ -292,12 +296,14 @@ class CarpetHotelArduino:
 
             # Log mode changes
             if self.animation_mode != last_mode:
+                self.log.info(f"Animation mode changed: {last_mode} → {self.animation_mode}")
                 print(f"[Animation] Mode changed: {last_mode} → {self.animation_mode}")
                 print(f"[Animation] Broker status: {self.broker.is_connected() if self.broker else 'No broker'}")
                 last_mode = self.animation_mode
 
             # Debug: Log every 100 iterations to show loop is running
             if iteration % 100 == 0:
+                self.log.debug(f"Loop alive - iteration {iteration}, mode={self.animation_mode}")
                 print(f"[Animation] Loop alive - mode={self.animation_mode}, iteration={iteration}, broker_connected={self.broker.is_connected() if self.broker else False}")
 
             if self.animation_mode == "STABLE":
@@ -312,6 +318,7 @@ class CarpetHotelArduino:
 
             time.sleep(0.05)  # 20 FPS animation
 
+        self.log.info("Animation loop stopped")
         print("[Animation] Loop stopped")
 
     def _animate_stable(self, elapsed: float):
@@ -338,6 +345,7 @@ class CarpetHotelArduino:
 
         # Debug output (frequently at first, then less often)
         if elapsed < 2.0 or (int(elapsed) % 5 == 0 and (elapsed % 5) < 0.1):
+            self.log.debug(f"STABLE animation - Green: {brightness}, elapsed: {elapsed:.1f}s")
             print(f"[Animation] STABLE - Green brightness: {brightness}, elapsed: {elapsed:.1f}s")
             print(f"[Animation] STABLE - Calling set_led('green', {brightness})")
 

@@ -393,6 +393,9 @@ class SharedState {
   // Keep reference to videos for compatibility
   ArrayList<Movie> videos;
 
+  // Track last sent scene to avoid spam
+  int lastSentScene = -1;
+
   void init(PApplet p) {
     parent = p;
     videos = new ArrayList<Movie>();
@@ -458,6 +461,12 @@ class SharedState {
   }
 
   void sendSceneOSC() {
+    // Only send if scene changed to avoid spam
+    if (currentScene == lastSentScene) {
+      return;
+    }
+    lastSentScene = currentScene;
+
     // Send current scene and number of active floors
     OscMessage msg = new OscMessage("/carpet/scene");
     msg.add(currentScene);                // Current scene number

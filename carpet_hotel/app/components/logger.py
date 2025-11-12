@@ -26,7 +26,7 @@ class Logger:
     - Optional verbosity control
     """
 
-    def __init__(self, component: str = "Core", verbose: bool = True, log_file: Optional[str] = None):
+    def __init__(self, component: str = "Core", verbose: bool = True, log_file: Optional[str] = None, clear_on_start: bool = False):
         """
         Initialize logger.
 
@@ -34,6 +34,7 @@ class Logger:
             component: Component name for prefix
             verbose: If False, only show important messages
             log_file: Optional log file path (auto-determined if None)
+            clear_on_start: If True, clear log file on initialization
         """
         self.component = component
         self.verbose = verbose
@@ -50,6 +51,14 @@ class Logger:
         if self.log_file:
             Path(self.log_file).parent.mkdir(parents=True, exist_ok=True)
 
+            # Clear log file if requested
+            if clear_on_start:
+                try:
+                    with open(self.log_file, 'w') as f:
+                        f.write('')  # Clear file
+                except Exception:
+                    pass  # Fail silently
+
     def _get_log_file_path(self, component: str) -> str:
         """Get log file path for component."""
         # Map components to log files
@@ -64,10 +73,10 @@ class Logger:
         # Default to core.log for unknown components
         log_filename = log_mapping.get(component, "core.log")
 
-        # Get project root and create logs path
+        # Get app directory (where logger.py is in components/)
         from pathlib import Path
-        project_root = Path(__file__).parent.parent.parent.absolute()
-        return str(project_root / "logs" / log_filename)
+        app_dir = Path(__file__).parent.parent.absolute()  # Go from components/logger.py to app/
+        return str(app_dir / "logs" / log_filename)
 
     def _print(self, prefix: str, message: str, force: bool = False):
         """
@@ -169,19 +178,20 @@ class Logger:
 _loggers = {}
 
 
-def get_logger(component: str, verbose: bool = True) -> Logger:
+def get_logger(component: str, verbose: bool = True, clear_on_start: bool = False) -> Logger:
     """
     Get or create logger for component.
 
     Args:
         component: Component name
         verbose: Verbosity level
+        clear_on_start: If True, clear log file on first creation
 
     Returns:
         Logger instance
     """
     if component not in _loggers:
-        _loggers[component] = Logger(component, verbose)
+        _loggers[component] = Logger(component, verbose, clear_on_start=clear_on_start)
     return _loggers[component]
 
 
@@ -189,6 +199,25 @@ def set_verbosity(verbose: bool):
     """Set verbosity for all loggers."""
     for logger in _loggers.values():
         logger.verbose = verbose
+
+
+def clear_all_logs():
+    """Clear all log files in the logs directory."""
+    from pathlib import Path
+    try:
+        # Get app directory
+        app_dir = Path(__file__).parent.parent.absolute()
+        logs_dir = app_dir / "logs"
+
+        if logs_dir.exists():
+            for log_file in logs_dir.glob("*.log"):
+                try:
+                    with open(log_file, 'w') as f:
+                        f.write('')  # Clear file
+                except Exception:
+                    pass  # Fail silently
+    except Exception:
+        pass  # Fail silently
 
 
 # Convenience function

@@ -52,6 +52,11 @@ class CarpetHotelCore:
 
     def __init__(self):
         """Initialize core coordinator."""
+        # Clear all log files on startup
+        from components.logger import clear_all_logs
+        clear_all_logs()
+        print("✓ Log files cleared (app/logs/)")
+
         # Component instances
         self.supercollider: Optional[CarpetHotelSuperCollider] = None
         self.processing: Optional[CarpetHotelProcessing] = None
@@ -85,6 +90,7 @@ class CarpetHotelCore:
 
         # Logger
         self.log = get_logger("Core")
+        self.log.info("Carpet Hotel Core initialized")
 
         # Register cleanup handlers
         atexit.register(self._cleanup)
@@ -544,6 +550,7 @@ class CarpetHotelCore:
     def stop_all(self) -> bool:
         """
         Stop all running components.
+        Logs are automatically saved to app/logs/ directory.
 
         Returns:
             True if all stopped successfully

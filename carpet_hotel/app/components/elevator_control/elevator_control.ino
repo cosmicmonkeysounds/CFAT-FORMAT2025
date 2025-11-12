@@ -158,9 +158,9 @@ private:
 // Pin definitions
 const int PIN_BUTTON_DOWN = A0;
 const int PIN_BUTTON_UP = A1;
-const int PIN_LED_RED = 3;      // D3 - PWM capable (~)
+const int PIN_LED_RED = 6;      // D6 - PWM capable (~)
 const int PIN_LED_YELLOW = 5;   // D5 - PWM capable (~)
-const int PIN_LED_GREEN = 6;    // D6 - PWM capable (~)
+const int PIN_LED_GREEN = 3;    // D3 - PWM capable (~)
 
 // Buttons using MomentarySwitch class (normally-closed switches)
 MomentarySwitch buttonDown(PIN_BUTTON_DOWN, false, PULLUP_UP, 50);
