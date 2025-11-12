@@ -4,9 +4,9 @@
  * Hardware:
  * - Pin A0: DOWN button (momentary, normally-closed)
  * - Pin A1: UP button (momentary, normally-closed)
- * - Pin A2: GREEN LED (PWM capable)
- * - Pin A3: YELLOW LED (PWM capable)
- * - Pin A4: RED LED (PWM capable)
+ * - Pin D6: RED LED (PWM capable - ~)
+ * - Pin D5: YELLOW LED (PWM capable - ~)
+ * - Pin D3: GREEN LED (PWM capable - ~)
  *
  * Serial Protocol:
  * - Sends: "UP" or "DOWN" when buttons are pressed
@@ -14,6 +14,7 @@
  *   Values are 0-255 for PWM brightness control
  *
  * Note: LED animations are controlled by Python, not by Arduino
+ * IMPORTANT: Only D3, D5, D6, D9, D10, D11 support PWM on Arduino Nano!
  */
 
 #include <string.h>
@@ -52,6 +53,11 @@
 enum PullupMode {
   PULLUP_NONE = 0,
   PULLUP_UP = 1
+};
+
+enum MomentaryNormal {
+  OPEN,
+  CLOSED
 };
 
 class MomentarySwitch {
@@ -152,9 +158,9 @@ private:
 // Pin definitions
 const int PIN_BUTTON_DOWN = A0;
 const int PIN_BUTTON_UP = A1;
-const int PIN_LED_GREEN = A4;   // PWM capable (swapped with RED)
-const int PIN_LED_YELLOW = A3;  // PWM capable
-const int PIN_LED_RED = A2;     // PWM capable (swapped with GREEN)
+const int PIN_LED_RED = 3;      // D3 - PWM capable (~)
+const int PIN_LED_YELLOW = 5;   // D5 - PWM capable (~)
+const int PIN_LED_GREEN = 6;    // D6 - PWM capable (~)
 
 // Buttons using MomentarySwitch class (normally-closed switches)
 MomentarySwitch buttonDown(PIN_BUTTON_DOWN, false, PULLUP_UP, 50);

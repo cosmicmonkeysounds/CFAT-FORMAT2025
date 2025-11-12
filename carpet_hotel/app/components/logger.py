@@ -5,9 +5,12 @@ Carpet Hotel Logger
 
 Centralized logging with component prefixes and color support.
 Reduces duplicate messages and provides clean, organized output.
+Logs to both console and files in logs/ folder.
 """
 
 import sys
+import os
+from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
@@ -23,22 +26,52 @@ class Logger:
     - Optional verbosity control
     """
 
-    def __init__(self, component: str = "Core", verbose: bool = True):
+    def __init__(self, component: str = "Core", verbose: bool = True, log_file: Optional[str] = None):
         """
         Initialize logger.
 
         Args:
             component: Component name for prefix
             verbose: If False, only show important messages
+            log_file: Optional log file path (auto-determined if None)
         """
         self.component = component
         self.verbose = verbose
         self.last_message = None
         self.repeat_count = 0
 
+        # Set up file logging
+        self.log_file = log_file
+        if self.log_file is None:
+            # Auto-determine log file based on component
+            self.log_file = self._get_log_file_path(component)
+
+        # Ensure logs directory exists
+        if self.log_file:
+            Path(self.log_file).parent.mkdir(parents=True, exist_ok=True)
+
+    def _get_log_file_path(self, component: str) -> str:
+        """Get log file path for component."""
+        # Map components to log files
+        log_mapping = {
+            "Processing": "video.log",
+            "SuperCollider": "sound.log",
+            "Arduino": "arduino.log",
+            "SerialBroker": "arduino.log",
+            "Core": "core.log",
+        }
+
+        # Default to core.log for unknown components
+        log_filename = log_mapping.get(component, "core.log")
+
+        # Get project root and create logs path
+        from pathlib import Path
+        project_root = Path(__file__).parent.parent.parent.absolute()
+        return str(project_root / "logs" / log_filename)
+
     def _print(self, prefix: str, message: str, force: bool = False):
         """
-        Print message with duplicate suppression.
+        Print message with duplicate suppression and log to file.
 
         Args:
             prefix: Message prefix (e.g., "✓", "✗", "→")
@@ -47,6 +80,17 @@ class Logger:
         """
         full_message = f"{prefix} {message}"
 
+        # Always write to file (without duplicate suppression)
+        if self.log_file:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            try:
+                with open(self.log_file, 'a') as f:
+                    f.write(f"[{timestamp}] {full_message}\n")
+            except Exception as e:
+                # Fail silently to not disrupt the program
+                pass
+
+        # Console output with duplicate suppression
         if full_message == self.last_message and not force:
             # Same message - increment counter
             self.repeat_count += 1

@@ -223,16 +223,22 @@ class CarpetHotelArduino:
             value: 0-255 (PWM brightness), or 0/1 for legacy compatibility
         """
         if not self.broker:
-            print(f"[Arduino] WARNING: set_led({color}, {value}) called but broker is None!")
+            print(f"[Arduino] ERROR: set_led({color}, {value}) called but broker is None!")
+            self.log.error(f"set_led({color}, {value}) - broker is None")
             return
 
         if not self.broker.is_connected():
-            print(f"[Arduino] WARNING: set_led({color}, {value}) called but broker not connected!")
+            print(f"[Arduino] ERROR: set_led({color}, {value}) called but broker not connected!")
+            self.log.error(f"set_led({color}, {value}) - broker not connected")
             return
 
         # Convert legacy 0/1 to 0/255
         if value == 1:
             value = 255
+
+        # Log occasionally for debugging
+        if random.randint(0, 50) == 0:
+            print(f"[Arduino] set_led({color}, {value}) - sending to broker")
 
         # Use broker for thread-safe write
         self.broker.write_led(color, value)
@@ -245,7 +251,7 @@ class CarpetHotelArduino:
             mode: 'STABLE', 'TRANSITION', or 'OFF'
             direction: 'up' or 'down' (for TRANSITION mode)
         """
-        self.log.info(f"LED animation mode: {mode} (direction: {direction})")
+        old_mode = self.animation_mode
 
         # Update animation mode
         if mode == "STABLE":
@@ -258,6 +264,9 @@ class CarpetHotelArduino:
             self.set_led("red", 0)
             self.set_led("yellow", 0)
             self.set_led("green", 0)
+
+        self.log.info(f"Animation mode: {old_mode} → {self.animation_mode}")
+        print(f"[Arduino] Animation mode changed: {old_mode} → {self.animation_mode}")
 
     def start_animation_thread(self):
         """Start the LED animation thread."""
@@ -272,16 +281,24 @@ class CarpetHotelArduino:
     def _animation_loop(self):
         """Main LED animation loop (runs in background thread)."""
         print("[Animation] Loop started")
+        print(f"[Animation] Initial state: running={self.running}, animation_running={self.animation_running}, broker_connected={self.broker.is_connected() if self.broker else False}")
         start_time = time.time()
         last_mode = None
+        iteration = 0
 
         while self.animation_running and self.running:
             elapsed = time.time() - start_time
+            iteration += 1
 
             # Log mode changes
             if self.animation_mode != last_mode:
                 print(f"[Animation] Mode changed: {last_mode} → {self.animation_mode}")
+                print(f"[Animation] Broker status: {self.broker.is_connected() if self.broker else 'No broker'}")
                 last_mode = self.animation_mode
+
+            # Debug: Log every 100 iterations to show loop is running
+            if iteration % 100 == 0:
+                print(f"[Animation] Loop alive - mode={self.animation_mode}, iteration={iteration}, broker_connected={self.broker.is_connected() if self.broker else False}")
 
             if self.animation_mode == "STABLE":
                 self._animate_stable(elapsed)
@@ -319,9 +336,10 @@ class CarpetHotelArduino:
         normalized = (sin_value + 1) / 2  # 0 to 1
         brightness = int(min_brightness + normalized * brightness_range)
 
-        # Debug output (once per second)
-        if int(elapsed) % 5 == 0 and (elapsed % 5) < 0.1:
-            print(f"[Animation] STABLE - Green brightness: {brightness}")
+        # Debug output (frequently at first, then less often)
+        if elapsed < 2.0 or (int(elapsed) % 5 == 0 and (elapsed % 5) < 0.1):
+            print(f"[Animation] STABLE - Green brightness: {brightness}, elapsed: {elapsed:.1f}s")
+            print(f"[Animation] STABLE - Calling set_led('green', {brightness})")
 
         # Set green LED, keep others off
         self.set_led("red", 0)

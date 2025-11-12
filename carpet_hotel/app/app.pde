@@ -33,6 +33,9 @@ float masterVolume = 0.5;         // Start at 50%
 // Shared state across all windows
 static SharedState sharedState;
 
+// Track all windows for cleanup
+static ArrayList<FloorWindow> allWindows = new ArrayList<FloorWindow>();
+
 void setup() {
   // Parse command line arguments
   parseArgs();
@@ -61,6 +64,7 @@ void setup() {
   for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
     String[] args = {"FloorWindow_" + i};
     FloorWindow window = new FloorWindow(i);
+    allWindows.add(window);  // Track for cleanup
     PApplet.runSketch(args, window);
   }
 
@@ -242,6 +246,16 @@ void movieEvent(Movie m) {
 
 void exit() {
   println("\n=== SHUTTING DOWN ===");
+
+  // Close all FloorWindow instances first
+  for (FloorWindow window : allWindows) {
+    if (window != null) {
+      println("Closing window " + window.windowIndex);
+      window.exit();
+    }
+  }
+
+  // Cleanup shared state
   if (sharedState != null) {
     sharedState.cleanup();
   }
@@ -253,10 +267,13 @@ void exit() {
   }
 
   // Give time for cleanup
-  delay(100);
+  delay(200);
 
   super.exit();
-  System.exit(0);  // Force exit
+
+  // Force exit all Java processes
+  println("Forcing exit...");
+  System.exit(0);
 }
 
 /**
@@ -971,6 +988,14 @@ class FloorWindow extends PApplet {
       sharedState.config.loadFromFile(sharedState.parent);
       println("Configuration reloaded!");
     }
+  }
+
+  public void exit() {
+    println("Closing FloorWindow " + windowIndex);
+    // Don't call super.exit() or System.exit() here - let main sketch handle it
+    // Just dispose this window
+    getSurface().setVisible(false);
+    dispose();
   }
 
 }

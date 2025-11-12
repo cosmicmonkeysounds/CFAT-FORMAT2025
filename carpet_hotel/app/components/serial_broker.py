@@ -153,6 +153,7 @@ class SerialBroker:
         Runs in background thread.
         """
         print("[SerialBroker] Write thread started")
+        write_count = 0
 
         while self.running:
             try:
@@ -166,6 +167,13 @@ class SerialBroker:
                 if self.serial_conn and self.serial_conn.is_open:
                     with self.lock:
                         self.serial_conn.write(message.encode())
+                        write_count += 1
+
+                        # Debug: Log every 20th write to show activity
+                        if write_count % 20 == 0:
+                            print(f"[SerialBroker] Wrote {write_count} messages (latest: {message.strip()})")
+                else:
+                    print(f"[SerialBroker] WARNING: Cannot write '{message.strip()}' - serial not open")
 
                 self.write_queue.task_done()
 
@@ -174,7 +182,7 @@ class SerialBroker:
                     print(f"[SerialBroker] Write error: {e}")
                 break
 
-        print("[SerialBroker] Write thread stopped")
+        print(f"[SerialBroker] Write thread stopped (wrote {write_count} total messages)")
 
     def write(self, message: str):
         """
@@ -202,9 +210,10 @@ class SerialBroker:
         value = max(0, min(255, value))
         cmd = f"{color.upper()}:{value}"
 
-        # Debug: Print every 100th LED command to avoid spam
-        if random.randint(0, 100) == 0:
-            print(f"[SerialBroker] Queuing: {cmd}")
+        # Debug: Print every 50th LED command to avoid spam
+        if random.randint(0, 50) == 0:
+            print(f"[SerialBroker] Queuing LED command: {cmd}")
+            print(f"[SerialBroker] Queue size: {self.write_queue.qsize()}")
 
         self.write(cmd)  # Use write() method to ensure newline is added
 
