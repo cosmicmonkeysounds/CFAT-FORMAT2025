@@ -1,5 +1,4 @@
 include README.md
 include LICENSE
 include requirements.txt
-include CONFLICT_EXAMPLE.txt
 recursive-include media_generator *.py

@@ -1,3 +1,5 @@
+*/test_output/*
+
 # Python
 __pycache__/
 *.py[cod]
@@ -23,10 +25,6 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
-*.manifest
-*.spec
-
 # Virtual environments
 venv/
 env/
@@ -45,12 +43,24 @@ venv.bak/
 # Output directories
 test_media/
 test_videos/
+test_output/
+test_output_suite/
+test_launcher_output/
+test_binary_output/
+
+# Generated media files
 *.mp4
 *.jpg
 *.jpeg
 *.png
 *.gif
 *.wav
+*.ogg
+*.mp3
+*.webp
+*.bmp
+*.tiff
+*.svg
 
 # Except example files
 !example_output/

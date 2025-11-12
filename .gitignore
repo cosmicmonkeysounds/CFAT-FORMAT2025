@@ -47,7 +47,7 @@ $RECYCLE.BIN/
 # ============================================================================
 
 # Processing sketch data folders (often contain generated/temporary files)
-carpet_hotel/data
+# carpet_hotel/data
 */data/*.txt
 */data/*.csv
 
@@ -246,4 +246,4 @@ tmp/
 temp/
 *.tmp
 media-generator/.github
-carpet_hotel/tests/data/carpet1.mp4
+carpet_hotel/app/configs/.carpet_hotel_config.json
