@@ -78,7 +78,7 @@ void setup() {
   println("\nInput modes:");
   println("  Test mode (keyboard): " + (TEST_MODE ? "ENABLED" : "disabled"));
   println("  OSC control (Python): " + (OSC_CONTROL_MODE ? "ENABLED" : "disabled"));
-  println("\nTIP: Edit 'configs/transition_config.txt' to customize transition effects");
+  println("\nTIP: Edit video config in GUI or 'configs/video_config.json'");
   println("\nCONTROLS:");
   if (TEST_MODE) {
     println("  1-9: Switch to scene");
@@ -188,8 +188,8 @@ void keyPressed() {
     sharedState.showDebug = !sharedState.showDebug;
     println("Debug panel: " + (sharedState.showDebug ? "ON" : "OFF"));
   } else if (key == 'r' || key == 'R') {
-    println("\nReloading transition configuration...");
-    sharedState.config.loadFromFile(this);
+    println("\nReloading video configuration...");
+    sharedState.config.loadFromJSON(this);
     println("Configuration reloaded!");
   }
 }
@@ -280,89 +280,177 @@ void exit() {
  * Transition configuration
  */
 class TransitionConfig {
+  // Animation
   float animationSpeed = 0.1;
+  String easingCurve = "sine";
+  float distanceMultiplier = 1.0;
+
+  // Chromatic Aberration
+  boolean chromaticEnabled = true;
   float chromaticIntensity = 8.0;
-  int motionBlurSamples = 3;
-  float motionBlurIntensity = 15.0;
-  float bloomIntensity = 80.0;
-  float maxEffectIntensity = 0.8;
-  float effectThreshold = 0.05;
   int chromaticRAlpha = 200;
   int chromaticGAlpha = 200;
   int chromaticBAlpha = 200;
+
+  // Motion Blur
+  boolean motionBlurEnabled = true;
+  int motionBlurSamples = 3;
+  float motionBlurIntensity = 15.0;
   int motionBlurAlphaDivisor = 2;
 
-  void loadFromFile(PApplet parent) {
-    String[] lines = parent.loadStrings(parent.sketchPath("configs/transition_config.txt"));
-    if (lines == null) {
-      println("Could not load configs/transition_config.txt, using defaults");
+  // Bloom
+  boolean bloomEnabled = true;
+  float bloomIntensity = 80.0;
+
+  // Effects
+  float maxEffectIntensity = 0.8;
+  float effectThreshold = 0.05;
+
+  // Timing
+  String velocityCurve = "sine_ease";
+  float accelerationPhase = 0.3;
+  float decelerationPhase = 0.7;
+
+  // Advanced
+  float floorSpacingMultiplier = 1.0;
+  float transitionSmoothness = 1.0;
+  String effectIntensityCurve = "sine";
+
+  void loadFromJSON(PApplet parent) {
+    String configPath = parent.sketchPath("configs/video_config.json");
+    JSONObject json = parent.loadJSONObject(configPath);
+
+    if (json == null) {
+      println("Could not load configs/video_config.json, using defaults");
       return;
     }
 
-    println("\nLoading transition configuration:");
-    for (String line : lines) {
-      line = line.trim();
-      if (line.length() == 0 || line.startsWith("#")) {
-        continue;
-      }
+    println("\nLoading video configuration from JSON:");
 
-      String[] parts = line.split("=");
-      if (parts.length != 2) continue;
-
-      String key = parts[0].trim();
-      String value = parts[1].trim();
-
-      try {
-        switch (key) {
-          case "animation_speed":
-            animationSpeed = Float.parseFloat(value);
-            println("  animation_speed = " + animationSpeed);
-            break;
-          case "chromatic_intensity":
-            chromaticIntensity = Float.parseFloat(value);
-            println("  chromatic_intensity = " + chromaticIntensity);
-            break;
-          case "motion_blur_samples":
-            motionBlurSamples = Integer.parseInt(value);
-            println("  motion_blur_samples = " + motionBlurSamples);
-            break;
-          case "motion_blur_intensity":
-            motionBlurIntensity = Float.parseFloat(value);
-            println("  motion_blur_intensity = " + motionBlurIntensity);
-            break;
-          case "bloom_intensity":
-            bloomIntensity = Float.parseFloat(value);
-            println("  bloom_intensity = " + bloomIntensity);
-            break;
-          case "max_effect_intensity":
-            maxEffectIntensity = Float.parseFloat(value);
-            println("  max_effect_intensity = " + maxEffectIntensity);
-            break;
-          case "effect_threshold":
-            effectThreshold = Float.parseFloat(value);
-            println("  effect_threshold = " + effectThreshold);
-            break;
-          case "chromatic_r_alpha":
-            chromaticRAlpha = Integer.parseInt(value);
-            println("  chromatic_r_alpha = " + chromaticRAlpha);
-            break;
-          case "chromatic_g_alpha":
-            chromaticGAlpha = Integer.parseInt(value);
-            println("  chromatic_g_alpha = " + chromaticGAlpha);
-            break;
-          case "chromatic_b_alpha":
-            chromaticBAlpha = Integer.parseInt(value);
-            println("  chromatic_b_alpha = " + chromaticBAlpha);
-            break;
-          case "motion_blur_alpha_divisor":
-            motionBlurAlphaDivisor = Integer.parseInt(value);
-            println("  motion_blur_alpha_divisor = " + motionBlurAlphaDivisor);
-            break;
-        }
-      } catch (Exception e) {
-        println("  Error parsing " + key + ": " + value);
-      }
+    // Animation
+    if (json.hasKey("animation")) {
+      JSONObject anim = json.getJSONObject("animation");
+      if (anim.hasKey("speed")) animationSpeed = anim.getFloat("speed");
+      if (anim.hasKey("easing_curve")) easingCurve = anim.getString("easing_curve");
+      if (anim.hasKey("distance_multiplier")) distanceMultiplier = anim.getFloat("distance_multiplier");
+      println("  Animation: speed=" + animationSpeed + ", easing=" + easingCurve + ", distMult=" + distanceMultiplier);
     }
+
+    // Effects
+    if (json.hasKey("effects")) {
+      JSONObject effects = json.getJSONObject("effects");
+
+      // Chromatic Aberration
+      if (effects.hasKey("chromatic_aberration")) {
+        JSONObject chrom = effects.getJSONObject("chromatic_aberration");
+        if (chrom.hasKey("enabled")) chromaticEnabled = chrom.getBoolean("enabled");
+        if (chrom.hasKey("intensity")) chromaticIntensity = chrom.getFloat("intensity");
+        if (chrom.hasKey("red_alpha")) chromaticRAlpha = chrom.getInt("red_alpha");
+        if (chrom.hasKey("green_alpha")) chromaticGAlpha = chrom.getInt("green_alpha");
+        if (chrom.hasKey("blue_alpha")) chromaticBAlpha = chrom.getInt("blue_alpha");
+        println("  Chromatic: enabled=" + chromaticEnabled + ", intensity=" + chromaticIntensity);
+      }
+
+      // Motion Blur
+      if (effects.hasKey("motion_blur")) {
+        JSONObject blur = effects.getJSONObject("motion_blur");
+        if (blur.hasKey("enabled")) motionBlurEnabled = blur.getBoolean("enabled");
+        if (blur.hasKey("samples")) motionBlurSamples = blur.getInt("samples");
+        if (blur.hasKey("intensity")) motionBlurIntensity = blur.getFloat("intensity");
+        if (blur.hasKey("alpha_divisor")) motionBlurAlphaDivisor = blur.getInt("alpha_divisor");
+        println("  Motion Blur: enabled=" + motionBlurEnabled + ", samples=" + motionBlurSamples);
+      }
+
+      // Bloom
+      if (effects.hasKey("bloom")) {
+        JSONObject bloom = effects.getJSONObject("bloom");
+        if (bloom.hasKey("enabled")) bloomEnabled = bloom.getBoolean("enabled");
+        if (bloom.hasKey("intensity")) bloomIntensity = bloom.getFloat("intensity");
+        println("  Bloom: enabled=" + bloomEnabled + ", intensity=" + bloomIntensity);
+      }
+
+      if (effects.hasKey("max_effect_intensity")) maxEffectIntensity = effects.getFloat("max_effect_intensity");
+      if (effects.hasKey("effect_threshold")) effectThreshold = effects.getFloat("effect_threshold");
+    }
+
+    // Timing
+    if (json.hasKey("timing")) {
+      JSONObject timing = json.getJSONObject("timing");
+      if (timing.hasKey("velocity_curve")) velocityCurve = timing.getString("velocity_curve");
+      if (timing.hasKey("acceleration_phase")) accelerationPhase = timing.getFloat("acceleration_phase");
+      if (timing.hasKey("deceleration_phase")) decelerationPhase = timing.getFloat("deceleration_phase");
+      println("  Timing: curve=" + velocityCurve + ", accel=" + accelerationPhase + ", decel=" + decelerationPhase);
+    }
+
+    // Advanced
+    if (json.hasKey("advanced")) {
+      JSONObject adv = json.getJSONObject("advanced");
+      if (adv.hasKey("floor_spacing_multiplier")) floorSpacingMultiplier = adv.getFloat("floor_spacing_multiplier");
+      if (adv.hasKey("transition_smoothness")) transitionSmoothness = adv.getFloat("transition_smoothness");
+      if (adv.hasKey("effect_intensity_curve")) effectIntensityCurve = adv.getString("effect_intensity_curve");
+      println("  Advanced: floorSpacing=" + floorSpacingMultiplier + ", smoothness=" + transitionSmoothness);
+    }
+
+    println("Configuration loaded successfully\n");
+  }
+
+  void saveToJSON(PApplet parent) {
+    String configPath = parent.sketchPath("configs/video_config.json");
+    JSONObject json = new JSONObject();
+
+    // Animation
+    JSONObject anim = new JSONObject();
+    anim.setFloat("speed", animationSpeed);
+    anim.setString("easing_curve", easingCurve);
+    anim.setFloat("distance_multiplier", distanceMultiplier);
+    json.setJSONObject("animation", anim);
+
+    // Effects
+    JSONObject effects = new JSONObject();
+
+    // Chromatic Aberration
+    JSONObject chrom = new JSONObject();
+    chrom.setBoolean("enabled", chromaticEnabled);
+    chrom.setFloat("intensity", chromaticIntensity);
+    chrom.setInt("red_alpha", chromaticRAlpha);
+    chrom.setInt("green_alpha", chromaticGAlpha);
+    chrom.setInt("blue_alpha", chromaticBAlpha);
+    effects.setJSONObject("chromatic_aberration", chrom);
+
+    // Motion Blur
+    JSONObject blur = new JSONObject();
+    blur.setBoolean("enabled", motionBlurEnabled);
+    blur.setInt("samples", motionBlurSamples);
+    blur.setFloat("intensity", motionBlurIntensity);
+    blur.setInt("alpha_divisor", motionBlurAlphaDivisor);
+    effects.setJSONObject("motion_blur", blur);
+
+    // Bloom
+    JSONObject bloom = new JSONObject();
+    bloom.setBoolean("enabled", bloomEnabled);
+    bloom.setFloat("intensity", bloomIntensity);
+    effects.setJSONObject("bloom", bloom);
+
+    effects.setFloat("max_effect_intensity", maxEffectIntensity);
+    effects.setFloat("effect_threshold", effectThreshold);
+    json.setJSONObject("effects", effects);
+
+    // Timing
+    JSONObject timing = new JSONObject();
+    timing.setString("velocity_curve", velocityCurve);
+    timing.setFloat("acceleration_phase", accelerationPhase);
+    timing.setFloat("deceleration_phase", decelerationPhase);
+    json.setJSONObject("timing", timing);
+
+    // Advanced
+    JSONObject adv = new JSONObject();
+    adv.setFloat("floor_spacing_multiplier", floorSpacingMultiplier);
+    adv.setFloat("transition_smoothness", transitionSmoothness);
+    adv.setString("effect_intensity_curve", effectIntensityCurve);
+    json.setJSONObject("advanced", adv);
+
+    parent.saveJSONObject(json, configPath);
+    println("Configuration saved to " + configPath);
   }
 }
 
@@ -405,7 +493,7 @@ class SharedState {
 
     // Load configuration
     config = new TransitionConfig();
-    config.loadFromFile(parent);
+    config.loadFromJSON(parent);
 
     // Find all carpet videos and audio
     findCarpetMedia();
@@ -852,34 +940,45 @@ class FloorWindow extends PApplet {
         pushMatrix();
         translate(drawX, drawY);
 
-        // Apply chromatic aberration by drawing RGB channels separately
-        tint(255, 0, 0, sharedState.config.chromaticRAlpha); // Red channel
-        float chromaticOffset = intensity * sharedState.config.chromaticIntensity;
-        image(video, -chromaticOffset, 0, drawWidth, drawHeight);
+        // Chromatic aberration (if enabled)
+        if (sharedState.config.chromaticEnabled) {
+          tint(255, 0, 0, sharedState.config.chromaticRAlpha); // Red channel
+          float chromaticOffset = intensity * sharedState.config.chromaticIntensity;
+          image(video, -chromaticOffset, 0, drawWidth, drawHeight);
 
-        tint(0, 255, 0, sharedState.config.chromaticGAlpha); // Green channel
-        image(video, 0, 0, drawWidth, drawHeight);
+          tint(0, 255, 0, sharedState.config.chromaticGAlpha); // Green channel
+          image(video, 0, 0, drawWidth, drawHeight);
 
-        tint(0, 0, 255, sharedState.config.chromaticBAlpha); // Blue channel
-        image(video, chromaticOffset, 0, drawWidth, drawHeight);
+          tint(0, 0, 255, sharedState.config.chromaticBAlpha); // Blue channel
+          image(video, chromaticOffset, 0, drawWidth, drawHeight);
 
-        noTint();
-
-        // Motion blur effect - draw multiple slightly offset copies
-        int blurSamples = sharedState.config.motionBlurSamples;
-        float blurDirection = sharedState.animationDirection * intensity * sharedState.config.motionBlurIntensity;
-        for (int i = 1; i <= blurSamples; i++) {
-          tint(255, 255 / (i * sharedState.config.motionBlurAlphaDivisor));
-          image(video, 0, -blurDirection * i, drawWidth, drawHeight);
+          noTint();
         }
 
-        noTint();
+        // Motion blur (if enabled)
+        if (sharedState.config.motionBlurEnabled) {
+          int blurSamples = sharedState.config.motionBlurSamples;
+          float blurDirection = sharedState.animationDirection * intensity * sharedState.config.motionBlurIntensity;
+          for (int i = 1; i <= blurSamples; i++) {
+            tint(255, 255 / (i * sharedState.config.motionBlurAlphaDivisor));
+            image(video, 0, -blurDirection * i, drawWidth, drawHeight);
+          }
+          noTint();
+        }
+
         popMatrix();
 
-        // Bloom effect - draw a blurred bright overlay
-        tint(255, intensity * sharedState.config.bloomIntensity); // Subtle bloom
-        image(video, drawX, drawY, drawWidth, drawHeight);
-        noTint();
+        // Bloom effect (if enabled)
+        if (sharedState.config.bloomEnabled) {
+          tint(255, intensity * sharedState.config.bloomIntensity);
+          image(video, drawX, drawY, drawWidth, drawHeight);
+          noTint();
+        }
+
+        // If all effects disabled, render normally
+        if (!sharedState.config.chromaticEnabled && !sharedState.config.motionBlurEnabled && !sharedState.config.bloomEnabled) {
+          image(video, drawX, drawY, drawWidth, drawHeight);
+        }
       } else {
         // Normal rendering without effects
         image(video, drawX, drawY, drawWidth, drawHeight);
@@ -993,8 +1092,8 @@ class FloorWindow extends PApplet {
         println("Window " + windowIndex + " fullscreen OFF");
       }
     } else if (key == 'r' || key == 'R') {
-      println("\nReloading transition configuration...");
-      sharedState.config.loadFromFile(sharedState.parent);
+      println("\nReloading video configuration...");
+      sharedState.config.loadFromJSON(sharedState.parent);
       println("Configuration reloaded!");
     }
   }

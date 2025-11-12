@@ -1,0 +1,38 @@
+{
+  "animation": {
+    "speed": 0.1,
+    "easing_curve": "sine",
+    "distance_multiplier": 1.0
+  },
+  "effects": {
+    "chromatic_aberration": {
+      "enabled": true,
+      "intensity": 8.0,
+      "red_alpha": 200,
+      "green_alpha": 200,
+      "blue_alpha": 200
+    },
+    "motion_blur": {
+      "enabled": true,
+      "samples": 3,
+      "intensity": 15.0,
+      "alpha_divisor": 2
+    },
+    "bloom": {
+      "enabled": true,
+      "intensity": 80.0
+    },
+    "max_effect_intensity": 0.8,
+    "effect_threshold": 0.05
+  },
+  "timing": {
+    "velocity_curve": "sine_ease",
+    "acceleration_phase": 0.3,
+    "deceleration_phase": 0.7
+  },
+  "advanced": {
+    "floor_spacing_multiplier": 1.0,
+    "transition_smoothness": 1.0,
+    "effect_intensity_curve": "sine"
+  }
+}

@@ -96,6 +96,7 @@ class CarpetHotelGUI:
         self.create_audio_tab(notebook)
         self.create_hardware_tab(notebook)
         self.create_command_tab(notebook)
+        self.create_video_config_tab(notebook)
 
         # Global controls at bottom
         self.create_global_controls()
@@ -880,6 +881,340 @@ class CarpetHotelGUI:
         ttk.Label(log_frame, text="Control Log:", font=('Arial', 10, 'bold')).pack(anchor='w')
         self.command_log = scrolledtext.ScrolledText(log_frame, height=8, width=80, state='disabled')
         self.command_log.pack(fill='both', expand=True)
+
+    # ========================================================================
+    # VIDEO CONFIG TAB
+    # ========================================================================
+
+    def create_video_config_tab(self, notebook):
+        """Create Video Config tab for editing Processing parameters."""
+        import json
+        from pathlib import Path
+
+        tab = ttk.Frame(notebook)
+        notebook.add(tab, text="Video Config")
+
+        # Header
+        header_frame = ttk.Frame(tab)
+        header_frame.pack(fill='x', padx=20, pady=10)
+
+        ttk.Label(header_frame, text="Video Configuration",
+                 font=('Arial', 16, 'bold')).pack(side='left')
+
+        # Buttons
+        btn_frame = ttk.Frame(header_frame)
+        btn_frame.pack(side='right')
+
+        ttk.Button(btn_frame, text="↻ Reload", command=self.reload_video_config,
+                  width=12).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="💾 Save", command=self.save_video_config,
+                  width=12).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="⟲ Reset", command=self.reset_video_config,
+                  width=12).pack(side='left', padx=2)
+
+        # Main scrollable area
+        canvas = tk.Canvas(tab)
+        scrollbar = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Config storage for widgets
+        self.video_config_vars = {}
+
+        # ===== ANIMATION SECTION =====
+        anim_frame = ttk.LabelFrame(scrollable_frame, text="Animation", padding=10)
+        anim_frame.pack(fill='x', padx=20, pady=5)
+
+        self._add_float_slider(anim_frame, "Speed", "animation.speed", 0.01, 1.0, 0.1)
+        self._add_string_dropdown(anim_frame, "Easing Curve", "animation.easing_curve",
+                                  ["linear", "sine", "quad", "cubic", "quart", "quint"], "sine")
+        self._add_float_slider(anim_frame, "Distance Multiplier", "animation.distance_multiplier", 0.5, 2.0, 1.0)
+
+        # ===== EFFECTS SECTION =====
+        effects_frame = ttk.LabelFrame(scrollable_frame, text="Effects", padding=10)
+        effects_frame.pack(fill='x', padx=20, pady=5)
+
+        # Chromatic Aberration
+        chrom_frame = ttk.Frame(effects_frame)
+        chrom_frame.pack(fill='x', pady=5)
+        ttk.Label(chrom_frame, text="Chromatic Aberration",
+                 font=('Arial', 11, 'bold')).pack(anchor='w')
+
+        self._add_checkbox(chrom_frame, "Enabled", "effects.chromatic_aberration.enabled", True)
+        self._add_float_slider(chrom_frame, "Intensity", "effects.chromatic_aberration.intensity", 0.0, 20.0, 8.0)
+        self._add_int_slider(chrom_frame, "Red Alpha", "effects.chromatic_aberration.red_alpha", 0, 255, 200)
+        self._add_int_slider(chrom_frame, "Green Alpha", "effects.chromatic_aberration.green_alpha", 0, 255, 200)
+        self._add_int_slider(chrom_frame, "Blue Alpha", "effects.chromatic_aberration.blue_alpha", 0, 255, 200)
+
+        ttk.Separator(effects_frame, orient='horizontal').pack(fill='x', pady=10)
+
+        # Motion Blur
+        blur_frame = ttk.Frame(effects_frame)
+        blur_frame.pack(fill='x', pady=5)
+        ttk.Label(blur_frame, text="Motion Blur",
+                 font=('Arial', 11, 'bold')).pack(anchor='w')
+
+        self._add_checkbox(blur_frame, "Enabled", "effects.motion_blur.enabled", True)
+        self._add_int_slider(blur_frame, "Samples", "effects.motion_blur.samples", 1, 10, 3)
+        self._add_float_slider(blur_frame, "Intensity", "effects.motion_blur.intensity", 0.0, 30.0, 15.0)
+        self._add_int_slider(blur_frame, "Alpha Divisor", "effects.motion_blur.alpha_divisor", 1, 10, 2)
+
+        ttk.Separator(effects_frame, orient='horizontal').pack(fill='x', pady=10)
+
+        # Bloom
+        bloom_frame = ttk.Frame(effects_frame)
+        bloom_frame.pack(fill='x', pady=5)
+        ttk.Label(bloom_frame, text="Bloom",
+                 font=('Arial', 11, 'bold')).pack(anchor='w')
+
+        self._add_checkbox(bloom_frame, "Enabled", "effects.bloom.enabled", True)
+        self._add_float_slider(bloom_frame, "Intensity", "effects.bloom.intensity", 0.0, 150.0, 80.0)
+
+        ttk.Separator(effects_frame, orient='horizontal').pack(fill='x', pady=10)
+
+        # General Effect Settings
+        self._add_float_slider(effects_frame, "Max Effect Intensity", "effects.max_effect_intensity", 0.0, 1.0, 0.8)
+        self._add_float_slider(effects_frame, "Effect Threshold", "effects.effect_threshold", 0.0, 0.5, 0.05)
+
+        # ===== TIMING SECTION =====
+        timing_frame = ttk.LabelFrame(scrollable_frame, text="Timing", padding=10)
+        timing_frame.pack(fill='x', padx=20, pady=5)
+
+        self._add_string_dropdown(timing_frame, "Velocity Curve", "timing.velocity_curve",
+                                  ["linear", "sine_ease", "quad_ease", "smooth"], "sine_ease")
+        self._add_float_slider(timing_frame, "Acceleration Phase", "timing.acceleration_phase", 0.0, 1.0, 0.3)
+        self._add_float_slider(timing_frame, "Deceleration Phase", "timing.deceleration_phase", 0.0, 1.0, 0.7)
+
+        # ===== ADVANCED SECTION =====
+        adv_frame = ttk.LabelFrame(scrollable_frame, text="Advanced", padding=10)
+        adv_frame.pack(fill='x', padx=20, pady=5)
+
+        self._add_float_slider(adv_frame, "Floor Spacing Multiplier", "advanced.floor_spacing_multiplier", 0.5, 2.0, 1.0)
+        self._add_float_slider(adv_frame, "Transition Smoothness", "advanced.transition_smoothness", 0.1, 2.0, 1.0)
+        self._add_string_dropdown(adv_frame, "Effect Intensity Curve", "advanced.effect_intensity_curve",
+                                  ["linear", "sine", "quad", "exponential"], "sine")
+
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True, padx=(20,0), pady=10)
+        scrollbar.pack(side="right", fill="y", pady=10)
+
+        # Load current config
+        self.reload_video_config()
+
+    def _add_checkbox(self, parent, label, config_key, default_value):
+        """Add a checkbox to the config UI."""
+        frame = ttk.Frame(parent)
+        frame.pack(fill='x', pady=2)
+
+        var = tk.BooleanVar(value=default_value)
+        self.video_config_vars[config_key] = var
+
+        cb = ttk.Checkbutton(frame, text=label, variable=var)
+        cb.pack(anchor='w', padx=20)
+
+    def _add_float_slider(self, parent, label, config_key, min_val, max_val, default_val):
+        """Add a float slider to the config UI."""
+        frame = ttk.Frame(parent)
+        frame.pack(fill='x', pady=2)
+
+        label_frame = ttk.Frame(frame)
+        label_frame.pack(fill='x')
+
+        ttk.Label(label_frame, text=label, width=25).pack(side='left', padx=20)
+
+        var = tk.DoubleVar(value=default_val)
+        value_label = ttk.Label(label_frame, text=f"{default_val:.2f}", width=8)
+        value_label.pack(side='right', padx=20)
+
+        slider = ttk.Scale(frame, from_=min_val, to=max_val, orient='horizontal',
+                          variable=var, command=lambda v: value_label.config(text=f"{float(v):.2f}"))
+        slider.pack(fill='x', padx=20)
+
+        self.video_config_vars[config_key] = var
+
+    def _add_int_slider(self, parent, label, config_key, min_val, max_val, default_val):
+        """Add an integer slider to the config UI."""
+        frame = ttk.Frame(parent)
+        frame.pack(fill='x', pady=2)
+
+        label_frame = ttk.Frame(frame)
+        label_frame.pack(fill='x')
+
+        ttk.Label(label_frame, text=label, width=25).pack(side='left', padx=20)
+
+        var = tk.IntVar(value=default_val)
+        value_label = ttk.Label(label_frame, text=str(default_val), width=8)
+        value_label.pack(side='right', padx=20)
+
+        slider = ttk.Scale(frame, from_=min_val, to=max_val, orient='horizontal',
+                          variable=var, command=lambda v: value_label.config(text=str(int(float(v)))))
+        slider.pack(fill='x', padx=20)
+
+        self.video_config_vars[config_key] = var
+
+    def _add_string_dropdown(self, parent, label, config_key, options, default_val):
+        """Add a string dropdown to the config UI."""
+        frame = ttk.Frame(parent)
+        frame.pack(fill='x', pady=2)
+
+        ttk.Label(frame, text=label, width=25).pack(side='left', padx=20)
+
+        var = tk.StringVar(value=default_val)
+        dropdown = ttk.Combobox(frame, textvariable=var, values=options,
+                               state='readonly', width=15)
+        dropdown.pack(side='left', padx=5)
+
+        self.video_config_vars[config_key] = var
+
+    def reload_video_config(self):
+        """Reload video config from JSON file."""
+        import json
+        from pathlib import Path
+
+        config_path = Path(__file__).parent.parent / "configs" / "video_config.json"
+
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+
+            # Update all variables from config
+            for key, var in self.video_config_vars.items():
+                keys = key.split('.')
+                value = config
+                for k in keys:
+                    value = value.get(k, None)
+                    if value is None:
+                        break
+
+                if value is not None:
+                    var.set(value)
+
+            messagebox.showinfo("Config Loaded", "Video configuration reloaded from file")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load config: {e}")
+
+    def save_video_config(self):
+        """Save video config to JSON file."""
+        import json
+        from pathlib import Path
+
+        config_path = Path(__file__).parent.parent / "configs" / "video_config.json"
+
+        try:
+            # Build config dict from variables
+            config = {
+                "animation": {
+                    "speed": self.video_config_vars["animation.speed"].get(),
+                    "easing_curve": self.video_config_vars["animation.easing_curve"].get(),
+                    "distance_multiplier": self.video_config_vars["animation.distance_multiplier"].get()
+                },
+                "effects": {
+                    "chromatic_aberration": {
+                        "enabled": self.video_config_vars["effects.chromatic_aberration.enabled"].get(),
+                        "intensity": self.video_config_vars["effects.chromatic_aberration.intensity"].get(),
+                        "red_alpha": self.video_config_vars["effects.chromatic_aberration.red_alpha"].get(),
+                        "green_alpha": self.video_config_vars["effects.chromatic_aberration.green_alpha"].get(),
+                        "blue_alpha": self.video_config_vars["effects.chromatic_aberration.blue_alpha"].get()
+                    },
+                    "motion_blur": {
+                        "enabled": self.video_config_vars["effects.motion_blur.enabled"].get(),
+                        "samples": self.video_config_vars["effects.motion_blur.samples"].get(),
+                        "intensity": self.video_config_vars["effects.motion_blur.intensity"].get(),
+                        "alpha_divisor": self.video_config_vars["effects.motion_blur.alpha_divisor"].get()
+                    },
+                    "bloom": {
+                        "enabled": self.video_config_vars["effects.bloom.enabled"].get(),
+                        "intensity": self.video_config_vars["effects.bloom.intensity"].get()
+                    },
+                    "max_effect_intensity": self.video_config_vars["effects.max_effect_intensity"].get(),
+                    "effect_threshold": self.video_config_vars["effects.effect_threshold"].get()
+                },
+                "timing": {
+                    "velocity_curve": self.video_config_vars["timing.velocity_curve"].get(),
+                    "acceleration_phase": self.video_config_vars["timing.acceleration_phase"].get(),
+                    "deceleration_phase": self.video_config_vars["timing.deceleration_phase"].get()
+                },
+                "advanced": {
+                    "floor_spacing_multiplier": self.video_config_vars["advanced.floor_spacing_multiplier"].get(),
+                    "transition_smoothness": self.video_config_vars["advanced.transition_smoothness"].get(),
+                    "effect_intensity_curve": self.video_config_vars["advanced.effect_intensity_curve"].get()
+                }
+            }
+
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+
+            messagebox.showinfo("Config Saved", "Video configuration saved successfully.\nPress 'R' in Processing to reload.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save config: {e}")
+
+    def reset_video_config(self):
+        """Reset video config to defaults."""
+        import json
+        from pathlib import Path
+
+        if not messagebox.askyesno("Reset Config", "Reset all video settings to defaults?"):
+            return
+
+        config_path = Path(__file__).parent.parent / "configs" / "video_config.json"
+
+        # Default config
+        default_config = {
+            "animation": {
+                "speed": 0.1,
+                "easing_curve": "sine",
+                "distance_multiplier": 1.0
+            },
+            "effects": {
+                "chromatic_aberration": {
+                    "enabled": True,
+                    "intensity": 8.0,
+                    "red_alpha": 200,
+                    "green_alpha": 200,
+                    "blue_alpha": 200
+                },
+                "motion_blur": {
+                    "enabled": True,
+                    "samples": 3,
+                    "intensity": 15.0,
+                    "alpha_divisor": 2
+                },
+                "bloom": {
+                    "enabled": True,
+                    "intensity": 80.0
+                },
+                "max_effect_intensity": 0.8,
+                "effect_threshold": 0.05
+            },
+            "timing": {
+                "velocity_curve": "sine_ease",
+                "acceleration_phase": 0.3,
+                "deceleration_phase": 0.7
+            },
+            "advanced": {
+                "floor_spacing_multiplier": 1.0,
+                "transition_smoothness": 1.0,
+                "effect_intensity_curve": "sine"
+            }
+        }
+
+        try:
+            with open(config_path, 'w') as f:
+                json.dump(default_config, f, indent=2)
+
+            # Reload into GUI
+            self.reload_video_config()
+
+            messagebox.showinfo("Config Reset", "Video configuration reset to defaults.\nPress 'R' in Processing to reload.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to reset config: {e}")
 
     def send_osc_command(self, address: str, args: list):
         """Send OSC command to the system."""
