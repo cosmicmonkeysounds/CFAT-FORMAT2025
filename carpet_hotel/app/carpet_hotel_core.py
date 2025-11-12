@@ -261,6 +261,17 @@ class CarpetHotelCore:
             state = args[0]
             self.log.debug(f"Processing state: {state}")
 
+            # Update LED animations based on Processing state
+            if self.arduino and self.arduino_running:
+                if state == "entering_transition":
+                    # Transition started - keep flickering until we reach scene
+                    # Direction is already set by elevator button handler
+                    self.log.info("Transition started - LED animation continues")
+                elif state == "entering_scene":
+                    # Scene reached - switch to stable
+                    self.arduino.set_led_animation_mode("STABLE")
+                    self.log.info("Scene reached - switching to STABLE LED animation")
+
     def _handle_elevator_up(self, address, *args):
         """Handle UP button press from Arduino."""
         # Trigger transition animation (UP direction)
@@ -278,13 +289,7 @@ class CarpetHotelCore:
             processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
             processing_client.send_message("/carpet/goto", [self.current_scene])
 
-        # After a delay, switch to stable animation (transition takes ~2 seconds)
-        import threading
-        def switch_to_stable():
-            time.sleep(2.0)  # Wait for transition to complete
-            if self.arduino and self.arduino_running:
-                self.arduino.set_led_animation_mode("STABLE")
-        threading.Thread(target=switch_to_stable, daemon=True).start()
+        # LED animation will be switched to STABLE when Processing sends "entering_scene" state
 
     def _handle_elevator_down(self, address, *args):
         """Handle DOWN button press from Arduino."""
@@ -303,13 +308,7 @@ class CarpetHotelCore:
             processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
             processing_client.send_message("/carpet/goto", [self.current_scene])
 
-        # After a delay, switch to stable animation (transition takes ~2 seconds)
-        import threading
-        def switch_to_stable():
-            time.sleep(2.0)  # Wait for transition to complete
-            if self.arduino and self.arduino_running:
-                self.arduino.set_led_animation_mode("STABLE")
-        threading.Thread(target=switch_to_stable, daemon=True).start()
+        # LED animation will be switched to STABLE when Processing sends "entering_scene" state
 
     def get_max_scene(self) -> int:
         """Calculate maximum scene index based on video files and displays."""

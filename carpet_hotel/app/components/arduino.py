@@ -326,7 +326,7 @@ class CarpetHotelArduino:
 
     def _animate_stable(self, elapsed: float):
         """
-        Stable animation: Slow pulsing of green LED (0 and 255 only for simplicity).
+        Stable animation: Slow pulsing of green LED (0 and 127 for dimmer look).
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
@@ -336,7 +336,7 @@ class CarpetHotelArduino:
         phase = (elapsed % period) / period  # 0.0 to 1.0
 
         # Simple threshold: on for first half, off for second half
-        brightness = 255 if phase < 0.5 else 0
+        brightness = 127 if phase < 0.5 else 0
 
         # Debug output (frequently at first, then less often)
         if elapsed < 5.0 or (int(elapsed) % 5 == 0 and (elapsed % 5) < 0.1):
@@ -351,7 +351,7 @@ class CarpetHotelArduino:
     def _animate_transition_up(self, elapsed: float):
         """
         Transition UP animation: Flicker red → yellow → green quickly.
-        Using only 0 and 255 for simplicity.
+        Using 0 and 127 for dimmer look.
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
@@ -361,22 +361,22 @@ class CarpetHotelArduino:
         step = int(elapsed / flicker_period) % 3  # 0, 1, 2 (red, yellow, green)
 
         if step == 0:  # Red
-            self.set_led("red", 255)
+            self.set_led("red", 127)
             self.set_led("yellow", 0)
             self.set_led("green", 0)
         elif step == 1:  # Yellow
             self.set_led("red", 0)
-            self.set_led("yellow", 255)
+            self.set_led("yellow", 127)
             self.set_led("green", 0)
         else:  # Green
             self.set_led("red", 0)
             self.set_led("yellow", 0)
-            self.set_led("green", 255)
+            self.set_led("green", 127)
 
     def _animate_transition_down(self, elapsed: float):
         """
         Transition DOWN animation: Flicker green → yellow → red quickly.
-        Using only 0 and 255 for simplicity.
+        Using 0 and 127 for dimmer look.
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
@@ -388,13 +388,13 @@ class CarpetHotelArduino:
         if step == 0:  # Green
             self.set_led("red", 0)
             self.set_led("yellow", 0)
-            self.set_led("green", 255)
+            self.set_led("green", 127)
         elif step == 1:  # Yellow
             self.set_led("red", 0)
-            self.set_led("yellow", 255)
+            self.set_led("yellow", 127)
             self.set_led("green", 0)
         else:  # Red
-            self.set_led("red", 255)
+            self.set_led("red", 127)
             self.set_led("yellow", 0)
             self.set_led("green", 0)
 
