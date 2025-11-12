@@ -117,10 +117,13 @@ class CarpetHotelArduino:
         # Start OSC server
         self.start_osc_server()
 
+        # IMPORTANT: Set running=True BEFORE starting animation thread
+        # Otherwise the thread will exit immediately
+        self.running = True
+
         # Start LED animation thread
         self.start_animation_thread()
 
-        self.running = True
         print(f"✓ Arduino connected and ready")
         return True
 
@@ -323,31 +326,22 @@ class CarpetHotelArduino:
 
     def _animate_stable(self, elapsed: float):
         """
-        Stable animation: Slow sin-wave pulsing of green LED between 60% to 80%.
+        Stable animation: Slow pulsing of green LED (0 and 255 only for simplicity).
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
         """
-        # Very slow oscillation - 5 second period
-        period = 5.0
-        phase = (elapsed % period) / period * 2 * math.pi
+        # Simple on/off pulsing - 1 second period
+        period = 1.0
+        phase = (elapsed % period) / period  # 0.0 to 1.0
 
-        # Sin wave oscillates between -1 and 1
-        # Map to 60% (153) to 80% (204)
-        min_brightness = int(255 * 0.60)  # 153
-        max_brightness = int(255 * 0.80)  # 204
-        brightness_range = max_brightness - min_brightness
-
-        # Calculate brightness using sin wave
-        sin_value = math.sin(phase)  # -1 to 1
-        normalized = (sin_value + 1) / 2  # 0 to 1
-        brightness = int(min_brightness + normalized * brightness_range)
+        # Simple threshold: on for first half, off for second half
+        brightness = 255 if phase < 0.5 else 0
 
         # Debug output (frequently at first, then less often)
-        if elapsed < 2.0 or (int(elapsed) % 5 == 0 and (elapsed % 5) < 0.1):
-            self.log.debug(f"STABLE animation - Green: {brightness}, elapsed: {elapsed:.1f}s")
+        if elapsed < 5.0 or (int(elapsed) % 5 == 0 and (elapsed % 5) < 0.1):
+            self.log.debug(f"STABLE animation - Green: {brightness}, elapsed: {elapsed:.1f}s, phase: {phase:.2f}")
             print(f"[Animation] STABLE - Green brightness: {brightness}, elapsed: {elapsed:.1f}s")
-            print(f"[Animation] STABLE - Calling set_led('green', {brightness})")
 
         # Set green LED, keep others off
         self.set_led("red", 0)
@@ -357,7 +351,7 @@ class CarpetHotelArduino:
     def _animate_transition_up(self, elapsed: float):
         """
         Transition UP animation: Flicker red → yellow → green quickly.
-        Random brightnesses: 0%-20% for "off", 80%-100% for "on".
+        Using only 0 and 255 for simplicity.
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
@@ -366,28 +360,23 @@ class CarpetHotelArduino:
         flicker_period = 0.1
         step = int(elapsed / flicker_period) % 3  # 0, 1, 2 (red, yellow, green)
 
-        # Random brightness for the active LED (80%-100%)
-        on_brightness = random.randint(int(255 * 0.80), 255)
-        # Random brightness for inactive LEDs (0%-20%)
-        off_brightness = random.randint(0, int(255 * 0.20))
-
         if step == 0:  # Red
-            self.set_led("red", on_brightness)
-            self.set_led("yellow", off_brightness)
-            self.set_led("green", off_brightness)
+            self.set_led("red", 255)
+            self.set_led("yellow", 0)
+            self.set_led("green", 0)
         elif step == 1:  # Yellow
-            self.set_led("red", off_brightness)
-            self.set_led("yellow", on_brightness)
-            self.set_led("green", off_brightness)
+            self.set_led("red", 0)
+            self.set_led("yellow", 255)
+            self.set_led("green", 0)
         else:  # Green
-            self.set_led("red", off_brightness)
-            self.set_led("yellow", off_brightness)
-            self.set_led("green", on_brightness)
+            self.set_led("red", 0)
+            self.set_led("yellow", 0)
+            self.set_led("green", 255)
 
     def _animate_transition_down(self, elapsed: float):
         """
         Transition DOWN animation: Flicker green → yellow → red quickly.
-        Random brightnesses: 0%-20% for "off", 80%-100% for "on".
+        Using only 0 and 255 for simplicity.
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
@@ -396,23 +385,18 @@ class CarpetHotelArduino:
         flicker_period = 0.1
         step = int(elapsed / flicker_period) % 3  # 0, 1, 2 (green, yellow, red)
 
-        # Random brightness for the active LED (80%-100%)
-        on_brightness = random.randint(int(255 * 0.80), 255)
-        # Random brightness for inactive LEDs (0%-20%)
-        off_brightness = random.randint(0, int(255 * 0.20))
-
         if step == 0:  # Green
-            self.set_led("red", off_brightness)
-            self.set_led("yellow", off_brightness)
-            self.set_led("green", on_brightness)
+            self.set_led("red", 0)
+            self.set_led("yellow", 0)
+            self.set_led("green", 255)
         elif step == 1:  # Yellow
-            self.set_led("red", off_brightness)
-            self.set_led("yellow", on_brightness)
-            self.set_led("green", off_brightness)
+            self.set_led("red", 0)
+            self.set_led("yellow", 255)
+            self.set_led("green", 0)
         else:  # Red
-            self.set_led("red", on_brightness)
-            self.set_led("yellow", off_brightness)
-            self.set_led("green", off_brightness)
+            self.set_led("red", 255)
+            self.set_led("yellow", 0)
+            self.set_led("green", 0)
 
     def run_forever(self):
         """

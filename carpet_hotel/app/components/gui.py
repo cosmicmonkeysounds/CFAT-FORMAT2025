@@ -1042,11 +1042,35 @@ class CarpetHotelGUI:
     # ========================================================================
 
     def log_to_widget(self, widget, message: str):
-        """Log message to a scrolled text widget."""
+        """Log message to a scrolled text widget and to log files."""
+        # Write to GUI widget
         widget.config(state='normal')
         widget.insert(tk.END, message + "\n")
         widget.see(tk.END)
         widget.config(state='disabled')
+
+        # Also write to appropriate log file
+        from components.logger import get_logger
+        if widget == self.video_log:
+            logger = get_logger("Processing")
+        elif widget == self.audio_log:
+            logger = get_logger("SuperCollider")
+        elif widget == self.hardware_log:
+            logger = get_logger("Arduino")
+        elif widget == self.command_log:
+            logger = get_logger("Core")
+        else:
+            logger = get_logger("Core")
+
+        # Parse message to determine log level
+        if message.startswith("✓"):
+            logger.success(message[2:])  # Remove "✓ " prefix
+        elif message.startswith("✗"):
+            logger.error(message[2:])  # Remove "✗ " prefix
+        elif message.startswith("→"):
+            logger.info(message[2:])  # Remove "→ " prefix
+        else:
+            logger.info(message)
 
     def _poll_status(self):
         """Poll core status and update GUI if state changes."""
