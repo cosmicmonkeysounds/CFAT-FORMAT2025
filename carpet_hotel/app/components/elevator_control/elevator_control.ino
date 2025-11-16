@@ -9,13 +9,13 @@
  * - Pin D3: GREEN LED (PWM capable - ~)
  *
  * Serial Protocol:
- * - Sends: "UP" / "DOWN" when buttons are pressed
- *          "UP_HELD:duration" / "DOWN_HELD:duration" while held (every 100ms)
- *          "UP_RELEASED:duration" / "DOWN_RELEASED:duration" when released
+ * - Sends: "UP" when button pressed, "UP_RELEASED" when released
+ *          "DOWN" when button pressed, "DOWN_RELEASED" when released
  * - Receives: "RED:255" / "RED:0", "YELLOW:128", "GREEN:255", etc.
  *   Values are 0-255 for PWM brightness control
  *
  * Note: LED animations are controlled by Python, not by Arduino
+ * Note: Timing/hold logic is handled by Python, Arduino just reports press/release
  * IMPORTANT: Only D3, D5, D6, D9, D10, D11 support PWM on Arduino Nano!
  */
 
@@ -168,14 +168,9 @@ const int PIN_LED_GREEN = 3;    // D3 - PWM capable (~)
 MomentarySwitch buttonDown(PIN_BUTTON_DOWN, false, PULLUP_UP, 50);
 MomentarySwitch buttonUp(PIN_BUTTON_UP, false, PULLUP_UP, 50);
 
-// Hold tracking
-unsigned long upPressStartTime = 0;
-unsigned long downPressStartTime = 0;
-bool upWasPressed = false;
-bool downWasPressed = false;
-const unsigned long HOLD_REPORT_INTERVAL = 100;  // Report held state every 100ms
-unsigned long lastUpHoldReport = 0;
-unsigned long lastDownHoldReport = 0;
+// Button state tracking (for detecting press/release)
+bool upIsPressed = false;
+bool downIsPressed = false;
 
 // No animation logic - Python controls LEDs directly
 
@@ -214,60 +209,30 @@ void loop() {
   buttonDown.update();
   buttonUp.update();
 
-  unsigned long now = millis();
-
   // ===== UP BUTTON =====
   bool upPressed = buttonUp.isPressed();
 
-  if (buttonUp.wasPressed()) {
+  if (upPressed && !upIsPressed) {
     // Button just pressed
     Serial.println("UP");
-    upPressStartTime = now;
-    upWasPressed = true;
-    lastUpHoldReport = now;
-  } else if (upPressed && upWasPressed) {
-    // Button is being held
-    unsigned long holdDuration = now - upPressStartTime;
-
-    // Report hold state periodically
-    if (now - lastUpHoldReport >= HOLD_REPORT_INTERVAL) {
-      Serial.print("UP_HELD:");
-      Serial.println(holdDuration);
-      lastUpHoldReport = now;
-    }
-  } else if (!upPressed && upWasPressed) {
+    upIsPressed = true;
+  } else if (!upPressed && upIsPressed) {
     // Button just released
-    unsigned long holdDuration = now - upPressStartTime;
-    Serial.print("UP_RELEASED:");
-    Serial.println(holdDuration);
-    upWasPressed = false;
+    Serial.println("UP_RELEASED");
+    upIsPressed = false;
   }
 
   // ===== DOWN BUTTON =====
   bool downPressed = buttonDown.isPressed();
 
-  if (buttonDown.wasPressed()) {
+  if (downPressed && !downIsPressed) {
     // Button just pressed
     Serial.println("DOWN");
-    downPressStartTime = now;
-    downWasPressed = true;
-    lastDownHoldReport = now;
-  } else if (downPressed && downWasPressed) {
-    // Button is being held
-    unsigned long holdDuration = now - downPressStartTime;
-
-    // Report hold state periodically
-    if (now - lastDownHoldReport >= HOLD_REPORT_INTERVAL) {
-      Serial.print("DOWN_HELD:");
-      Serial.println(holdDuration);
-      lastDownHoldReport = now;
-    }
-  } else if (!downPressed && downWasPressed) {
+    downIsPressed = true;
+  } else if (!downPressed && downIsPressed) {
     // Button just released
-    unsigned long holdDuration = now - downPressStartTime;
-    Serial.print("DOWN_RELEASED:");
-    Serial.println(holdDuration);
-    downWasPressed = false;
+    Serial.println("DOWN_RELEASED");
+    downIsPressed = false;
   }
 
   // Process serial commands

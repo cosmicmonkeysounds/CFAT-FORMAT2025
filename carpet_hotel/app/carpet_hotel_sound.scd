@@ -150,10 +150,13 @@ var masterVolume = 0.7;
             var screenKey = ("screen" ++ screenIdx).asSymbol;
             var player;
 
-            if(players[floorNum].notNil, {
-                player = players[floorNum][screenKey];
-                if(player.notNil, {
-                    player.set(\amp, volumePerFloor);
+            // Bounds check - only play if floor exists
+            if((floorNum >= 1) && (floorNum <= numFloors), {
+                if(players[floorNum].notNil, {
+                    player = players[floorNum][screenKey];
+                    if(player.notNil, {
+                        player.set(\amp, volumePerFloor);
+                    });
                 });
             });
         });
@@ -195,19 +198,24 @@ var masterVolume = 0.7;
             currentFloorForScreen = currentFloor + screenIdx + 1; // +1 for file numbering
             nextFloorForScreen = (currentFloor + direction) + screenIdx + 1;
 
+            // Bounds check - only play if floor exists
             // Fade out current floor
-            if(players[currentFloorForScreen].notNil, {
-                var player = players[currentFloorForScreen][screenKey];
-                if(player.notNil, {
-                    player.set(\amp, fadeOutGain * masterVolume);
+            if((currentFloorForScreen >= 1) && (currentFloorForScreen <= numFloors), {
+                if(players[currentFloorForScreen].notNil, {
+                    var player = players[currentFloorForScreen][screenKey];
+                    if(player.notNil, {
+                        player.set(\amp, fadeOutGain * masterVolume);
+                    });
                 });
             });
 
             // Fade in next floor
-            if(players[nextFloorForScreen].notNil, {
-                var player = players[nextFloorForScreen][screenKey];
-                if(player.notNil, {
-                    player.set(\amp, fadeInGain * masterVolume);
+            if((nextFloorForScreen >= 1) && (nextFloorForScreen <= numFloors), {
+                if(players[nextFloorForScreen].notNil, {
+                    var player = players[nextFloorForScreen][screenKey];
+                    if(player.notNil, {
+                        player.set(\amp, fadeInGain * masterVolume);
+                    });
                 });
             });
         });

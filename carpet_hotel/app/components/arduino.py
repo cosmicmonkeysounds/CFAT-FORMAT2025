@@ -69,14 +69,15 @@ class CarpetHotelArduino:
         self.animation_running = False
         self.transition_start_time = 0.0  # Track when transition animation started
 
-        # Button hold tracking for jump feature
-        self.up_hold_duration = 0  # milliseconds
-        self.down_hold_duration = 0  # milliseconds
-        self.jump_armed = False  # True when a button is held and jump is ready
-        self.jump_button_held = None  # 'UP' or 'DOWN' - which button is held
-        self.jump_used = False  # True if jump charge has been used (prevents re-arming until release)
-        self.max_jump_hold_time = 10000  # 10 seconds in milliseconds
-        self.current_state = "STABLE"  # Track if we're in stable mode
+        # Button state machine for jump feature
+        # States: NEUTRAL, HELD_UP, HELD_DOWN
+        # 0-3s: Normal 1-floor move on release
+        # 3-13s: Jump power accumulates (3s=0%, 13s=100%)
+        self.button_state = "NEUTRAL"  # NEUTRAL, HELD_UP, HELD_DOWN
+        self.button_press_time = None  # Time when current button was pressed
+        self.normal_press_threshold = 3.0  # 3 seconds
+        self.max_jump_time = 10.0  # 10 seconds after threshold
+        self.current_state = "STABLE"  # Track if we're in stable mode ('STABLE' or 'TRANSITION')
 
     def set_message_callback(self, callback):
         """
@@ -141,12 +142,14 @@ class CarpetHotelArduino:
         """
         Handle incoming serial message from broker.
 
-        Implements jump logic:
-        - When in STABLE mode, holding UP/DOWN accumulates jump power
-        - Pressing opposite button triggers jump (scaled by hold time)
-        - 10 seconds hold = jump to opposite end
-        - 5 seconds hold = jump halfway
-        - Must release held button to exit jump state
+        Button state machine:
+        - NEUTRAL: No button held
+        - HELD_UP: UP button currently held
+        - HELD_DOWN: DOWN button currently held
+
+        Timing rules (only executed if system in STABLE state):
+        - 0-3s hold: Normal 1-floor move
+        - 3-13s hold: Jump power = (time - 3s) / 10s
 
         Args:
             message: Message from Arduino
@@ -155,103 +158,128 @@ class CarpetHotelArduino:
         message = message.strip()
         message_upper = message.upper()
 
-        # ===== HELD MESSAGES =====
-        if message_upper.startswith("UP_HELD:"):
-            duration = int(message_upper.split(":")[1])
-            self.up_hold_duration = duration
-            # Only arm jump if we're in STABLE mode and haven't used the charge yet
-            if self.current_state == "STABLE" and not self.jump_used:
-                self.jump_armed = True
-                self.jump_button_held = "UP"
+        print(f"[Arduino] Received: '{message_upper}' | Button state: {self.button_state} | System state: {self.current_state}")
+
+        # ===== PRESS MESSAGES =====
+        if message_upper == "UP":
+            if self.button_state == "NEUTRAL":
+                # Enter HELD_UP state
+                self.button_state = "HELD_UP"
+                self.button_press_time = time.time()
+                print(f"[Arduino] NEUTRAL → HELD_UP (press time: {self.button_press_time})")
+            else:
+                # Already holding a button, ignore
+                print(f"[Arduino] UP press ignored - already in {self.button_state} state")
             return
 
-        elif message_upper.startswith("DOWN_HELD:"):
-            duration = int(message_upper.split(":")[1])
-            self.down_hold_duration = duration
-            # Only arm jump if we're in STABLE mode and haven't used the charge yet
-            if self.current_state == "STABLE" and not self.jump_used:
-                self.jump_armed = True
-                self.jump_button_held = "DOWN"
+        elif message_upper == "DOWN":
+            if self.button_state == "NEUTRAL":
+                # Enter HELD_DOWN state
+                self.button_state = "HELD_DOWN"
+                self.button_press_time = time.time()
+                print(f"[Arduino] NEUTRAL → HELD_DOWN (press time: {self.button_press_time})")
+            else:
+                # Already holding a button, ignore
+                print(f"[Arduino] DOWN press ignored - already in {self.button_state} state")
             return
 
         # ===== RELEASED MESSAGES =====
-        elif message_upper.startswith("UP_RELEASED:"):
-            # Always clear UP state when released, regardless of jump state
-            self.up_hold_duration = 0
-            if self.jump_button_held == "UP":
-                # Released the held button - reset all jump state completely
-                self.jump_armed = False
-                self.jump_button_held = None
-                self.jump_used = False  # Reset used flag - allows recharging
-                self.log.info("Jump state cleared (UP released) - can recharge")
-            return
+        elif message_upper == "UP_RELEASED":
+            if self.button_state != "HELD_UP":
+                # Not in UP held state, ignore release
+                print(f"[Arduino] UP_RELEASED ignored - button state is {self.button_state}")
+                return
 
-        elif message_upper.startswith("DOWN_RELEASED:"):
-            # Always clear DOWN state when released, regardless of jump state
-            self.down_hold_duration = 0
-            if self.jump_button_held == "DOWN":
-                # Released the held button - reset all jump state completely
-                self.jump_armed = False
-                self.jump_button_held = None
-                self.jump_used = False  # Reset used flag - allows recharging
-                self.log.info("Jump state cleared (DOWN released) - can recharge")
-            return
+            # Calculate hold duration
+            hold_duration = time.time() - self.button_press_time if self.button_press_time else 0
+            print(f"[Arduino] UP hold duration: {hold_duration:.2f}s")
 
-        # ===== PRESS MESSAGES (with jump logic) =====
-        elif message_upper == "UP":
-            # Check if jump is armed with DOWN held
-            if self.jump_armed and self.jump_button_held == "DOWN":
-                self._execute_jump("UP", self.down_hold_duration)
-            else:
-                # Normal UP press
+            # Return to NEUTRAL state
+            self.button_state = "NEUTRAL"
+            self.button_press_time = None
+            print(f"[Arduino] HELD_UP → NEUTRAL")
+
+            # Only execute command if system is STABLE
+            if self.current_state != "STABLE":
+                print(f"[Arduino] Command ignored - system state is {self.current_state}")
+                return
+
+            # Execute move based on hold duration
+            if hold_duration < self.normal_press_threshold:
+                # Normal 1-floor move
+                print(f"[Arduino] Normal UP move - sending OSC")
                 if self.osc_client:
                     self.osc_client.send_message("/carpet/elevator/up", [])
-                self.log.success("Button UP pressed")
-                self._notify("✓ Button UP pressed")
-
-        elif message_upper == "DOWN":
-            # Check if jump is armed with UP held
-            if self.jump_armed and self.jump_button_held == "UP":
-                self._execute_jump("DOWN", self.up_hold_duration)
+                    print(f"[Arduino] ✓ OSC sent: /carpet/elevator/up")
+                self.log.success(f"UP: Normal move ({hold_duration:.1f}s)")
+                self._notify("✓ UP: 1 floor")
             else:
-                # Normal DOWN press
+                # Jump - calculate power from time over threshold
+                jump_time = hold_duration - self.normal_press_threshold
+                jump_fraction = min(jump_time / self.max_jump_time, 1.0)
+                print(f"[Arduino] Jump UP - power {jump_fraction*100:.0f}%")
+                self._execute_jump("up", jump_fraction)
+
+            return
+
+        elif message_upper == "DOWN_RELEASED":
+            if self.button_state != "HELD_DOWN":
+                # Not in DOWN held state, ignore release
+                print(f"[Arduino] DOWN_RELEASED ignored - button state is {self.button_state}")
+                return
+
+            # Calculate hold duration
+            hold_duration = time.time() - self.button_press_time if self.button_press_time else 0
+            print(f"[Arduino] DOWN hold duration: {hold_duration:.2f}s")
+
+            # Return to NEUTRAL state
+            self.button_state = "NEUTRAL"
+            self.button_press_time = None
+            print(f"[Arduino] HELD_DOWN → NEUTRAL")
+
+            # Only execute command if system is STABLE
+            if self.current_state != "STABLE":
+                print(f"[Arduino] Command ignored - system state is {self.current_state}")
+                return
+
+            # Execute move based on hold duration
+            if hold_duration < self.normal_press_threshold:
+                # Normal 1-floor move
+                print(f"[Arduino] Normal DOWN move - sending OSC")
                 if self.osc_client:
                     self.osc_client.send_message("/carpet/elevator/down", [])
-                self.log.success("Button DOWN pressed")
-                self._notify("✓ Button DOWN pressed")
+                    print(f"[Arduino] ✓ OSC sent: /carpet/elevator/down")
+                self.log.success(f"DOWN: Normal move ({hold_duration:.1f}s)")
+                self._notify("✓ DOWN: 1 floor")
+            else:
+                # Jump - calculate power from time over threshold
+                jump_time = hold_duration - self.normal_press_threshold
+                jump_fraction = min(jump_time / self.max_jump_time, 1.0)
+                print(f"[Arduino] Jump DOWN - power {jump_fraction*100:.0f}%")
+                self._execute_jump("down", jump_fraction)
+
+            return
 
         else:
             # Unknown message - might be debug output
             if message:  # Ignore empty lines
                 self.log.debug(f"Arduino: {message}")
 
-    def _execute_jump(self, direction: str, hold_duration_ms: int):
+    def _execute_jump(self, direction: str, jump_fraction: float):
         """
-        Execute a jump based on hold duration.
+        Execute a jump based on hold duration over threshold.
 
         Args:
-            direction: "UP" or "DOWN" - direction of the jump
-            hold_duration_ms: How long the opposite button was held (milliseconds)
+            direction: "up" or "down" - direction of the jump
+            jump_fraction: 0.0 to 1.0 - power (0.0 = 3s hold, 1.0 = 13s hold)
         """
-        # Calculate jump distance based on hold duration
-        # 0ms = 0%, 10000ms (10s) = 100%
-        hold_fraction = min(hold_duration_ms / self.max_jump_hold_time, 1.0)
-
-        # Send jump command to OSC with the hold fraction
+        # Send jump command to OSC with the jump fraction
         # Python core will calculate the actual scene to jump to
         if self.osc_client:
-            self.osc_client.send_message("/carpet/elevator/jump", [direction.lower(), hold_fraction])
+            self.osc_client.send_message("/carpet/elevator/jump", [direction, jump_fraction])
 
-        self.log.success(f"JUMP {direction} - hold: {hold_duration_ms}ms ({hold_fraction*100:.1f}%)")
-        self._notify(f"✓ JUMP {direction} - {hold_fraction*100:.0f}% power")
-
-        # Mark jump as used - prevents re-arming until button is released
-        # User must release the held button and hold again to recharge
-        self.jump_armed = False
-        self.jump_used = True  # This prevents re-arming even if button still held
-        # Note: jump_button_held stays set so we know which button to watch for release
-        # Note: hold durations stay so we can see the charge level
-        self.log.info("Jump executed - charge used, must release to recharge")
+        self.log.success(f"JUMP {direction.upper()} - {jump_fraction*100:.0f}% power")
+        self._notify(f"✓ JUMP {direction.upper()} - {jump_fraction*100:.0f}% power")
 
     def setup_osc(self) -> bool:
         """

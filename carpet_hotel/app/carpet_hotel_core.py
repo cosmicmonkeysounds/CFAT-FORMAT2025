@@ -275,39 +275,59 @@ class CarpetHotelCore:
 
     def _handle_elevator_up(self, address, *args):
         """Handle UP button press from Arduino."""
+        print(f"\n[CORE] ═══ RECEIVED /carpet/elevator/up ═══")
+        print(f"[CORE] Current scene: {self.current_scene}")
+        print(f"[CORE] Arduino running: {self.arduino_running}")
+        print(f"[CORE] Processing running: {self.pde_running}")
+
         # Trigger transition animation (UP direction)
         if self.arduino and self.arduino_running:
             self.arduino.set_led_animation_mode("TRANSITION", direction="up")
+            print(f"[CORE] Set LED animation to TRANSITION (up)")
 
         # Increment scene
         max_scene = self.get_max_scene()
         self.current_scene = (self.current_scene + 1) % (max_scene + 1)
 
         self.log.info(f"Arduino UP → Scene {self.current_scene}")
+        print(f"[CORE] New scene: {self.current_scene}")
 
         # Send goto command to Processing
         if self.pde_running:
             processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
             processing_client.send_message("/carpet/goto", [self.current_scene])
+            print(f"[CORE] ✓ Sent /carpet/goto [{self.current_scene}] to Processing (127.0.0.1:12000)")
+        else:
+            print(f"[CORE] ✗ Processing not running - cannot send goto")
 
         # LED animation will be switched to STABLE when Processing sends "entering_scene" state
 
     def _handle_elevator_down(self, address, *args):
         """Handle DOWN button press from Arduino."""
+        print(f"\n[CORE] ═══ RECEIVED /carpet/elevator/down ═══")
+        print(f"[CORE] Current scene: {self.current_scene}")
+        print(f"[CORE] Arduino running: {self.arduino_running}")
+        print(f"[CORE] Processing running: {self.pde_running}")
+
         # Trigger transition animation (DOWN direction)
         if self.arduino and self.arduino_running:
             self.arduino.set_led_animation_mode("TRANSITION", direction="down")
+            print(f"[CORE] Set LED animation to TRANSITION (down)")
 
         # Decrement scene
         max_scene = self.get_max_scene()
         self.current_scene = (self.current_scene - 1) % (max_scene + 1)
 
         self.log.info(f"Arduino DOWN → Scene {self.current_scene}")
+        print(f"[CORE] New scene: {self.current_scene}")
 
         # Send goto command to Processing
         if self.pde_running:
             processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
             processing_client.send_message("/carpet/goto", [self.current_scene])
+            print(f"[CORE] ✓ Sent /carpet/goto [{self.current_scene}] to Processing (127.0.0.1:12000)")
+        else:
+            print(f"[CORE] ✗ Processing not running - cannot send goto")
 
         # LED animation will be switched to STABLE when Processing sends "entering_scene" state
 
