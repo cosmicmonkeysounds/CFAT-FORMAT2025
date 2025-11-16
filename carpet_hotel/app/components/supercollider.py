@@ -226,26 +226,64 @@ class CarpetHotelSuperCollider:
         print("[SuperCollider] Stopping...")
         self.initialized = False
 
-        # Send Cmd+. (stop all sound) to sclang via stdin
+        # Send Cmd+. (stop all sound) and quit to sclang via stdin
         if self.process.process and self.process.process.stdin:
             try:
-                # Send the equivalent of Cmd+. in SuperCollider
-                # This stops all synths and cleans up properly
+                # Send the equivalent of Cmd+. in SuperCollider to stop synths
                 self.process.process.stdin.write("CmdPeriod.run;\n")
                 self.process.process.stdin.flush()
-                print("[SuperCollider] Sent stop command")
-                time.sleep(0.5)  # Give SC time to stop synths
+                time.sleep(0.2)
 
-                # Close stdin to signal we're done
+                # Send quit command
+                self.process.process.stdin.write("0.exit;\n")
+                self.process.process.stdin.flush()
+                print("[SuperCollider] Sent stop and quit commands")
+                time.sleep(0.3)
+
+                # Close stdin to prevent further input
                 self.process.process.stdin.close()
-                print("[SuperCollider] Closed stdin")
             except Exception as e:
-                print(f"[SuperCollider] Could not send stop command: {e}")
+                print(f"[SuperCollider] Could not send commands: {e}")
 
+        # Stop the process (will use pkill as fallback)
         result = self.process.stop()
-        if result:
-            print("✓ SuperCollider fully stopped")
-        return result
+
+        # Extra aggressive cleanup - kill BOTH sclang and scsynth
+        import subprocess
+        for process_name in ["sclang", "scsynth"]:
+            try:
+                # Use killall which is more reliable than pkill for exact names
+                subprocess.run(["killall", "-9", process_name],
+                             capture_output=True, timeout=2)
+                print(f"[SuperCollider] Sent kill signal to all {process_name} processes")
+            except Exception as e:
+                pass  # Process might not exist, which is fine
+
+        # Verify processes are actually dead
+        time.sleep(0.5)
+        still_running = []
+        for process_name in ["sclang", "scsynth"]:
+            try:
+                result = subprocess.run(["pgrep", process_name],
+                                      capture_output=True, timeout=1)
+                if result.returncode == 0:  # Process found
+                    still_running.append(process_name)
+            except:
+                pass
+
+        if still_running:
+            print(f"⚠ Warning: {', '.join(still_running)} still running after kill attempts")
+            # One final nuclear option
+            for process_name in still_running:
+                try:
+                    subprocess.run(["pkill", "-9", "-f", process_name],
+                                 capture_output=True, timeout=2)
+                except:
+                    pass
+        else:
+            print("✓ SuperCollider fully stopped (verified)")
+
+        return True
 
     def is_running(self) -> bool:
         """

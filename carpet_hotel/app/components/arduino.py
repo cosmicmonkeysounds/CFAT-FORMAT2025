@@ -78,6 +78,7 @@ class CarpetHotelArduino:
         self.charge_start_time = None  # Time when HELD state started
         self.charge_amount = 0.0  # 0.0 to 10.0 seconds
         self.hold_timer_thread: Optional[threading.Thread] = None
+        self.hold_timer_cancel = threading.Event()  # Event to cancel hold timer
         self.MAX_CHARGE_TIME = 10.0  # Maximum charge time in seconds
         self.HOLD_THRESHOLD = 1.0  # Time to hold before entering HELD state
 
@@ -156,9 +157,11 @@ class CarpetHotelArduino:
         """
         Handle incoming serial message from broker.
 
-        Logic:
-        - Short press (< 1s): Move 1 scene
-        - Hold (> 1s): Enter HELD state, charge for up to 10s, jump on release
+        Simple logic:
+        - Button press → Start 1s timer
+        - Button release before 1s → Move 1 scene
+        - Button held 1s+ → Enter HELD/charging state
+        - Button release while charging → Execute jump
 
         Args:
             message: Message from Arduino
@@ -168,13 +171,13 @@ class CarpetHotelArduino:
         message_upper = message.upper()
 
         # Log ALL raw messages for debugging
-        self.log.debug(f"RAW: '{message}' | Hold state: {self.button_hold_state}")
+        self.log.debug(f"RAW: '{message}' | Hold state: {self.button_hold_state} | Charging: {self.charge_start_time is not None}")
 
         # ===== HANDLE BUTTON PRESSES =====
         if message_upper == "UP" or message_upper == "DOWN":
             button = message_upper  # 'UP' or 'DOWN'
 
-            # Ignore if already in HELD state (other button is being held)
+            # Ignore if another button is being held
             if self.button_hold_state is not None:
                 self.log.debug(f"{button} ignored - already holding {self.button_hold_state}")
                 return
@@ -184,12 +187,13 @@ class CarpetHotelArduino:
                 self.log.debug(f"{button} ignored - system in {self.current_state} state")
                 return
 
-            # Record button press
+            # Record button press and start 1s timer
             self.button_hold_state = button
             self.button_press_time = time.time()
-            self.log.info(f"{button} pressed - starting hold timer")
+            self.log.info(f"{button} pressed - starting 1s hold timer")
 
-            # Start 1-second hold detection timer
+            # Clear cancel event and start 1-second hold detection timer
+            self.hold_timer_cancel.clear()
             self.hold_timer_thread = threading.Thread(target=self._hold_detection_timer, args=(button,), daemon=True)
             self.hold_timer_thread.start()
             return
@@ -215,13 +219,13 @@ class CarpetHotelArduino:
 
             self.log.info(f"{button} released after {hold_duration:.2f}s")
 
-            # Check if we're in HELD state (charging)
+            # Check if we entered HELD/charging state
             if self.charge_start_time is not None:
-                # HELD state - execute jump
+                # We're charging - execute jump
                 self._execute_jump(button)
-            elif hold_duration < self.HOLD_THRESHOLD:
-                # Short press - move 1 scene
-                self.log.info(f"{button} short press - moving 1 scene")
+            else:
+                # Released before 1s - move 1 scene
+                self.log.info(f"{button} short press ({hold_duration:.2f}s) - moving 1 scene")
                 if self.osc_client:
                     if button == "UP":
                         self.osc_client.send_message("/carpet/elevator/up", [])
@@ -242,13 +246,19 @@ class CarpetHotelArduino:
     def _hold_detection_timer(self, button: str):
         """
         Timer that waits 1 second. If button still held, enter HELD state.
+        Uses Event.wait() for non-blocking cancellation.
 
         Args:
             button: 'UP' or 'DOWN'
         """
-        time.sleep(self.HOLD_THRESHOLD)
+        # Wait for HOLD_THRESHOLD seconds, but allow early cancellation
+        cancelled = self.hold_timer_cancel.wait(self.HOLD_THRESHOLD)
 
-        # Check if button is still being held
+        # If cancelled, just exit
+        if cancelled:
+            return
+
+        # Check if button is still being held (wasn't released during wait)
         if self.button_hold_state == button and self.button_press_time:
             # Enter HELD state
             self.charge_start_time = time.time()
@@ -284,21 +294,28 @@ class CarpetHotelArduino:
         current_scene = self.core.current_scene
 
         # Calculate jump distance based on charge
-        # 10 seconds = full range, 5 seconds = half range
+        # 10 seconds = full jump to opposite end
+        # 5 seconds = jump halfway to opposite end
         charge_ratio = self.charge_amount / self.MAX_CHARGE_TIME
-        total_range = max_scene  # 0 to max_scene
 
         if button == "UP":
             # Jump toward max scene
-            scenes_to_jump = int(charge_ratio * total_range)
-            target_scene = min(current_scene + scenes_to_jump, max_scene)
+            # Calculate distance from current to max
+            distance_to_max = max_scene - current_scene
+            scenes_to_jump = int(charge_ratio * distance_to_max)
+            target_scene = current_scene + scenes_to_jump
         else:  # DOWN
             # Jump toward scene 0
-            scenes_to_jump = int(charge_ratio * total_range)
-            target_scene = max(current_scene - scenes_to_jump, 0)
+            # Calculate distance from current to 0
+            distance_to_zero = current_scene
+            scenes_to_jump = int(charge_ratio * distance_to_zero)
+            target_scene = current_scene - scenes_to_jump
 
-        self.log.info(f"Jumping from scene {current_scene} to {target_scene} (charge: {charge_ratio*100:.1f}%)")
-        self._notify(f"🚀 JUMP: {current_scene} → {target_scene} ({scenes_to_jump} scenes)")
+        # Clamp to valid range (prevent over/underflow)
+        target_scene = max(0, min(target_scene, max_scene))
+
+        self.log.info(f"Jumping from scene {current_scene} to {target_scene} (charge: {charge_ratio*100:.1f}%, {abs(target_scene - current_scene)} scenes)")
+        self._notify(f"🚀 JUMP: {current_scene} → {target_scene} ({abs(target_scene - current_scene)} scenes)")
 
         # Send goto command
         if self.osc_client:
@@ -306,6 +323,9 @@ class CarpetHotelArduino:
 
     def _reset_hold_state(self):
         """Reset all button hold state variables."""
+        # Cancel any running hold timer
+        self.hold_timer_cancel.set()
+
         self.button_hold_state = None
         self.button_press_time = None
         self.charge_start_time = None
