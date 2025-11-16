@@ -74,6 +74,7 @@ class CarpetHotelArduino:
         self.down_hold_duration = 0  # milliseconds
         self.jump_armed = False  # True when a button is held and jump is ready
         self.jump_button_held = None  # 'UP' or 'DOWN' - which button is held
+        self.jump_used = False  # True if jump charge has been used (prevents re-arming until release)
         self.max_jump_hold_time = 10000  # 10 seconds in milliseconds
         self.current_state = "STABLE"  # Track if we're in stable mode
 
@@ -158,7 +159,8 @@ class CarpetHotelArduino:
         if message_upper.startswith("UP_HELD:"):
             duration = int(message_upper.split(":")[1])
             self.up_hold_duration = duration
-            if self.current_state == "STABLE":
+            # Only arm jump if we're in STABLE mode and haven't used the charge yet
+            if self.current_state == "STABLE" and not self.jump_used:
                 self.jump_armed = True
                 self.jump_button_held = "UP"
             return
@@ -166,7 +168,8 @@ class CarpetHotelArduino:
         elif message_upper.startswith("DOWN_HELD:"):
             duration = int(message_upper.split(":")[1])
             self.down_hold_duration = duration
-            if self.current_state == "STABLE":
+            # Only arm jump if we're in STABLE mode and haven't used the charge yet
+            if self.current_state == "STABLE" and not self.jump_used:
                 self.jump_armed = True
                 self.jump_button_held = "DOWN"
             return
@@ -176,20 +179,22 @@ class CarpetHotelArduino:
             # Always clear UP state when released, regardless of jump state
             self.up_hold_duration = 0
             if self.jump_button_held == "UP":
-                # Released the held button - exit jump state completely
+                # Released the held button - reset all jump state completely
                 self.jump_armed = False
                 self.jump_button_held = None
-                self.log.info("Jump state cleared (UP released)")
+                self.jump_used = False  # Reset used flag - allows recharging
+                self.log.info("Jump state cleared (UP released) - can recharge")
             return
 
         elif message_upper.startswith("DOWN_RELEASED:"):
             # Always clear DOWN state when released, regardless of jump state
             self.down_hold_duration = 0
             if self.jump_button_held == "DOWN":
-                # Released the held button - exit jump state completely
+                # Released the held button - reset all jump state completely
                 self.jump_armed = False
                 self.jump_button_held = None
-                self.log.info("Jump state cleared (DOWN released)")
+                self.jump_used = False  # Reset used flag - allows recharging
+                self.log.info("Jump state cleared (DOWN released) - can recharge")
             return
 
         # ===== PRESS MESSAGES (with jump logic) =====
@@ -240,13 +245,13 @@ class CarpetHotelArduino:
         self.log.success(f"JUMP {direction} - hold: {hold_duration_ms}ms ({hold_fraction*100:.1f}%)")
         self._notify(f"✓ JUMP {direction} - {hold_fraction*100:.0f}% power")
 
-        # Clear ALL jump state after executing - prevents multiple jumps
-        # User must release held button and press again to initiate new jump
+        # Mark jump as used - prevents re-arming until button is released
+        # User must release the held button and hold again to recharge
         self.jump_armed = False
-        self.jump_button_held = None
-        self.up_hold_duration = 0
-        self.down_hold_duration = 0
-        self.log.info("Jump executed - all jump state cleared")
+        self.jump_used = True  # This prevents re-arming even if button still held
+        # Note: jump_button_held stays set so we know which button to watch for release
+        # Note: hold durations stay so we can see the charge level
+        self.log.info("Jump executed - charge used, must release to recharge")
 
     def setup_osc(self) -> bool:
         """
