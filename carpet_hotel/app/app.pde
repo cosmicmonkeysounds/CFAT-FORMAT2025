@@ -285,6 +285,13 @@ class TransitionConfig {
   String easingCurve = "sine";
   float distanceMultiplier = 1.0;
 
+  // Distance-based speed
+  boolean distanceBasedSpeedEnabled = true;
+  String distanceSpeedCurve = "linear";
+  float minSpeedMultiplier = 0.5;
+  float maxSpeedMultiplier = 1.0;
+  float referenceDistance = 27;
+
   // Chromatic Aberration
   boolean chromaticEnabled = true;
   float chromaticIntensity = 8.0;
@@ -333,6 +340,19 @@ class TransitionConfig {
       if (anim.hasKey("speed")) animationSpeed = anim.getFloat("speed");
       if (anim.hasKey("easing_curve")) easingCurve = anim.getString("easing_curve");
       if (anim.hasKey("distance_multiplier")) distanceMultiplier = anim.getFloat("distance_multiplier");
+
+      // Distance-based speed
+      if (anim.hasKey("distance_based_speed")) {
+        JSONObject dbs = anim.getJSONObject("distance_based_speed");
+        if (dbs.hasKey("enabled")) distanceBasedSpeedEnabled = dbs.getBoolean("enabled");
+        if (dbs.hasKey("curve_type")) distanceSpeedCurve = dbs.getString("curve_type");
+        if (dbs.hasKey("min_multiplier")) minSpeedMultiplier = dbs.getFloat("min_multiplier");
+        if (dbs.hasKey("max_multiplier")) maxSpeedMultiplier = dbs.getFloat("max_multiplier");
+        if (dbs.hasKey("reference_distance")) referenceDistance = dbs.getFloat("reference_distance");
+        println("  Distance-based speed: enabled=" + distanceBasedSpeedEnabled + ", curve=" + distanceSpeedCurve +
+                ", min=" + minSpeedMultiplier + "x, max=" + maxSpeedMultiplier + "x");
+      }
+
       println("  Animation: speed=" + animationSpeed + ", easing=" + easingCurve + ", distMult=" + distanceMultiplier);
     }
 
@@ -403,6 +423,16 @@ class TransitionConfig {
     anim.setFloat("speed", animationSpeed);
     anim.setString("easing_curve", easingCurve);
     anim.setFloat("distance_multiplier", distanceMultiplier);
+
+    // Distance-based speed
+    JSONObject dbs = new JSONObject();
+    dbs.setBoolean("enabled", distanceBasedSpeedEnabled);
+    dbs.setString("curve_type", distanceSpeedCurve);
+    dbs.setFloat("min_multiplier", minSpeedMultiplier);
+    dbs.setFloat("max_multiplier", maxSpeedMultiplier);
+    dbs.setFloat("reference_distance", referenceDistance);
+    anim.setJSONObject("distance_based_speed", dbs);
+
     json.setJSONObject("animation", anim);
 
     // Effects
@@ -451,6 +481,42 @@ class TransitionConfig {
 
     parent.saveJSONObject(json, configPath);
     println("Configuration saved to " + configPath);
+  }
+
+  /**
+   * Calculate distance-based speed multiplier
+   * Returns a value between minSpeedMultiplier and maxSpeedMultiplier based on distance
+   */
+  float getDistanceSpeedMultiplier(float distance) {
+    if (!distanceBasedSpeedEnabled || distance <= 0) {
+      return 1.0;
+    }
+
+    // Clamp distance to valid range (1 to referenceDistance)
+    float clampedDistance = constrain(distance, 1, referenceDistance);
+
+    // Normalize distance to 0-1 range
+    float normalizedDistance = (clampedDistance - 1) / (referenceDistance - 1);
+
+    // Apply curve
+    float curvedValue = normalizedDistance;
+    if (distanceSpeedCurve.equals("linear")) {
+      curvedValue = normalizedDistance;
+    } else if (distanceSpeedCurve.equals("exponential")) {
+      // Exponential curve (accelerates faster)
+      curvedValue = pow(normalizedDistance, 2);
+    } else if (distanceSpeedCurve.equals("logarithmic")) {
+      // Logarithmic curve (accelerates slower)
+      curvedValue = sqrt(normalizedDistance);
+    } else if (distanceSpeedCurve.equals("inverse")) {
+      // Inverse curve (decelerates)
+      curvedValue = 1 - pow(1 - normalizedDistance, 2);
+    }
+
+    // Map to speed multiplier range
+    float multiplier = minSpeedMultiplier + (maxSpeedMultiplier - minSpeedMultiplier) * curvedValue;
+
+    return multiplier;
   }
 }
 
@@ -521,8 +587,11 @@ class SharedState {
 
   void update() {
     if (isAnimating) {
-      // Increment animation progress linearly using config speed
-      animationProgress += config.animationSpeed;
+      // Calculate distance-based speed multiplier
+      float speedMultiplier = config.getDistanceSpeedMultiplier(totalDistance);
+
+      // Increment animation progress with distance-adjusted speed
+      animationProgress += config.animationSpeed * speedMultiplier;
 
       // Check if animation is complete
       if (animationProgress >= totalDistance) {

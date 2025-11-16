@@ -2,7 +2,7 @@
   "animation": {
     "speed": 0.1,
     "easing_curve": "sine",
-    "distance_multiplier": 1.7207446808510638
+    "distance_multiplier": 1.7486702127659575
   },
   "effects": {
     "chromatic_aberration": {
@@ -26,13 +26,13 @@
     "effect_threshold": 0.05
   },
   "timing": {
-    "velocity_curve": "sine_ease",
-    "acceleration_phase": 0.3,
+    "velocity_curve": "quad_ease",
+    "acceleration_phase": 0.23138297872340424,
     "deceleration_phase": 0.7
   },
   "advanced": {
-    "floor_spacing_multiplier": 1.0,
-    "transition_smoothness": 1.0,
+    "floor_spacing_multiplier": 1.1143617021276595,
+    "transition_smoothness": 1.0449468085106381,
     "effect_intensity_curve": "sine"
   }
 }
