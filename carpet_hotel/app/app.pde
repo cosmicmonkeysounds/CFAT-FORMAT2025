@@ -9,8 +9,11 @@ import netP5.*;
 import java.io.File;
 
 // Configuration
-int[] DISPLAY_NUMBERS = {1, 2};   // Which display for each window (settable via CLI)
-int VIDEO_HEIGHT = 1080;          // Standard video height for animation
+int[] SCENE_DISPLAY_NUMBERS = {1, 2};   // Physical displays for scene windows A, B, C...
+String[] SCENE_DISPLAY_LETTERS = {"A", "B"};  // Letters for scene displays
+int COMPOSITE_DISPLAY_NUMBER = -1;       // Physical display for Z composite (-1 = disabled)
+String COMPOSITE_BLEND_MODE = "multiply"; // Blend mode for Z display
+int VIDEO_HEIGHT = 1080;                  // Standard video height for animation
 
 // Input modes (settable via CLI)
 boolean TEST_MODE = false;        // Keyboard input (1-9, arrows)
@@ -37,7 +40,10 @@ static SharedState sharedState;
 static ArrayList<FloorWindow> allWindows = new ArrayList<FloorWindow>();
 
 void setup() {
-  // Parse command line arguments
+  // Load display configuration from config file
+  loadDisplayConfig();
+
+  // Parse command line arguments (can override config)
   parseArgs();
 
   // Create tiny control window
@@ -60,17 +66,28 @@ void setup() {
   sharedState = new SharedState();
   sharedState.init(this);
 
-  // Launch separate windows for each display
-  for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
-    String[] args = {"FloorWindow_" + i};
+  // Launch separate windows for each scene display
+  for (int i = 0; i < SCENE_SCENE_DISPLAY_NUMBERS.length; i++) {
+    String[] args = {"SceneWindow_" + SCENE_DISPLAY_LETTERS[i]};
     FloorWindow window = new FloorWindow(i);
     allWindows.add(window);  // Track for cleanup
     PApplet.runSketch(args, window);
   }
 
+  // Launch composite window if enabled
+  if (COMPOSITE_DISPLAY_NUMBER >= 0) {
+    String[] args = {"CompositeWindow_Z"};
+    CompositeWindow compositeWindow = new CompositeWindow();
+    PApplet.runSketch(args, compositeWindow);
+  }
+
   println("\n=== CARPET HOTEL CONTROL ===");
-  println("Windows: " + DISPLAY_NUMBERS.length);
-  println("Displays: " + java.util.Arrays.toString(DISPLAY_NUMBERS));
+  println("Scene Windows: " + SCENE_SCENE_DISPLAY_NUMBERS.length);
+  println("Scene Displays: " + java.util.Arrays.toString(SCENE_DISPLAY_LETTERS));
+  println("Scene Physical: " + java.util.Arrays.toString(SCENE_DISPLAY_NUMBERS));
+  if (COMPOSITE_DISPLAY_NUMBER >= 0) {
+    println("Composite Display Z: " + COMPOSITE_DISPLAY_NUMBER + " (blend: " + COMPOSITE_BLEND_MODE + ")");
+  }
   println("Floors loaded: " + sharedState.floors.size());
   println("Videos: " + sharedState.videoNames.size());
   println("Audio: " + sharedState.audioNames.size() + " (handled by SuperCollider)");
@@ -95,8 +112,53 @@ void setup() {
   sendVolumeOSC();
 }
 
+void loadDisplayConfig() {
+  // Load display configuration from video_config.json
+  try {
+    JSONObject config = loadJSONObject("configs/video_config.json");
+    if (config != null && config.hasKey("displays")) {
+      JSONObject displays = config.getJSONObject("displays");
+
+      // Load scene displays
+      if (displays.hasKey("scene_displays")) {
+        JSONArray sceneDisplays = displays.getJSONArray("scene_displays");
+        ArrayList<Integer> enabledDisplayNums = new ArrayList<Integer>();
+        ArrayList<String> enabledDisplayLetters = new ArrayList<String>();
+
+        for (int i = 0; i < sceneDisplays.size(); i++) {
+          JSONObject display = sceneDisplays.getJSONObject(i);
+          if (display.getBoolean("enabled", false)) {
+            enabledDisplayNums.add(display.getInt("physical_display"));
+            enabledDisplayLetters.add(display.getString("letter"));
+          }
+        }
+
+        // Convert ArrayLists to arrays
+        SCENE_DISPLAY_NUMBERS = new int[enabledDisplayNums.size()];
+        SCENE_DISPLAY_LETTERS = new String[enabledDisplayLetters.size()];
+        for (int i = 0; i < enabledDisplayNums.size(); i++) {
+          SCENE_DISPLAY_NUMBERS[i] = enabledDisplayNums.get(i);
+          SCENE_DISPLAY_LETTERS[i] = enabledDisplayLetters.get(i);
+        }
+      }
+
+      // Load composite display
+      if (displays.hasKey("composite_display")) {
+        JSONObject composite = displays.getJSONObject("composite_display");
+        if (composite.getBoolean("enabled", false)) {
+          COMPOSITE_DISPLAY_NUMBER = composite.getInt("physical_display");
+          COMPOSITE_BLEND_MODE = composite.getString("blend_mode");
+        }
+      }
+    }
+  } catch (Exception e) {
+    println("Warning: Could not load display config: " + e.getMessage());
+    println("Using defaults: 2 scene displays on physical displays 1 and 2");
+  }
+}
+
 void parseArgs() {
-  // Parse command line arguments
+  // Parse command line arguments (can override config file)
   // Format: --test-mode --osc-control --displays=1,2,3
   for (String arg : args) {
     if (arg.equals("--test-mode")) {
@@ -104,11 +166,14 @@ void parseArgs() {
     } else if (arg.equals("--osc-control")) {
       OSC_CONTROL_MODE = true;
     } else if (arg.startsWith("--displays=")) {
+      // Override scene displays from command line
       String displaysStr = arg.substring("--displays=".length());
       String[] parts = displaysStr.split(",");
-      DISPLAY_NUMBERS = new int[parts.length];
+      SCENE_DISPLAY_NUMBERS = new int[parts.length];
+      SCENE_DISPLAY_LETTERS = new String[parts.length];
       for (int i = 0; i < parts.length; i++) {
-        DISPLAY_NUMBERS[i] = Integer.parseInt(parts[i].trim());
+        SCENE_DISPLAY_NUMBERS[i] = Integer.parseInt(parts[i].trim());
+        SCENE_DISPLAY_LETTERS[i] = String.valueOf((char)('A' + i)); // A, B, C...
       }
     }
   }
@@ -140,7 +205,7 @@ void draw() {
 
   y += 10;
   text("Current windows:", 20, y); y += 20;
-  for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
+  for (int i = 0; i < SCENE_DISPLAY_NUMBERS.length; i++) {
     int videoIdx = sharedState.currentScene + i;
     if (videoIdx < sharedState.videoNames.size()) {
       String filename = sharedState.videoNames.get(videoIdx);
@@ -178,7 +243,7 @@ void keyPressed() {
   // Global controls (always available)
   if (key == ' ') {
     println("\n=== SCENE " + sharedState.currentScene + " ===");
-    for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
+    for (int i = 0; i < SCENE_DISPLAY_NUMBERS.length; i++) {
       int videoIdx = sharedState.currentScene + i;
       if (videoIdx < sharedState.videos.size()) {
         println("  Window " + i + " -> " + sharedState.videoNames.get(videoIdx));
@@ -564,8 +629,8 @@ class SharedState {
     // Find all carpet videos and audio
     findCarpetMedia();
 
-    // Load first DISPLAY_NUMBERS.length floors
-    for (int i = 0; i < min(DISPLAY_NUMBERS.length, videoNames.size()); i++) {
+    // Load first SCENE_SCENE_DISPLAY_NUMBERS.length floors
+    for (int i = 0; i < min(SCENE_SCENE_DISPLAY_NUMBERS.length, videoNames.size()); i++) {
       String videoFile = videoNames.get(i);
       String audioFile = i < audioNames.size() ? audioNames.get(i) : null;
       Floor floor = new Floor(parent, videoFile, audioFile, i);
@@ -582,7 +647,7 @@ class SharedState {
   }
 
   int getNumScenes() {
-    return max(1, videoNames.size() - DISPLAY_NUMBERS.length + 1);
+    return max(1, videoNames.size() - SCENE_DISPLAY_NUMBERS.length + 1);
   }
 
   void update() {
@@ -627,10 +692,10 @@ class SharedState {
     // Send current scene and number of active floors
     OscMessage msg = new OscMessage("/carpet/scene");
     msg.add(currentScene);                // Current scene number
-    msg.add(DISPLAY_NUMBERS.length);      // Number of active floors
+    msg.add(SCENE_DISPLAY_NUMBERS.length);      // Number of active floors
     msg.add(0);                           // Not animating
     oscP5.send(msg, pythonAddress);       // Send to Python, which forwards to SuperCollider
-    println("[OSC-SEND] /carpet/scene " + currentScene + " " + DISPLAY_NUMBERS.length + " 0 (via Python)");
+    println("[OSC-SEND] /carpet/scene " + currentScene + " " + SCENE_DISPLAY_NUMBERS.length + " 0 (via Python)");
   }
 
   void sendTransitionOSC() {
@@ -656,9 +721,9 @@ class SharedState {
     msg.add(currentFloor);                // Current floor during transition
     msg.add(fractionalProgress);          // Progress within current floor (0.0-1.0)
     msg.add(sceneDirection);              // Scene direction: +1 = ascending, -1 = descending
-    msg.add(DISPLAY_NUMBERS.length);      // Number of screens
+    msg.add(SCENE_DISPLAY_NUMBERS.length);      // Number of screens
     oscP5.send(msg, pythonAddress);       // Send to Python, which forwards to SuperCollider
-    println("[OSC-SEND] /carpet/transition " + currentFloor + " " + fractionalProgress + " " + sceneDirection + " " + DISPLAY_NUMBERS.length + " (via Python)");
+    println("[OSC-SEND] /carpet/transition " + currentFloor + " " + fractionalProgress + " " + sceneDirection + " " + SCENE_DISPLAY_NUMBERS.length + " (via Python)");
   }
 
   void startTransition(int newScene) {
@@ -689,7 +754,7 @@ class SharedState {
     int minScene = min(currentScene, targetScene);
     int maxScene = max(currentScene, targetScene);
     for (int scene = minScene; scene <= maxScene; scene++) {
-      for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
+      for (int i = 0; i < SCENE_DISPLAY_NUMBERS.length; i++) {
         int videoIdx = scene + i;
         if (videoIdx >= 0 && videoIdx < videoNames.size()) {
           ensureVideoLoaded(videoIdx);
@@ -890,10 +955,12 @@ class Floor {
 class FloorWindow extends PApplet {
   int windowIndex;
   int displayNum;
+  String displayLetter;
 
   FloorWindow(int index) {
     this.windowIndex = index;
-    this.displayNum = DISPLAY_NUMBERS[index];
+    this.displayNum = SCENE_DISPLAY_NUMBERS[index];
+    this.displayLetter = SCENE_DISPLAY_LETTERS[index];
   }
 
   public void settings() {
@@ -903,7 +970,7 @@ class FloorWindow extends PApplet {
 
   public void setup() {
     background(0);
-    surface.setTitle("Carpet Hotel - Window " + windowIndex);
+    surface.setTitle("Carpet Hotel - Scene " + displayLetter);
   }
 
   public void draw() {
@@ -1085,8 +1152,8 @@ class FloorWindow extends PApplet {
     text("=== CARPET HOTEL DEBUG ===", 20, y); y += lineHeight + 5;
 
     fill(255);
-    text("Window: " + windowIndex, 20, y); y += lineHeight;
-    text("Display: " + DISPLAY_NUMBERS[windowIndex], 20, y); y += lineHeight;
+    text("Window: " + displayLetter, 20, y); y += lineHeight;
+    text("Physical Display: " + displayNum, 20, y); y += lineHeight;
     text("Screen: " + width + "x" + height, 20, y); y += lineHeight;
 
     y += 5;
@@ -1154,7 +1221,7 @@ class FloorWindow extends PApplet {
       }
     } else if (key == ' ') {
       println("\n=== SCENE " + sharedState.currentScene + " ===");
-      for (int i = 0; i < DISPLAY_NUMBERS.length; i++) {
+      for (int i = 0; i < SCENE_DISPLAY_NUMBERS.length; i++) {
         int vIdx = sharedState.currentScene + i;
         if (vIdx < sharedState.videoNames.size()) {
           println("  Window " + i + " -> " + sharedState.videoNames.get(vIdx));
@@ -1189,4 +1256,129 @@ class FloorWindow extends PApplet {
     dispose();
   }
 
+}
+
+/**
+ * Composite Window (Z Display) - Blends multiple scene windows
+ */
+class CompositeWindow extends PApplet {
+  PGraphics sceneA, sceneB;
+  boolean showDebug = false;
+
+  public void settings() {
+    fullScreen(P2D, COMPOSITE_DISPLAY_NUMBER);
+    pixelDensity(1);
+  }
+
+  public void setup() {
+    background(0);
+    surface.setTitle("Carpet Hotel - Composite Z");
+
+    // Create offscreen buffers for each scene window
+    sceneA = createGraphics(width, height, P2D);
+    sceneB = createGraphics(width, height, P2D);
+  }
+
+  public void draw() {
+    background(0);
+
+    // Copy content from scene windows to our buffers
+    // Note: This is a placeholder - actual implementation would need to
+    // capture the rendered output from FloorWindow instances
+    // For now, we'll render a blend visualization
+
+    // Check if we have at least 2 scene displays to blend
+    if (allWindows.size() < 2) {
+      fill(255, 0, 0);
+      textAlign(CENTER, CENTER);
+      textSize(32);
+      text("Composite Z requires at least 2 scene displays", width/2, height/2);
+      return;
+    }
+
+    // Render blend of scene displays
+    renderComposite();
+
+    // Show debug info
+    if (showDebug) {
+      renderDebugInfo();
+    }
+  }
+
+  void renderComposite() {
+    // Get current scene
+    int currentScene = sharedState.currentScene;
+
+    // For display A (first scene window) - get the video
+    int videoIdxA = currentScene;  // First window shows scene N
+    int videoIdxB = currentScene + 1;  // Second window shows scene N+1
+
+    // Bounds check
+    if (videoIdxA >= sharedState.videoNames.size() ||
+        videoIdxB >= sharedState.videoNames.size()) {
+      return;
+    }
+
+    // Get videos from shared state
+    Floor floorA = sharedState.floors.get(videoIdxA);
+    Floor floorB = sharedState.floors.get(videoIdxB);
+
+    if (floorA == null || floorB == null ||
+        floorA.video == null || floorB.video == null) {
+      return;
+    }
+
+    // Draw first video
+    image(floorA.video, 0, 0, width, height);
+
+    // Apply blend mode and draw second video
+    blendMode(getBlendMode(COMPOSITE_BLEND_MODE));
+    image(floorB.video, 0, 0, width, height);
+
+    // Reset blend mode
+    blendMode(BLEND);
+  }
+
+  int getBlendMode(String mode) {
+    // Convert string blend mode to Processing constant
+    switch (mode.toLowerCase()) {
+      case "add": return ADD;
+      case "subtract": return SUBTRACT;
+      case "multiply": return MULTIPLY;
+      case "screen": return SCREEN;
+      case "lightest": return LIGHTEST;
+      case "darkest": return DARKEST;
+      case "difference": return DIFFERENCE;
+      case "exclusion": return EXCLUSION;
+      default: return BLEND;
+    }
+  }
+
+  void renderDebugInfo() {
+    fill(0, 255, 0);
+    textAlign(LEFT, TOP);
+    textSize(14);
+    int y = 20;
+    int lineHeight = 22;
+
+    text("=== COMPOSITE DISPLAY Z ===", 20, y); y += lineHeight + 5;
+
+    fill(255);
+    text("Physical Display: " + COMPOSITE_DISPLAY_NUMBER, 20, y); y += lineHeight;
+    text("Screen: " + width + "x" + height, 20, y); y += lineHeight;
+    text("Blend Mode: " + COMPOSITE_BLEND_MODE, 20, y); y += lineHeight;
+    text("Scene: " + sharedState.currentScene, 20, y); y += lineHeight;
+  }
+
+  void keyPressed() {
+    if (key == 'd' || key == 'D') {
+      showDebug = !showDebug;
+    }
+  }
+
+  void dispose() {
+    if (sceneA != null) sceneA.dispose();
+    if (sceneB != null) sceneB.dispose();
+    super.dispose();
+  }
 }

@@ -1,4 +1,31 @@
 {
+  "displays": {
+    "scene_displays": [
+      {
+        "letter": "A",
+        "physical_display": 1,
+        "device_name": "Display 1 [Primary]",
+        "enabled": true
+      },
+      {
+        "letter": "B",
+        "physical_display": 2,
+        "device_name": "Display 2",
+        "enabled": true
+      }
+    ],
+    "composite_display": {
+      "letter": "Z",
+      "physical_display": 3,
+      "device_name": "Display 3",
+      "enabled": true,
+      "blend_mode": "multiply",
+      "blend_sources": [
+        "A",
+        "B"
+      ]
+    }
+  },
   "animation": {
     "speed": 0.1,
     "easing_curve": "sine",

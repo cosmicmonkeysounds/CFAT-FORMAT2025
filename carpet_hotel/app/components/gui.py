@@ -30,6 +30,10 @@ from components.arduino import CarpetHotelArduino
 from components.utils.utils import detect_displays, detect_serial_ports
 from components.settings_manager import SettingsManager, DEFAULT_SETTINGS
 
+# Get absolute path to app directory
+APP_DIR = Path(__file__).parent.parent.absolute()
+CONFIGS_DIR = APP_DIR / "configs"
+
 # Check for OSC
 try:
     from pythonosc import udp_client
@@ -58,21 +62,13 @@ class CarpetHotelGUI:
         self.audio_running = False
         self.hardware_running = False
 
-        # Display management
-        self.all_displays = []
-        self.active_displays = []
-        self.inactive_displays = []
-
-        # Display hover preview
-        self.preview_window = None
-        self.preview_display_index = None
-        self.preview_timer = None
+        # Display configuration now managed in Hardware tab via video_config.json
 
         # Create GUI
         self.create_gui()
 
         # Initial setup
-        self.refresh_displays()
+        # Display detection now handled in Hardware tab on-demand
         self.refresh_audio_devices()
         self.refresh_serial_ports()
 
@@ -117,10 +113,6 @@ class CarpetHotelGUI:
         ttk.Label(header_frame, text="Video System (Processing)",
                  font=('Arial', 16, 'bold')).pack(side='left')
 
-        # Refresh button
-        ttk.Button(header_frame, text="↻ Refresh Displays",
-                  command=self.refresh_displays, width=15).pack(side='right', padx=5)
-
         # Status
         status_frame = ttk.LabelFrame(tab, text="Status", padding=10)
         status_frame.pack(fill='x', padx=20, pady=5)
@@ -141,55 +133,45 @@ class CarpetHotelGUI:
                                         command=self.stop_video, width=20, state='disabled')
         self.video_stop_btn.pack(side='left', padx=5)
 
-        # Display management section
-        display_frame = ttk.LabelFrame(tab, text="Display Management", padding=10)
+        # Display configuration info
+        display_frame = ttk.LabelFrame(tab, text="Display Configuration", padding=10)
         display_frame.pack(fill='both', expand=True, padx=20, pady=10)
 
         # Help text
-        help_text = "Drag displays between Active and Inactive lists. Active displays are used in order."
+        help_text = "Configure displays in the Hardware tab. Current configuration shown below."
         ttk.Label(display_frame, text=help_text, foreground='gray',
                  font=('Arial', 9)).pack(anchor='w', pady=(0,10))
 
-        # Two-column layout for Active/Inactive
-        columns_frame = ttk.Frame(display_frame)
-        columns_frame.pack(fill='both', expand=True)
+        # Configure displays button
+        btn_frame = ttk.Frame(display_frame)
+        btn_frame.pack(fill='x', pady=5)
 
-        # Inactive Displays (left)
-        inactive_frame = ttk.Frame(columns_frame)
-        inactive_frame.pack(side='left', fill='both', expand=True, padx=(0,5))
+        ttk.Button(btn_frame, text="⚙ Configure Displays (Hardware Tab)",
+                  command=lambda: self.notebook.select(2),  # Switch to Hardware tab (index 2)
+                  width=30).pack(side='left', padx=5)
 
-        ttk.Label(inactive_frame, text="Inactive Displays",
-                 font=('Arial', 12, 'bold')).pack()
+        ttk.Button(btn_frame, text="↻ Refresh Config",
+                  command=self.refresh_video_display_config,
+                  width=15).pack(side='left', padx=5)
 
-        self.inactive_listbox = tk.Listbox(inactive_frame, height=8,
-                                          selectmode=tk.SINGLE)
-        self.inactive_listbox.pack(fill='both', expand=True, pady=5)
-        self.inactive_listbox.bind('<Double-Button-1>', self.move_to_active)
-        self.inactive_listbox.bind('<Motion>', lambda e: self.on_listbox_hover(e, self.inactive_listbox, self.inactive_displays))
-        self.inactive_listbox.bind('<Leave>', self.hide_display_preview)
+        # Display configuration list
+        config_frame = ttk.Frame(display_frame)
+        config_frame.pack(fill='both', expand=True, pady=10)
 
-        # Active Displays (right)
-        active_frame = ttk.Frame(columns_frame)
-        active_frame.pack(side='left', fill='both', expand=True, padx=(5,0))
+        ttk.Label(config_frame, text="Scene Displays:",
+                 font=('Arial', 11, 'bold')).pack(anchor='w')
 
-        ttk.Label(active_frame, text="Active Displays (Processing Order)",
-                 font=('Arial', 12, 'bold')).pack()
+        self.video_scene_displays_text = scrolledtext.ScrolledText(config_frame, height=4, width=80, state='disabled')
+        self.video_scene_displays_text.pack(fill='x', pady=5)
 
-        self.active_listbox = tk.Listbox(active_frame, height=8,
-                                        selectmode=tk.SINGLE)
-        self.active_listbox.pack(fill='both', expand=True, pady=5)
-        self.active_listbox.bind('<Double-Button-1>', self.move_to_inactive)
-        self.active_listbox.bind('<Motion>', lambda e: self.on_listbox_hover(e, self.active_listbox, self.active_displays))
-        self.active_listbox.bind('<Leave>', self.hide_display_preview)
+        ttk.Label(config_frame, text="Composite Display:",
+                 font=('Arial', 11, 'bold')).pack(anchor='w', pady=(10,0))
 
-        # Reorder buttons below active list
-        reorder_frame = ttk.Frame(active_frame)
-        reorder_frame.pack(fill='x')
+        self.video_composite_text = scrolledtext.ScrolledText(config_frame, height=2, width=80, state='disabled')
+        self.video_composite_text.pack(fill='x', pady=5)
 
-        ttk.Button(reorder_frame, text="▲ Move Up",
-                  command=self.move_display_up, width=12).pack(side='left', padx=2)
-        ttk.Button(reorder_frame, text="▼ Move Down",
-                  command=self.move_display_down, width=12).pack(side='left', padx=2)
+        # Auto-refresh config on startup
+        self.root.after(300, self.refresh_video_display_config)
 
         # Keyboard control option (always enabled by default)
         self.video_keyboard_var = tk.BooleanVar(value=True)
@@ -201,215 +183,78 @@ class CarpetHotelGUI:
         self.video_log = scrolledtext.ScrolledText(tab, height=6, width=80, state='disabled')
         self.video_log.pack(fill='x', padx=20, pady=5)
 
-    def refresh_displays(self):
-        """Refresh display detection."""
-        self.all_displays = detect_displays()
+    # Old display list methods removed - display configuration now in Hardware tab
 
-        # Initialize active displays if empty (auto-add all available displays)
-        if not self.active_displays:
-            if len(self.all_displays) >= 2:
-                # Use first two displays by default
-                self.active_displays = self.all_displays[:2]
-                self.inactive_displays = self.all_displays[2:]
-            elif len(self.all_displays) == 1:
-                # Use the one display available
-                self.active_displays = self.all_displays[:1]
-                self.inactive_displays = []
-            else:
-                # No displays found
-                self.active_displays = []
-                self.inactive_displays = []
+    def refresh_video_display_config(self):
+        """Refresh display configuration shown in Video tab."""
+        import json
 
-        self.update_display_lists()
+        config_path = CONFIGS_DIR / "video_config.json"
 
-    def update_display_lists(self):
-        """Update the display listboxes."""
-        # Clear lists
-        self.inactive_listbox.delete(0, tk.END)
-        self.active_listbox.delete(0, tk.END)
-
-        # Populate inactive
-        for display in self.inactive_displays:
-            label = f"Display {display['index']}: {display['name']} ({display['resolution'][0]}x{display['resolution'][1]})"
-            self.inactive_listbox.insert(tk.END, label)
-
-        # Populate active
-        for i, display in enumerate(self.active_displays):
-            label = f"[{i+1}] Display {display['index']}: {display['name']} ({display['resolution'][0]}x{display['resolution'][1]})"
-            self.active_listbox.insert(tk.END, label)
-
-    def move_to_active(self, event=None):
-        """Move selected display from inactive to active."""
-        selection = self.inactive_listbox.curselection()
-        if not selection:
-            return
-
-        idx = selection[0]
-        display = self.inactive_displays.pop(idx)
-        self.active_displays.append(display)
-        self.update_display_lists()
-
-    def move_to_inactive(self, event=None):
-        """Move selected display from active to inactive."""
-        selection = self.active_listbox.curselection()
-        if not selection:
-            return
-
-        idx = selection[0]
-        display = self.active_displays.pop(idx)
-        self.inactive_displays.append(display)
-        self.update_display_lists()
-
-    def move_display_up(self):
-        """Move selected display up in active list."""
-        selection = self.active_listbox.curselection()
-        if not selection or selection[0] == 0:
-            return
-
-        idx = selection[0]
-        self.active_displays[idx], self.active_displays[idx-1] = \
-            self.active_displays[idx-1], self.active_displays[idx]
-        self.update_display_lists()
-        self.active_listbox.selection_set(idx-1)
-
-    def move_display_down(self):
-        """Move selected display down in active list."""
-        selection = self.active_listbox.curselection()
-        if not selection or selection[0] == len(self.active_displays) - 1:
-            return
-
-        idx = selection[0]
-        self.active_displays[idx], self.active_displays[idx+1] = \
-            self.active_displays[idx+1], self.active_displays[idx]
-        self.update_display_lists()
-        self.active_listbox.selection_set(idx+1)
-
-    def on_listbox_hover(self, event, listbox, display_list):
-        """Show preview window when hovering over a display in the listbox."""
-        # Get the item under cursor
-        index = listbox.nearest(event.y)
-        if index < 0 or index >= len(display_list):
-            self.hide_display_preview()
-            return
-
-        display = display_list[index]
-        display_index = display['index']
-
-        # Only show if hovering over a different display
-        if self.preview_display_index == display_index:
-            return
-
-        # Cancel any pending timer
-        if self.preview_timer:
-            self.root.after_cancel(self.preview_timer)
-
-        # Show preview after short delay (500ms)
-        self.preview_timer = self.root.after(500,
-            lambda: self.show_display_preview(display))
-
-    def show_display_preview(self, display):
-        """Show a preview window on the specified display."""
-        # Close existing preview
-        self.hide_display_preview()
-
-        # Create a new top-level window
-        self.preview_window = tk.Toplevel(self.root)
-        self.preview_window.attributes('-topmost', True)
-        self.preview_window.overrideredirect(True)  # No window decorations
-
-        # Get display info
-        display_index = display['index']
-        display_name = display['name']
-        resolution = display['resolution']
-
-        # Try to position window on the target display
-        # Note: Tkinter doesn't have perfect multi-monitor support, so we approximate
         try:
-            # Use screeninfo to get monitor geometry if available
-            from screeninfo import get_monitors
-            monitors = get_monitors()
-            if display_index < len(monitors):
-                monitor = monitors[display_index]
-                x = monitor.x + (monitor.width // 2) - 200
-                y = monitor.y + (monitor.height // 2) - 75
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+
+            if 'displays' not in config:
+                self.log_to_widget_direct(self.video_scene_displays_text,
+                                         "No display configuration found. Please configure in Hardware tab.")
+                self.log_to_widget_direct(self.video_composite_text, "Not configured")
+                return
+
+            displays_config = config['displays']
+
+            # Show scene displays
+            scene_text = ""
+            if 'scene_displays' in displays_config:
+                for disp in displays_config['scene_displays']:
+                    if disp.get('enabled'):
+                        scene_text += f"  {disp['letter']}: Display {disp['physical_display']} - {disp['device_name']}\n"
+
+            if not scene_text:
+                scene_text = "  No scene displays configured"
+
+            self.log_to_widget_direct(self.video_scene_displays_text, scene_text)
+
+            # Show composite display
+            composite_text = ""
+            if 'composite_display' in displays_config:
+                comp = displays_config['composite_display']
+                if comp.get('enabled'):
+                    composite_text = f"  Z: Display {comp['physical_display']} - {comp['device_name']}\n"
+                    composite_text += f"  Blend Mode: {comp['blend_mode']}\n"
+                    composite_text += f"  Sources: {', '.join(comp.get('blend_sources', []))}"
+                else:
+                    composite_text = "  Disabled"
             else:
-                # Fallback: just center on main display
-                x = 300
-                y = 300
-        except:
-            # If screeninfo not available, estimate based on display index
-            x = display_index * 1920 + 600  # Assume displays are side-by-side
-            y = 400
+                composite_text = "  Not configured"
 
-        # Position and size the window
-        self.preview_window.geometry(f"400x150+{x}+{y}")
+            self.log_to_widget_direct(self.video_composite_text, composite_text)
 
-        # Set background
-        self.preview_window.configure(bg='#2c3e50')
+        except Exception as e:
+            self.log_to_widget_direct(self.video_scene_displays_text,
+                                     f"Error loading config: {e}")
+            self.log_to_widget_direct(self.video_composite_text, "Error")
 
-        # Add display info
-        frame = tk.Frame(self.preview_window, bg='#2c3e50', padx=30, pady=30)
-        frame.pack(fill='both', expand=True)
-
-        # Display number (large)
-        tk.Label(frame,
-                text=f"Display {display_index}",
-                font=('Arial', 32, 'bold'),
-                bg='#2c3e50',
-                fg='#ecf0f1').pack()
-
-        # Display name
-        tk.Label(frame,
-                text=display_name,
-                font=('Arial', 16),
-                bg='#2c3e50',
-                fg='#95a5a6').pack(pady=(10, 0))
-
-        # Resolution
-        tk.Label(frame,
-                text=f"{resolution[0]} × {resolution[1]}",
-                font=('Arial', 12),
-                bg='#2c3e50',
-                fg='#7f8c8d').pack()
-
-        self.preview_display_index = display_index
-
-    def hide_display_preview(self, event=None):
-        """Hide the display preview window."""
-        # Cancel any pending timer
-        if self.preview_timer:
-            self.root.after_cancel(self.preview_timer)
-            self.preview_timer = None
-
-        # Close preview window
-        if self.preview_window:
-            try:
-                self.preview_window.destroy()
-            except:
-                pass
-            self.preview_window = None
-            self.preview_display_index = None
+    def log_to_widget_direct(self, widget, message: str):
+        """Write directly to a text widget (for display config)."""
+        widget.config(state='normal')
+        widget.delete(1.0, tk.END)
+        widget.insert(tk.END, message)
+        widget.config(state='disabled')
 
     def start_video(self):
         """Start Processing video system."""
         if self.video_running:
             return
 
-        if not self.active_displays:
-            self.log_to_widget(self.video_log, "✗ No active displays selected")
-            messagebox.showwarning("No Displays", "Please add at least one display to the Active list.")
-            return
-
-        # Get display indices in order
-        display_indices = [d['index'] for d in self.active_displays]
-
         self.log_to_widget(self.video_log, "Starting Processing video system...")
-        self.log_to_widget(self.video_log, f"  Active displays: {display_indices}")
+        self.log_to_widget(self.video_log, "  (Reading display config from video_config.json)")
         self.log_to_widget(self.video_log, f"  Keyboard enabled: {self.video_keyboard_var.get()}")
 
         def start_thread():
+            # Processing now reads display config from video_config.json
             success = self.core.start_processing(
-                displays=display_indices,
+                displays=None,  # Not used anymore - Processing reads from config
                 enable_keyboard=self.video_keyboard_var.get()
             )
 
@@ -625,6 +470,17 @@ class CarpetHotelGUI:
         ttk.Button(header_frame, text="↻ Refresh Ports",
                   command=self.refresh_serial_ports, width=15).pack(side='right', padx=5)
 
+        # Info box
+        info_frame = ttk.LabelFrame(tab, text="ℹ System Overview", padding=10)
+        info_frame.pack(fill='x', padx=20, pady=5)
+
+        info_text = """Elevator Controls: Simple press UP or DOWN button = move 1 scene in that direction
+Displays: Configure scene displays (A-G) and optional composite (Z) below
+Arduino: Auto-detected on first connection attempt"""
+
+        ttk.Label(info_frame, text=info_text, foreground='#555',
+                 font=('Arial', 9), justify='left').pack(anchor='w')
+
         # Status
         status_frame = ttk.LabelFrame(tab, text="Status", padding=10)
         status_frame.pack(fill='x', padx=20, pady=5)
@@ -646,6 +502,63 @@ class CarpetHotelGUI:
                                                  width=20, state='disabled')
         self.hardware_disconnect_btn.pack(side='left', padx=5)
 
+        # Display Configuration
+        display_frame = ttk.LabelFrame(tab, text="Display Configuration", padding=10)
+        display_frame.pack(fill='x', padx=20, pady=10)
+
+        # Refresh displays button
+        refresh_frame = ttk.Frame(display_frame)
+        refresh_frame.pack(fill='x', pady=5)
+        ttk.Button(refresh_frame, text="🔄 Detect Displays",
+                  command=self.refresh_displays_hardware, width=20).pack(side='left', padx=5)
+        ttk.Label(refresh_frame, text="Available displays will appear below",
+                 foreground='gray').pack(side='left', padx=10)
+
+        # Display list container
+        self.display_list_frame = ttk.Frame(display_frame)
+        self.display_list_frame.pack(fill='both', expand=True, pady=5)
+
+        # Display rows will be added here dynamically
+        self.display_rows = []
+
+        # Auto-detect displays on startup
+        self.root.after(100, self.refresh_displays_hardware)
+        self.root.after(200, self.load_display_config_to_gui)
+
+        # Composite display section
+        composite_frame = ttk.LabelFrame(display_frame, text="Composite Display (Z)", padding=10)
+        composite_frame.pack(fill='x', pady=10)
+
+        comp_row1 = ttk.Frame(composite_frame)
+        comp_row1.pack(fill='x', pady=5)
+
+        self.composite_enabled_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(comp_row1, text="Enable Z Display",
+                       variable=self.composite_enabled_var,
+                       command=self.update_composite_state).pack(side='left', padx=5)
+
+        ttk.Label(comp_row1, text="Physical Display:", width=15).pack(side='left', padx=10)
+        self.composite_display_var = tk.StringVar(value="")
+        self.composite_display_dropdown = ttk.Combobox(comp_row1,
+                                                      textvariable=self.composite_display_var,
+                                                      state='disabled', width=25)
+        self.composite_display_dropdown.pack(side='left', padx=5)
+
+        comp_row2 = ttk.Frame(composite_frame)
+        comp_row2.pack(fill='x', pady=5)
+
+        ttk.Label(comp_row2, text="Blend Mode:", width=15).pack(side='left', padx=5)
+        self.composite_blend_var = tk.StringVar(value="multiply")
+        blend_modes = ['multiply', 'add', 'subtract', 'screen', 'lightest', 'darkest', 'difference', 'exclusion']
+        self.composite_blend_dropdown = ttk.Combobox(comp_row2,
+                                                     textvariable=self.composite_blend_var,
+                                                     values=blend_modes,
+                                                     state='disabled', width=25)
+        self.composite_blend_dropdown.pack(side='left', padx=5)
+
+        ttk.Button(comp_row2, text="💾 Save Display Config",
+                  command=self.save_display_config, width=20).pack(side='right', padx=5)
+
         # Serial port configuration
         config_frame = ttk.LabelFrame(tab, text="Serial Port Configuration", padding=10)
         config_frame.pack(fill='x', padx=20, pady=10)
@@ -654,7 +567,7 @@ class CarpetHotelGUI:
         port_frame.pack(fill='x', pady=5)
 
         ttk.Label(port_frame, text="Serial Port:", width=15).pack(side='left', padx=5)
-        self.serial_port_var = tk.StringVar(value="")
+        self.serial_port_var = tk.StringVar(value="Auto-detect")
         self.serial_port_dropdown = ttk.Combobox(port_frame,
                                                 textvariable=self.serial_port_var,
                                                 state='readonly', width=40)
@@ -703,7 +616,7 @@ class CarpetHotelGUI:
     def refresh_serial_ports(self):
         """Refresh serial port detection."""
         ports = detect_serial_ports()
-        port_labels = []
+        port_labels = ["Auto-detect"]  # Add auto-detect as first option
 
         for port in ports:
             label = f"{port['device']}"
@@ -714,13 +627,280 @@ class CarpetHotelGUI:
 
         self.serial_port_dropdown['values'] = port_labels
 
-        # Auto-select first Arduino port if found
-        for i, label in enumerate(port_labels):
-            if "[Arduino]" in label:
-                self.serial_port_var.set(label)
-                break
+        # Default to Auto-detect if not already set
+        if not self.serial_port_var.get() or self.serial_port_var.get() == "Auto-detect":
+            self.serial_port_var.set("Auto-detect")
 
-        self.log_to_widget(self.hardware_log, f"Found {len(ports)} serial ports")
+        self.log_to_widget(self.hardware_log, f"Found {len(ports)} serial ports (+ Auto-detect option)")
+
+    def refresh_displays_hardware(self):
+        """Detect and display all connected displays in Hardware tab."""
+        from components.utils.utils import detect_displays
+
+        displays = detect_displays()
+
+        # Clear existing display rows
+        for row in self.display_rows:
+            row.destroy()
+        self.display_rows = []
+
+        if not displays:
+            no_displays_label = ttk.Label(self.display_list_frame,
+                                         text="No displays detected",
+                                         foreground='red')
+            no_displays_label.pack(pady=10)
+            self.display_rows.append(no_displays_label)
+            return
+
+        # Create header row
+        header = ttk.Frame(self.display_list_frame)
+        header.pack(fill='x', pady=5)
+        ttk.Label(header, text="Enable", width=8, font=('Arial', 9, 'bold')).pack(side='left', padx=5)
+        ttk.Label(header, text="Letter", width=8, font=('Arial', 9, 'bold')).pack(side='left', padx=5)
+        ttk.Label(header, text="Physical #", width=10, font=('Arial', 9, 'bold')).pack(side='left', padx=5)
+        ttk.Label(header, text="Device Name", width=40, font=('Arial', 9, 'bold')).pack(side='left', padx=5)
+        ttk.Label(header, text="Resolution", width=15, font=('Arial', 9, 'bold')).pack(side='left', padx=5)
+        self.display_rows.append(header)
+
+        # Create row for each display
+        self.display_vars = []
+        for display in displays:
+            row_frame = ttk.Frame(self.display_list_frame)
+            row_frame.pack(fill='x', pady=2)
+
+            # Enabled checkbox
+            enabled_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(row_frame, variable=enabled_var).pack(side='left', padx=5)
+
+            # Letter dropdown (A-G)
+            letter_var = tk.StringVar(value="")
+            letter_combo = ttk.Combobox(row_frame, textvariable=letter_var,
+                                       values=['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+                                       state='readonly', width=5)
+            letter_combo.pack(side='left', padx=5)
+
+            # Physical display number
+            phys_label = ttk.Label(row_frame, text=str(display['index'] + 1), width=10)
+            phys_label.pack(side='left', padx=5)
+
+            # Device name
+            device_name = display['name']
+            device_label = ttk.Label(row_frame, text=device_name, width=40)
+            device_label.pack(side='left', padx=5)
+
+            # Resolution
+            res_text = f"{display['resolution'][0]}×{display['resolution'][1]}"
+            res_label = ttk.Label(row_frame, text=res_text, width=15)
+            res_label.pack(side='left', padx=5)
+
+            # Test button
+            test_btn = ttk.Button(row_frame, text="Test",
+                                 command=lambda idx=display['index']: self.test_display(idx),
+                                 width=8)
+            test_btn.pack(side='left', padx=5)
+
+            self.display_rows.append(row_frame)
+            self.display_vars.append({
+                'index': display['index'],
+                'name': device_name,
+                'enabled': enabled_var,
+                'letter': letter_var,
+                'resolution': display['resolution']
+            })
+
+        # Update composite display dropdown
+        display_options = [f"{i+1}: {d['name']}" for i, d in enumerate(displays)]
+        self.composite_display_dropdown['values'] = display_options
+
+        self.log_to_widget(self.hardware_log, f"✓ Detected {len(displays)} displays")
+
+    def update_composite_state(self):
+        """Enable/disable composite display controls."""
+        state = 'readonly' if self.composite_enabled_var.get() else 'disabled'
+        self.composite_display_dropdown.config(state=state)
+        self.composite_blend_dropdown.config(state=state)
+
+    def test_display(self, display_index):
+        """Show a test pattern on the specified display."""
+        try:
+            # Get display info
+            from screeninfo import get_monitors
+            monitors = get_monitors()
+
+            if display_index >= len(monitors):
+                import tkinter.messagebox as msgbox
+                msgbox.showerror("Error", f"Display {display_index + 1} not found!")
+                return
+
+            monitor = monitors[display_index]
+
+            # Create fullscreen test window
+            test_window = tk.Toplevel(self.root)
+            test_window.attributes('-fullscreen', True)
+            test_window.attributes('-topmost', True)
+            test_window.configure(bg='#2c3e50')
+
+            # Position on target display
+            test_window.geometry(f"{monitor.width}x{monitor.height}+{monitor.x}+{monitor.y}")
+
+            # Add display info
+            frame = tk.Frame(test_window, bg='#2c3e50')
+            frame.place(relx=0.5, rely=0.5, anchor='center')
+
+            # Display number (large)
+            tk.Label(frame,
+                    text=f"Display {display_index + 1}",
+                    font=('Arial', 72, 'bold'),
+                    bg='#2c3e50',
+                    fg='#ecf0f1').pack(pady=20)
+
+            # Display name
+            tk.Label(frame,
+                    text=monitor.name if hasattr(monitor, 'name') else f"Monitor {display_index + 1}",
+                    font=('Arial', 32),
+                    bg='#2c3e50',
+                    fg='#95a5a6').pack(pady=10)
+
+            # Resolution
+            tk.Label(frame,
+                    text=f"{monitor.width} × {monitor.height}",
+                    font=('Arial', 24),
+                    bg='#2c3e50',
+                    fg='#7f8c8d').pack(pady=10)
+
+            # Instructions
+            tk.Label(frame,
+                    text="Press ESC or click to close",
+                    font=('Arial', 16),
+                    bg='#2c3e50',
+                    fg='#95a5a6').pack(pady=30)
+
+            # Close on ESC or click
+            test_window.bind('<Escape>', lambda e: test_window.destroy())
+            test_window.bind('<Button-1>', lambda e: test_window.destroy())
+
+            # Auto-close after 5 seconds
+            test_window.after(5000, test_window.destroy)
+
+            self.log_to_widget(self.hardware_log, f"✓ Test window shown on display {display_index + 1}")
+
+        except Exception as e:
+            import tkinter.messagebox as msgbox
+            msgbox.showerror("Error", f"Failed to test display:\n{e}")
+
+    def load_display_config_to_gui(self):
+        """Load saved display configuration into GUI."""
+        import json
+
+        config_path = CONFIGS_DIR / "video_config.json"
+
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+
+            if 'displays' not in config:
+                return
+
+            displays_config = config['displays']
+
+            # Load scene displays
+            if 'scene_displays' in displays_config:
+                for scene_disp in displays_config['scene_displays']:
+                    if scene_disp.get('enabled'):
+                        letter = scene_disp['letter']
+                        phys_idx = scene_disp['physical_display'] - 1  # Convert to 0-indexed
+
+                        # Find matching display var
+                        for var_dict in self.display_vars:
+                            if var_dict['index'] == phys_idx:
+                                var_dict['enabled'].set(True)
+                                var_dict['letter'].set(letter)
+                                break
+
+            # Load composite display
+            if 'composite_display' in displays_config:
+                comp = displays_config['composite_display']
+                if comp.get('enabled'):
+                    self.composite_enabled_var.set(True)
+                    if comp.get('physical_display'):
+                        # Find matching display in dropdown
+                        phys_num = comp['physical_display']
+                        for option in self.composite_display_dropdown['values']:
+                            if option.startswith(f"{phys_num}:"):
+                                self.composite_display_var.set(option)
+                                break
+                    self.composite_blend_var.set(comp.get('blend_mode', 'multiply'))
+                    self.update_composite_state()
+
+        except Exception as e:
+            # Config doesn't exist or is invalid - not an error, just means first run
+            pass
+
+    def save_display_config(self):
+        """Save display configuration to video_config.json."""
+        import json
+
+        config_path = CONFIGS_DIR / "video_config.json"
+
+        try:
+            # Load existing config
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+
+            # Build scene displays array
+            scene_displays = []
+            for var_dict in self.display_vars:
+                if var_dict['enabled'].get() and var_dict['letter'].get():
+                    scene_displays.append({
+                        "letter": var_dict['letter'].get(),
+                        "physical_display": var_dict['index'] + 1,  # 1-indexed for Processing
+                        "device_name": var_dict['name'],
+                        "enabled": True
+                    })
+
+            # Sort by letter
+            scene_displays.sort(key=lambda x: x['letter'])
+
+            # Build composite display config
+            composite_config = {
+                "letter": "Z",
+                "physical_display": None,
+                "device_name": "",
+                "enabled": False,
+                "blend_mode": self.composite_blend_var.get(),
+                "blend_sources": ["A", "B"]
+            }
+
+            if self.composite_enabled_var.get():
+                comp_display_text = self.composite_display_var.get()
+                if comp_display_text:
+                    # Extract display index from "1: Display Name" format
+                    comp_idx = int(comp_display_text.split(':')[0])
+                    composite_config['physical_display'] = comp_idx
+                    composite_config['device_name'] = comp_display_text.split(': ', 1)[1]
+                    composite_config['enabled'] = True
+
+                    # Update blend sources based on enabled scene displays
+                    composite_config['blend_sources'] = [d['letter'] for d in scene_displays]
+
+            # Update config
+            config['displays'] = {
+                'scene_displays': scene_displays,
+                'composite_display': composite_config
+            }
+
+            # Save config
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+
+            self.log_to_widget(self.hardware_log, "✓ Display configuration saved")
+            import tkinter.messagebox as msgbox
+            msgbox.showinfo("Success", "Display configuration saved!\n\nRestart Processing to apply changes.")
+
+        except Exception as e:
+            self.log_to_widget(self.hardware_log, f"✗ Failed to save config: {e}")
+            import tkinter.messagebox as msgbox
+            msgbox.showerror("Error", f"Failed to save configuration:\n{e}")
 
     def connect_hardware(self):
         """Connect to Arduino."""
@@ -732,10 +912,15 @@ class CarpetHotelGUI:
             self.log_to_widget(self.hardware_log, "✗ Please select a serial port")
             return
 
-        # Extract just the device path
-        port = port.split()[0]
+        # Handle auto-detect
+        if port == "Auto-detect":
+            self.log_to_widget(self.hardware_log, "Auto-detecting Arduino...")
+            port = "auto"  # Signal to use auto-detection
+        else:
+            # Extract just the device path
+            port = port.split()[0]
 
-        self.log_to_widget(self.hardware_log, "Connecting to Arduino...")
+        self.log_to_widget(self.hardware_log, f"Connecting to Arduino... ({port})")
 
         def connect_thread():
             success = self.core.start_arduino(port)
@@ -1463,19 +1648,8 @@ class CarpetHotelGUI:
         self.video_keyboard_var.set(enable_keyboard)
 
         # Apply saved display lists
-        saved_active = self.settings.get("active_displays", DEFAULT_SETTINGS["active_displays"])
-        saved_inactive = self.settings.get("inactive_displays", DEFAULT_SETTINGS["inactive_displays"])
-
-        # Only restore if we have saved displays
-        if saved_active or saved_inactive:
-            self.active_displays = saved_active
-            self.inactive_displays = saved_inactive
-            self.update_display_lists()
-
-            if saved_active:
-                self.core.num_displays = len(saved_active)
-                # Update scene dropdown based on displays
-                self.root.after(100, self.update_scene_dropdown)
+        # Display configuration now managed via video_config.json in Hardware tab
+        # Old active/inactive display settings are no longer used
 
         # Apply saved window geometry
         window_x = self.settings.get("window_x")
@@ -1488,7 +1662,7 @@ class CarpetHotelGUI:
         else:
             self.root.geometry(f"{window_width}x{window_height}")
 
-        print(f"✓ Settings loaded: volume={int(volume*100)}%, active_displays={len(saved_active)}, keyboard={enable_keyboard}")
+        print(f"✓ Settings loaded: volume={int(volume*100)}%, keyboard={enable_keyboard}")
 
     def save_settings(self):
         """Save current GUI settings."""
@@ -1508,8 +1682,7 @@ class CarpetHotelGUI:
             "master_volume": self.volume_var.get(),
 
             # Video settings
-            "active_displays": self.active_displays,
-            "inactive_displays": self.inactive_displays,
+            # Display configuration now managed via video_config.json
             "enable_keyboard": self.video_keyboard_var.get(),
 
             # Hardware settings
@@ -1522,7 +1695,7 @@ class CarpetHotelGUI:
             "window_y": y,
         })
         self.settings.save()
-        print(f"✓ Settings saved: {len(self.active_displays)} active displays, keyboard={self.video_keyboard_var.get()}")
+        print(f"✓ Settings saved (displays configured via video_config.json)")
 
     def run(self):
         """Run the GUI main loop."""

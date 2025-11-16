@@ -110,8 +110,7 @@ DEFAULT_SETTINGS = {
     "master_volume": 0.7,
 
     # Video settings
-    "active_displays": [],  # List of active display dicts
-    "inactive_displays": [],  # List of inactive display dicts
+    # Display configuration now managed via video_config.json
     "enable_keyboard": True,
 
     # Hardware settings
