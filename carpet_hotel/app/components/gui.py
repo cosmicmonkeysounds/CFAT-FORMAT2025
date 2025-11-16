@@ -538,12 +538,14 @@ Arduino: Auto-detected on first connection attempt"""
         comp_row1.pack(fill='x', pady=5)
 
         self.composite_enabled_var = tk.BooleanVar(value=False)
+        self.composite_enabled_var.trace('w', lambda *args: self.auto_save_display_config())
         ttk.Checkbutton(comp_row1, text="Enable Z Display",
                        variable=self.composite_enabled_var,
                        command=self.update_composite_state).pack(side='left', padx=5)
 
         ttk.Label(comp_row1, text="Physical Display:", width=15).pack(side='left', padx=10)
         self.composite_display_var = tk.StringVar(value="")
+        self.composite_display_var.trace('w', lambda *args: self.auto_save_display_config())
         self.composite_display_dropdown = ttk.Combobox(comp_row1,
                                                       textvariable=self.composite_display_var,
                                                       state='disabled', width=25)
@@ -554,6 +556,7 @@ Arduino: Auto-detected on first connection attempt"""
 
         ttk.Label(comp_row2, text="Blend Mode:", width=15).pack(side='left', padx=5)
         self.composite_blend_var = tk.StringVar(value="multiply")
+        self.composite_blend_var.trace('w', lambda *args: self.auto_save_display_config())
         blend_modes = ['multiply', 'add', 'subtract', 'screen', 'lightest', 'darkest', 'difference', 'exclusion']
         self.composite_blend_dropdown = ttk.Combobox(comp_row2,
                                                      textvariable=self.composite_blend_var,
@@ -573,6 +576,7 @@ Arduino: Auto-detected on first connection attempt"""
 
         ttk.Label(port_frame, text="Serial Port:", width=15).pack(side='left', padx=5)
         self.serial_port_var = tk.StringVar(value="Auto-detect")
+        self.serial_port_var.trace('w', lambda *args: self.save_arduino_port())
         self.serial_port_dropdown = ttk.Combobox(port_frame,
                                                 textvariable=self.serial_port_var,
                                                 state='readonly', width=40)
@@ -632,8 +636,14 @@ Arduino: Auto-detected on first connection attempt"""
 
         self.serial_port_dropdown['values'] = port_labels
 
-        # Default to Auto-detect if not already set
-        if not self.serial_port_var.get() or self.serial_port_var.get() == "Auto-detect":
+        # Restore saved port from settings
+        saved_port = self.settings.get('serial_port', "Auto-detect")
+        if saved_port and saved_port in port_labels:
+            self.serial_port_var.set(saved_port)
+        elif saved_port == "Auto-detect":
+            self.serial_port_var.set("Auto-detect")
+        else:
+            # Saved port not available, default to Auto-detect
             self.serial_port_var.set("Auto-detect")
 
         self.log_to_widget(self.hardware_log, f"Found {len(ports)} serial ports (+ Auto-detect option)")
@@ -675,10 +685,12 @@ Arduino: Auto-detected on first connection attempt"""
 
             # Enabled checkbox
             enabled_var = tk.BooleanVar(value=False)
+            enabled_var.trace('w', lambda *args: self.auto_save_display_config())
             ttk.Checkbutton(row_frame, variable=enabled_var).pack(side='left', padx=5)
 
             # Letter dropdown (A-G)
             letter_var = tk.StringVar(value="")
+            letter_var.trace('w', lambda *args: self.auto_save_display_config())
             letter_combo = ttk.Combobox(row_frame, textvariable=letter_var,
                                        values=['A', 'B', 'C', 'D', 'E', 'F', 'G'],
                                        state='readonly', width=5)
@@ -841,7 +853,25 @@ Arduino: Auto-detected on first connection attempt"""
             # Config doesn't exist or is invalid - not an error, just means first run
             pass
 
-    def save_display_config(self):
+    def auto_save_display_config(self):
+        """Auto-save display configuration (debounced)."""
+        # Cancel any pending auto-save
+        if hasattr(self, '_auto_save_timer'):
+            self.root.after_cancel(self._auto_save_timer)
+
+        # Schedule save after 500ms delay (debounce)
+        self._auto_save_timer = self.root.after(500, self._do_auto_save)
+
+    def _do_auto_save(self):
+        """Actually perform the auto-save."""
+        if not hasattr(self, 'display_vars') or not self.display_vars:
+            return  # Not yet initialized
+
+        self.save_display_config(silent=True)
+        # Also refresh the video config display
+        self.refresh_video_display_config()
+
+    def save_display_config(self, silent=False):
         """Save display configuration to video_config.json."""
         import json
 
@@ -898,14 +928,22 @@ Arduino: Auto-detected on first connection attempt"""
             with open(config_path, 'w') as f:
                 json.dump(config, f, indent=2)
 
-            self.log_to_widget(self.hardware_log, "✓ Display configuration saved")
-            import tkinter.messagebox as msgbox
-            msgbox.showinfo("Success", "Display configuration saved!\n\nRestart Processing to apply changes.")
+            if not silent:
+                self.log_to_widget(self.hardware_log, "✓ Display configuration saved")
+                import tkinter.messagebox as msgbox
+                msgbox.showinfo("Success", "Display configuration saved!\n\nRestart Processing to apply changes.")
 
         except Exception as e:
-            self.log_to_widget(self.hardware_log, f"✗ Failed to save config: {e}")
-            import tkinter.messagebox as msgbox
-            msgbox.showerror("Error", f"Failed to save configuration:\n{e}")
+            if not silent:
+                self.log_to_widget(self.hardware_log, f"✗ Failed to save config: {e}")
+                import tkinter.messagebox as msgbox
+                msgbox.showerror("Error", f"Failed to save configuration:\n{e}")
+
+    def save_arduino_port(self):
+        """Save the selected Arduino port to settings."""
+        port = self.serial_port_var.get()
+        self.settings.set('serial_port', port)
+        self.settings.save()
 
     def connect_hardware(self):
         """Connect to Arduino."""

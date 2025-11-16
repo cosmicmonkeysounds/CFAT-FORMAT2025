@@ -1022,6 +1022,30 @@ class FloorWindow extends PApplet {
   public void setup() {
     background(0);
     surface.setTitle("Carpet Hotel - Scene " + displayLetter);
+
+    // Force window to correct display using Java AWT
+    // (macOS doesn't always respect fullScreen display parameter)
+    try {
+      GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+      GraphicsDevice[] gs = ge.getScreenDevices();
+
+      // displayNum is 1-based, convert to 0-based for array
+      int deviceIndex = displayNum - 1;
+
+      if (deviceIndex >= 0 && deviceIndex < gs.length) {
+        GraphicsDevice gd = gs[deviceIndex];
+        java.awt.Rectangle bounds = gd.getDefaultConfiguration().getBounds();
+
+        // Move window to the display's position
+        surface.setLocation(bounds.x, bounds.y);
+        println("FloorWindow " + displayLetter + " positioned at (" + bounds.x + ", " + bounds.y + ") on display " + displayNum);
+      } else {
+        println("⚠ Warning: Display " + displayNum + " not found, using default");
+      }
+    } catch (Exception e) {
+      println("⚠ Could not position window: " + e.getMessage());
+    }
+
     println("FloorWindow " + displayLetter + " setup complete on display " + displayNum);
   }
 
@@ -1326,6 +1350,30 @@ class CompositeWindow extends PApplet {
   public void setup() {
     background(0);
     surface.setTitle("Carpet Hotel - Composite Z");
+
+    // Force window to correct display using Java AWT
+    // (macOS doesn't always respect fullScreen display parameter)
+    try {
+      GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+      GraphicsDevice[] gs = ge.getScreenDevices();
+
+      // COMPOSITE_DISPLAY_NUMBER is 1-based, convert to 0-based for array
+      int deviceIndex = COMPOSITE_DISPLAY_NUMBER - 1;
+
+      if (deviceIndex >= 0 && deviceIndex < gs.length) {
+        GraphicsDevice gd = gs[deviceIndex];
+        java.awt.Rectangle bounds = gd.getDefaultConfiguration().getBounds();
+
+        // Move window to the display's position
+        surface.setLocation(bounds.x, bounds.y);
+        println("CompositeWindow Z positioned at (" + bounds.x + ", " + bounds.y + ") on display " + COMPOSITE_DISPLAY_NUMBER);
+      } else {
+        println("⚠ Warning: Display " + COMPOSITE_DISPLAY_NUMBER + " not found, using default");
+      }
+    } catch (Exception e) {
+      println("⚠ Could not position composite window: " + e.getMessage());
+    }
+
     println("CompositeWindow setup complete on display " + COMPOSITE_DISPLAY_NUMBER);
 
     // Create offscreen buffers for each scene window
