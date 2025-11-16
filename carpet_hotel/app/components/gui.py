@@ -49,7 +49,17 @@ class CarpetHotelGUI:
         """Initialize the GUI."""
         self.root = tk.Tk()
         self.root.title("Carpet Hotel - Control Panel")
-        self.root.geometry("1000x900")
+        self.root.geometry("1200x1000")
+
+        # Configure default font sizes (larger)
+        default_font = ('Arial', 12)
+        header_font = ('Arial', 18, 'bold')
+        button_font = ('Arial', 14)
+
+        self.root.option_add('*TButton*Font', button_font)
+        self.root.option_add('*TLabel*Font', default_font)
+        self.root.option_add('*TEntry*Font', default_font)
+        self.root.option_add('*TCombobox*Font', default_font)
 
         # Core instance
         self.core = CarpetHotelCore()
@@ -83,9 +93,38 @@ class CarpetHotelGUI:
 
     def create_gui(self):
         """Create all GUI elements."""
-        # Create notebook for tabs
-        notebook = ttk.Notebook(self.root)
-        notebook.pack(fill='both', expand=True, padx=10, pady=(10, 5))
+        # Create sticky header with START/STOP ALL at top
+        self.create_sticky_header()
+
+        # Create main container frame with scrollbar
+        main_container = ttk.Frame(self.root)
+        main_container.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # Create canvas and scrollbar for scrollable content
+        canvas = tk.Canvas(main_container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Pack scrollbar and canvas
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Create notebook for tabs inside scrollable area
+        notebook = ttk.Notebook(scrollable_frame)
+        notebook.pack(fill='both', expand=True, padx=5, pady=5)
 
         # Create tabs
         self.create_video_tab(notebook)
@@ -93,9 +132,6 @@ class CarpetHotelGUI:
         self.create_hardware_tab(notebook)
         self.create_command_tab(notebook)
         self.create_video_config_tab(notebook)
-
-        # Global controls at bottom
-        self.create_global_controls()
 
     # ========================================================================
     # VIDEO TAB
@@ -1595,22 +1631,45 @@ Arduino: Auto-detected on first connection attempt"""
     # GLOBAL CONTROLS
     # ========================================================================
 
-    def create_global_controls(self):
-        """Create global control buttons at bottom."""
+    def create_sticky_header(self):
+        """Create sticky header with START/STOP ALL at top."""
+        # Header frame with background color
+        header_frame = tk.Frame(self.root, bg='#2c3e50', height=80)
+        header_frame.pack(fill='x', side='top')
+        header_frame.pack_propagate(False)  # Prevent frame from shrinking
+
+        # Title
+        title_label = tk.Label(header_frame, text="CARPET HOTEL CONTROL",
+                              font=('Arial', 22, 'bold'), bg='#2c3e50', fg='white')
+        title_label.pack(side='left', padx=30, pady=20)
+
+        # Button frame
+        button_frame = tk.Frame(header_frame, bg='#2c3e50')
+        button_frame.pack(side='right', padx=30, pady=15)
+
+        # START ALL button (green background)
+        self.start_all_btn = tk.Button(button_frame, text="▶ START ALL",
+                                       command=self.start_all,
+                                       font=('Arial', 16, 'bold'),
+                                       bg='#27ae60', fg='white',
+                                       activebackground='#229954',
+                                       width=15, height=2,
+                                       relief='raised', bd=3)
+        self.start_all_btn.pack(side='left', padx=10)
+
+        # STOP ALL button (red background)
+        self.stop_all_btn = tk.Button(button_frame, text="■ STOP ALL",
+                                      command=self.stop_all,
+                                      font=('Arial', 16, 'bold'),
+                                      bg='#e74c3c', fg='white',
+                                      activebackground='#c0392b',
+                                      width=15, height=2,
+                                      relief='raised', bd=3)
+        self.stop_all_btn.pack(side='left', padx=10)
+
+        # Separator line
         separator = ttk.Separator(self.root, orient='horizontal')
-        separator.pack(fill='x', padx=10, pady=5)
-
-        global_frame = ttk.Frame(self.root)
-        global_frame.pack(fill='x', padx=20, pady=10)
-
-        ttk.Label(global_frame, text="Global Control:",
-                 font=('Arial', 14, 'bold')).pack(side='left', padx=10)
-
-        ttk.Button(global_frame, text="▶ START ALL",
-                  command=self.start_all, width=20).pack(side='left', padx=5)
-
-        ttk.Button(global_frame, text="■ STOP ALL",
-                  command=self.stop_all, width=20).pack(side='left', padx=5)
+        separator.pack(fill='x')
 
     def start_all(self):
         """Start all systems."""

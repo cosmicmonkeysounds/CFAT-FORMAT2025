@@ -193,12 +193,13 @@ class CarpetHotelArduino:
 
             # OSC server to receive LED control messages
             dispatcher = Dispatcher()
-            dispatcher.map("/carpet/elevator/led/red", self.handle_led_red)
+            # Swapped: red OSC → green LED, green OSC → red LED
+            dispatcher.map("/carpet/elevator/led/red", self.handle_led_green)
             dispatcher.map("/carpet/elevator/led/yellow", self.handle_led_yellow)
-            dispatcher.map("/carpet/elevator/led/green", self.handle_led_green)
-            dispatcher.map("/carpet/led/red", self.handle_led_red)
+            dispatcher.map("/carpet/elevator/led/green", self.handle_led_red)
+            dispatcher.map("/carpet/led/red", self.handle_led_green)
             dispatcher.map("/carpet/led/yellow", self.handle_led_yellow)
-            dispatcher.map("/carpet/led/green", self.handle_led_green)
+            dispatcher.map("/carpet/led/green", self.handle_led_red)
 
             self.osc_server = ThreadingOSCUDPServer(
                 ("127.0.0.1", self.osc_recv_port), dispatcher
