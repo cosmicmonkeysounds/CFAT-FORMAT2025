@@ -1063,7 +1063,9 @@ class FloorWindow extends PApplet {
       renderAnimatedTransition();
     } else {
       // Normal rendering - just show current video
-      int videoIdx = displayScene + windowIndex;
+      // Reverse windowIndex so Display A shows higher floor, Display B shows lower
+      int reversedIndex = (SCENE_DISPLAY_NUMBERS.length - 1) - windowIndex;
+      int videoIdx = displayScene + reversedIndex;
       renderVideo(videoIdx, 0, 0);
     }
 
@@ -1094,9 +1096,12 @@ class FloorWindow extends PApplet {
     // Render multiple videos to ensure smooth scrolling through all intermediate floors
     // We need to render all videos that might be visible in the viewport
     // Render from 2 videos before to 2 videos after to avoid gaps
+    // Reverse windowIndex so Display A shows higher floor, Display B shows lower
+    int reversedIndex = (SCENE_DISPLAY_NUMBERS.length - 1) - windowIndex;
+
     for (int floorOffset = -2; floorOffset <= 2; floorOffset++) {
       int floor = currentFloor + floorOffset * sceneDirection;
-      int videoIdx = floor + windowIndex;
+      int videoIdx = floor + reversedIndex;
 
       // Calculate Y position for this floor
       // Stack floors vertically, offsetting by scroll position
