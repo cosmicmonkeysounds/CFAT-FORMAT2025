@@ -352,6 +352,23 @@ class CarpetHotelGUI:
                                                   state='readonly', width=40)
         self.audio_device_dropdown.pack(side='left', padx=5)
 
+        # Audio output bus selection
+        bus_frame = ttk.Frame(config_frame)
+        bus_frame.pack(fill='x', pady=5)
+
+        ttk.Label(bus_frame, text="Output Bus:", width=15).pack(side='left', padx=5)
+        self.audio_bus_var = tk.IntVar(value=0)
+        self.audio_bus_dropdown = ttk.Combobox(bus_frame,
+                                               textvariable=self.audio_bus_var,
+                                               state='readonly', width=40)
+        # Create bus options (0-15 is typical for most systems)
+        bus_options = [f"{i} - {'Stereo' if i % 2 == 0 else 'Mono'} Bus {i//2 + 1}" for i in range(16)]
+        bus_options[0] = "0 - Default (Main Output)"
+        self.audio_bus_dropdown['values'] = bus_options
+        self.audio_bus_dropdown.current(0)
+        self.audio_bus_dropdown.pack(side='left', padx=5)
+        self.audio_bus_dropdown.bind('<<ComboboxSelected>>', self.on_audio_bus_change)
+
         # Volume control
         volume_frame = ttk.Frame(config_frame)
         volume_frame.pack(fill='x', pady=5)
@@ -399,16 +416,34 @@ class CarpetHotelGUI:
             except Exception as e:
                 self.log_to_widget(self.audio_log, f"✗ Error setting volume: {e}")
 
+    def on_audio_bus_change(self, event=None):
+        """Handle audio bus change."""
+        bus = self.audio_bus_var.get()
+
+        # Save setting
+        self.settings.set("audio_output_bus", bus)
+        self.settings.save()
+
+        # Log the change
+        self.log_to_widget(self.audio_log, f"Output bus set to: {bus}")
+
+        # Note: SuperCollider will need to be restarted to apply bus changes
+        if self.audio_running:
+            self.log_to_widget(self.audio_log, "⚠ Restart audio to apply bus change")
+
     def start_audio(self):
         """Start SuperCollider audio system."""
         if self.audio_running:
             return
 
+        # Get the selected bus
+        output_bus = self.audio_bus_var.get()
+
         self.log_to_widget(self.audio_log, "Starting SuperCollider audio system...")
-        self.log_to_widget(self.audio_log, "(Using macOS system default audio device)")
+        self.log_to_widget(self.audio_log, f"(Output bus: {output_bus})")
 
         def start_thread():
-            success = self.core.start_supercollider()
+            success = self.core.start_supercollider(output_bus=output_bus)
 
             if success:
                 self.audio_running = True
@@ -1324,9 +1359,9 @@ Arduino: Auto-detected on first connection attempt"""
                 if value is not None:
                     var.set(value)
 
-            messagebox.showinfo("Config Loaded", "Video configuration reloaded from file")
+            print("✓ Video configuration reloaded from file")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to load config: {e}")
+            print(f"✗ Failed to load config: {e}")
 
     def save_video_config(self):
         """Save video config to JSON file."""
@@ -1379,17 +1414,17 @@ Arduino: Auto-detected on first connection attempt"""
             with open(config_path, 'w') as f:
                 json.dump(config, f, indent=2)
 
-            messagebox.showinfo("Config Saved", "Video configuration saved successfully.\nPress 'R' in Processing to reload.")
+            print("✓ Video configuration saved successfully")
+            print("  Press 'R' in Processing to reload")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save config: {e}")
+            print(f"✗ Failed to save config: {e}")
 
     def reset_video_config(self):
         """Reset video config to defaults."""
         import json
         from pathlib import Path
 
-        if not messagebox.askyesno("Reset Config", "Reset all video settings to defaults?"):
-            return
+        print("Resetting video configuration to defaults...")
 
         config_path = Path(__file__).parent.parent / "configs" / "video_config.json"
 
@@ -1440,9 +1475,10 @@ Arduino: Auto-detected on first connection attempt"""
             # Reload into GUI
             self.reload_video_config()
 
-            messagebox.showinfo("Config Reset", "Video configuration reset to defaults.\nPress 'R' in Processing to reload.")
+            print("✓ Video configuration reset to defaults")
+            print("  Press 'R' in Processing to reload")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to reset config: {e}")
+            print(f"✗ Failed to reset config: {e}")
 
     def send_osc_command(self, address: str, args: list):
         """Send OSC command to the system."""
@@ -1680,6 +1716,10 @@ Arduino: Auto-detected on first connection attempt"""
         audio_device = self.settings.get("audio_device", DEFAULT_SETTINGS["audio_device"])
         if audio_device:
             self.audio_device_var.set(audio_device)
+
+        # Apply saved audio output bus
+        audio_bus = self.settings.get("audio_output_bus", 0)
+        self.audio_bus_var.set(audio_bus)
 
         # Apply saved serial port
         serial_port = self.settings.get("serial_port", DEFAULT_SETTINGS["serial_port"])

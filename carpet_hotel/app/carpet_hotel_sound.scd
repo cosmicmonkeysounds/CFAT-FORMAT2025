@@ -16,9 +16,16 @@ var audioPath, floors, players, volumes;
 var numFloors; // Will be set dynamically based on available files
 var numScreens = 2; // Number of display screens
 var masterVolume = 0.7;
+var outputBusOffset = 0; // Bus offset for audio output (configurable via args)
 
 // ===== STARTUP MESSAGE =====
 "=== CARPET HOTEL AUDIO ENGINE ===".postln;
+
+// Parse command-line arguments
+if(thisProcess.argv.size > 0, {
+    outputBusOffset = thisProcess.argv[0].asInteger;
+    ("Output bus offset: " ++ outputBusOffset).postln;
+});
 
 // ===== STEP 1: CONFIGURE SERVER =====
 ~configureServer = {
@@ -86,7 +93,7 @@ var masterVolume = 0.7;
                 players[i] = IdentityDictionary.new;
 
                 numScreens.do({ |screenIdx|
-                    var outbus = screenIdx * 2; // Screen 0 → bus 0-1, Screen 1 → bus 2-3
+                    var outbus = outputBusOffset + (screenIdx * 2); // Apply bus offset
                     var screenKey = ("screen" ++ screenIdx).asSymbol;
 
                     players[i][screenKey] = {

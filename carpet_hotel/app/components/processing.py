@@ -143,7 +143,30 @@ class CarpetHotelProcessing:
         if self._output_thread and self._output_thread.is_alive():
             self._output_thread.join(timeout=1)
 
-        return self.process.stop()
+        # Stop the main process
+        result = self.process.stop()
+
+        # Extra cleanup: kill any remaining Processing processes
+        # This is important because Processing spawns multiple windows
+        try:
+            import subprocess
+            # Kill all processing-java processes
+            subprocess.run(
+                ["pkill", "-9", "-f", "processing-java"],
+                capture_output=True,
+                timeout=3
+            )
+            # Kill all Processing.app processes
+            subprocess.run(
+                ["pkill", "-9", "-f", "Processing.app"],
+                capture_output=True,
+                timeout=3
+            )
+            self.log.info("Killed all remaining Processing processes")
+        except Exception as e:
+            self.log.debug(f"Extra cleanup error (may be normal): {e}")
+
+        return result
 
     def _start_output_monitor(self):
         """

@@ -42,6 +42,11 @@ static SharedState sharedState;
 // Track all windows for cleanup
 static ArrayList<FloorWindow> allWindows = new ArrayList<FloorWindow>();
 
+// Quadruple-click tracking for exit
+int[] clickTimes = new int[4];  // Store last 4 click timestamps
+int clickIndex = 0;              // Current position in circular buffer
+int CLICK_WINDOW_MS = 600;       // Time window for quadruple-click (ms)
+
 void setup() {
   // Load display configuration from config file
   loadDisplayConfig();
@@ -112,7 +117,7 @@ void setup() {
   println("  F: Toggle fullscreen");
   println("  R: Reload config file");
   println("  SPACE: Print info");
-  println("  ESC: Close all windows");
+  println("  ESC or QUADRUPLE-CLICK: Close all windows");
 
   // Send initial volume to SuperCollider
   sendVolumeOSC();
@@ -305,6 +310,35 @@ void keyPressed() {
     println("\nReloading video configuration...");
     sharedState.config.loadFromJSON(this);
     println("Configuration reloaded!");
+  }
+}
+
+void mousePressed() {
+  // Track clicks for quadruple-click exit
+  int currentTime = millis();
+
+  // Store this click time in circular buffer
+  clickTimes[clickIndex] = currentTime;
+  clickIndex = (clickIndex + 1) % 4;
+
+  // Check if we have 4 clicks within the time window
+  int oldestClick = clickTimes[clickIndex];  // The oldest of the 4 clicks
+  int newestClick = currentTime;
+
+  if (newestClick - oldestClick < CLICK_WINDOW_MS) {
+    // Quadruple-click detected - exit application
+    println("\n=== QUADRUPLE-CLICK DETECTED ===");
+    println("Closing all windows...");
+
+    // Close all FloorWindow instances
+    for (FloorWindow window : allWindows) {
+      if (window != null) {
+        window.exit();
+      }
+    }
+
+    // Exit main window
+    exit();
   }
 }
 

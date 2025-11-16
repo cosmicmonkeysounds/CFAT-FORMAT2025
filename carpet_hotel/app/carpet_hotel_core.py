@@ -420,12 +420,15 @@ class CarpetHotelCore:
     # Component Management
     # ========================================================================
 
-    def start_supercollider(self) -> bool:
+    def start_supercollider(self, output_bus: int = 0) -> bool:
         """
         Start SuperCollider audio engine.
 
         Uses system default audio device. User should configure audio device
         via macOS System Settings before running.
+
+        Args:
+            output_bus: Audio output bus offset (default: 0)
 
         Returns:
             True if started successfully
@@ -436,7 +439,7 @@ class CarpetHotelCore:
 
         self.supercollider = CarpetHotelSuperCollider()
 
-        if self.supercollider.start():
+        if self.supercollider.start(output_bus=output_bus):
             self.sc_running = True
 
             # Setup OSC if not already done

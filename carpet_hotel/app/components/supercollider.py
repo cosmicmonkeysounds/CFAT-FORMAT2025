@@ -40,9 +40,12 @@ class CarpetHotelSuperCollider:
         self.process = ProcessWrapper("SuperCollider")
         self.initialized = False
 
-    def start(self) -> bool:
+    def start(self, output_bus: int = 0) -> bool:
         """
         Start SuperCollider audio engine.
+
+        Args:
+            output_bus: Audio output bus offset (default: 0)
 
         Returns:
             True if started successfully
@@ -57,38 +60,19 @@ class CarpetHotelSuperCollider:
 
         print(f"Starting SuperCollider...")
         print(f"  Using system default audio device")
+        print(f"  Output bus offset: {output_bus}")
 
-        # Build command: just sclang with no arguments
-        # We'll execute the script via stdin instead of command line
-        # This avoids SC thinking the arguments are files to execute
-        cmd = [self.sclang_path]
+        # Build command with script path and bus argument
+        # Pass bus as command-line argument so thisProcess.argv can access it
+        cmd = [self.sclang_path, str(self.sc_script), str(output_bus)]
 
-        # Start process
+        # Start process - script will be loaded automatically with bus argument
         if not self.process.start(cmd):
             return False
 
-        # Send execute command IMMEDIATELY (before compilation finishes)
-        # This is how the old code did it - sclang queues the command and executes after compile
-        execute_code = f'thisProcess.interpreter.executeFile("{str(self.sc_script)}");\n'
+        print(f"  ✓ SuperCollider script loading with bus argument")
 
-        print(f"  Sending command: {execute_code.strip()}")
-
-        if self.process.process and self.process.process.stdin:
-            try:
-                self.process.process.stdin.write(execute_code)
-                self.process.process.stdin.flush()
-                print("  ✓ Command sent to sclang")
-                # Keep stdin open so SC doesn't exit
-            except Exception as e:
-                print(f"✗ Failed to send command to sclang: {e}")
-                self.stop()
-                return False
-        else:
-            print("✗ No stdin available for sclang process")
-            self.stop()
-            return False
-
-        # Wait for initialization (this includes waiting for compilation + script execution)
+        # Wait for initialization
         if not self.wait_for_init():
             print("✗ SuperCollider failed to initialize")
             self.stop()
