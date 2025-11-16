@@ -2,21 +2,21 @@
   "animation": {
     "speed": 0.1,
     "easing_curve": "sine",
-    "distance_multiplier": 1.0
+    "distance_multiplier": 1.7207446808510638
   },
   "effects": {
     "chromatic_aberration": {
       "enabled": true,
-      "intensity": 8.0,
+      "intensity": 10.053191489361701,
       "red_alpha": 200,
       "green_alpha": 200,
       "blue_alpha": 200
     },
     "motion_blur": {
       "enabled": true,
-      "samples": 3,
-      "intensity": 15.0,
-      "alpha_divisor": 2
+      "samples": 4,
+      "intensity": 19.867021276595747,
+      "alpha_divisor": 3
     },
     "bloom": {
       "enabled": true,

@@ -13,7 +13,7 @@ OSC Messages:
 (
 // ===== GLOBAL STATE =====
 var audioPath, floors, players, volumes;
-var numFloors = 10;
+var numFloors; // Will be set dynamically based on available files
 var masterVolume = 0.7;
 
 // ===== STARTUP MESSAGE =====
@@ -33,6 +33,8 @@ var masterVolume = 0.7;
 
 // ===== STEP 2: LOAD AUDIO FILES =====
 ~loadAudioFiles = {
+    var carpetFiles, floorNumbers;
+
     "Loading audio files...".postln;
 
     // Initialize dictionaries
@@ -44,9 +46,29 @@ var masterVolume = 0.7;
     audioPath = (thisProcess.nowExecutingPath.dirname +/+ "../data/").standardizePath;
     ("Searching in: " ++ audioPath).postln;
 
+    // Dynamically detect available carpet_*.wav files
+    carpetFiles = PathName(audioPath).files.select({ |file|
+        file.fileName.beginsWith("carpet_") && file.extension == "wav"
+    });
+
+    // Extract floor numbers from filenames
+    floorNumbers = carpetFiles.collect({ |file|
+        var numStr = file.fileNameWithoutExtension.replace("carpet_", "");
+        numStr.asInteger;
+    });
+
+    // Set numFloors based on available files
+    if(floorNumbers.size > 0, {
+        numFloors = floorNumbers.maxItem;
+        ("Found " ++ floorNumbers.size ++ " audio files (max floor: " ++ numFloors ++ ")").postln;
+    }, {
+        "ERROR: No carpet_*.wav files found!".postln;
+        numFloors = 0;
+    });
+
     // Load all carpet audio files in a Routine
     Routine({
-        (1..numFloors).do({ |i|
+        floorNumbers.do({ |i|
             var path = audioPath ++ "carpet_" ++ i ++ ".wav";
             var file = PathName(path);
 
@@ -108,7 +130,7 @@ var masterVolume = 0.7;
 
         // Set volume for active floors in current scene
         numWindows.do({ |i|
-            floorNum = sceneNum + i + 2; // +2 to match file numbering
+            floorNum = sceneNum + i + 1; // +1 because scenes are 0-indexed but files start at 1
             if(players[floorNum].notNil, {
                 players[floorNum].set(\amp, volumePerFloor);
             });
@@ -128,8 +150,8 @@ var masterVolume = 0.7;
 
         // Calculate which floors are audible (current + next)
         numWindows.do({ |i|
-            audibleFloors.add(currentFloor + i + 2); // +2 for file numbering
-            audibleFloors.add(nextFloor + i + 2);
+            audibleFloors.add(currentFloor + i + 1); // +1 because scenes are 0-indexed but files start at 1
+            audibleFloors.add(nextFloor + i + 1);
         });
 
         // Equal power mixing
@@ -147,7 +169,7 @@ var masterVolume = 0.7;
             var isNext, crossfadeGain, finalVolume;
 
             if(players[floorNum].notNil, {
-                isNext = (floorNum >= (nextFloor + 2)) && (floorNum < (nextFloor + numWindows + 2));
+                isNext = (floorNum >= (nextFloor + 1)) && (floorNum < (nextFloor + numWindows + 1));
 
                 if(isNext, {
                     // Fading in: sine curve (0 to 1)
