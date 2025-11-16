@@ -78,10 +78,13 @@ class CarpetHotelProcessing:
         # Add OSC control mode (always enabled for Python control)
         cmd.append("--osc-control")
 
-        # Display configuration
-        if self.displays:
+        # Display configuration now read from video_config.json by Processing
+        # Only pass if explicitly provided (otherwise Processing reads from config)
+        # This parameter is deprecated - displays should be configured in video_config.json
+        if self.displays and self.displays != [1, 2]:  # Only override if non-default
             displays_str = ','.join(map(str, self.displays))
             cmd.append(f"--displays={displays_str}")
+            print(f"  ⚠ Using command-line displays override (prefer video_config.json)")
 
         # Pass video files as arguments
         video_files = self._get_video_files()

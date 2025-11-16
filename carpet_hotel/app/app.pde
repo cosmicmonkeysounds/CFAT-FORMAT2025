@@ -67,7 +67,7 @@ void setup() {
   sharedState.init(this);
 
   // Launch separate windows for each scene display
-  for (int i = 0; i < SCENE_SCENE_DISPLAY_NUMBERS.length; i++) {
+  for (int i = 0; i < SCENE_DISPLAY_NUMBERS.length; i++) {
     String[] args = {"SceneWindow_" + SCENE_DISPLAY_LETTERS[i]};
     FloorWindow window = new FloorWindow(i);
     allWindows.add(window);  // Track for cleanup
@@ -82,7 +82,7 @@ void setup() {
   }
 
   println("\n=== CARPET HOTEL CONTROL ===");
-  println("Scene Windows: " + SCENE_SCENE_DISPLAY_NUMBERS.length);
+  println("Scene Windows: " + SCENE_DISPLAY_NUMBERS.length);
   println("Scene Displays: " + java.util.Arrays.toString(SCENE_DISPLAY_LETTERS));
   println("Scene Physical: " + java.util.Arrays.toString(SCENE_DISPLAY_NUMBERS));
   if (COMPOSITE_DISPLAY_NUMBER >= 0) {
@@ -133,12 +133,17 @@ void loadDisplayConfig() {
           }
         }
 
-        // Convert ArrayLists to arrays
-        SCENE_DISPLAY_NUMBERS = new int[enabledDisplayNums.size()];
-        SCENE_DISPLAY_LETTERS = new String[enabledDisplayLetters.size()];
-        for (int i = 0; i < enabledDisplayNums.size(); i++) {
-          SCENE_DISPLAY_NUMBERS[i] = enabledDisplayNums.get(i);
-          SCENE_DISPLAY_LETTERS[i] = enabledDisplayLetters.get(i);
+        // Convert ArrayLists to arrays only if we have displays
+        if (enabledDisplayNums.size() > 0) {
+          SCENE_DISPLAY_NUMBERS = new int[enabledDisplayNums.size()];
+          SCENE_DISPLAY_LETTERS = new String[enabledDisplayLetters.size()];
+          for (int i = 0; i < enabledDisplayNums.size(); i++) {
+            SCENE_DISPLAY_NUMBERS[i] = enabledDisplayNums.get(i);
+            SCENE_DISPLAY_LETTERS[i] = enabledDisplayLetters.get(i);
+          }
+          println("✓ Loaded " + enabledDisplayNums.size() + " scene display(s) from config");
+        } else {
+          println("⚠ No enabled scene displays in config, using defaults");
         }
       }
 
@@ -148,12 +153,21 @@ void loadDisplayConfig() {
         if (composite.getBoolean("enabled", false)) {
           COMPOSITE_DISPLAY_NUMBER = composite.getInt("physical_display");
           COMPOSITE_BLEND_MODE = composite.getString("blend_mode");
+          println("✓ Loaded composite display Z on physical display " + COMPOSITE_DISPLAY_NUMBER);
         }
       }
     }
   } catch (Exception e) {
-    println("Warning: Could not load display config: " + e.getMessage());
+    println("✗ ERROR loading display config: " + e.getMessage());
+    e.printStackTrace();
     println("Using defaults: 2 scene displays on physical displays 1 and 2");
+  }
+
+  // Validate we have at least one scene display
+  if (SCENE_DISPLAY_NUMBERS.length == 0) {
+    println("✗ ERROR: No scene displays configured!");
+    println("Please configure displays in the GUI Hardware tab or video_config.json");
+    exit();
   }
 }
 
@@ -629,8 +643,8 @@ class SharedState {
     // Find all carpet videos and audio
     findCarpetMedia();
 
-    // Load first SCENE_SCENE_DISPLAY_NUMBERS.length floors
-    for (int i = 0; i < min(SCENE_SCENE_DISPLAY_NUMBERS.length, videoNames.size()); i++) {
+    // Load first SCENE_DISPLAY_NUMBERS.length floors
+    for (int i = 0; i < min(SCENE_DISPLAY_NUMBERS.length, videoNames.size()); i++) {
       String videoFile = videoNames.get(i);
       String audioFile = i < audioNames.size() ? audioNames.get(i) : null;
       Floor floor = new Floor(parent, videoFile, audioFile, i);
