@@ -37,7 +37,8 @@ class CarpetHotelSuperCollider:
         self.sclang_path = find_sclang()
         self.sc_script = get_app_dir() / "carpet_hotel_sound.scd"
 
-        self.process = ProcessWrapper("SuperCollider")
+        # ProcessWrapper with sclang pattern for forceful cleanup
+        self.process = ProcessWrapper("SuperCollider", process_name_pattern="sclang")
         self.initialized = False
 
     def start(self, output_bus: int = 0) -> bool:
@@ -222,6 +223,7 @@ class CarpetHotelSuperCollider:
         Returns:
             True if stopped successfully
         """
+        print("[SuperCollider] Stopping...")
         self.initialized = False
 
         # Send Cmd+. (stop all sound) to sclang via stdin
@@ -233,10 +235,17 @@ class CarpetHotelSuperCollider:
                 self.process.process.stdin.flush()
                 print("[SuperCollider] Sent stop command")
                 time.sleep(0.5)  # Give SC time to stop synths
+
+                # Close stdin to signal we're done
+                self.process.process.stdin.close()
+                print("[SuperCollider] Closed stdin")
             except Exception as e:
                 print(f"[SuperCollider] Could not send stop command: {e}")
 
-        return self.process.stop()
+        result = self.process.stop()
+        if result:
+            print("✓ SuperCollider fully stopped")
+        return result
 
     def is_running(self) -> bool:
         """

@@ -467,7 +467,9 @@ class CarpetHotelCore:
             return True
 
         if self.supercollider.stop():
+            self.supercollider = None
             self.sc_running = False
+            print("✓ SuperCollider stopped and cleaned up")
             return True
 
         return False
@@ -572,7 +574,9 @@ class CarpetHotelCore:
 
         # Disconnect Arduino
         self.arduino.disconnect()
+        self.arduino = None
         self.arduino_running = False
+        print("✓ Arduino stopped and cleaned up")
         return True
 
     def start_all(self, displays: Optional[List[int]] = None,

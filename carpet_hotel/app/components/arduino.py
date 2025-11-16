@@ -505,6 +505,7 @@ class CarpetHotelArduino:
 
     def disconnect(self):
         """Disconnect and cleanup resources."""
+        print("[Arduino] Disconnecting...")
         self.running = False
         self.animation_running = False
 
@@ -512,13 +513,22 @@ class CarpetHotelArduino:
         if self.animation_thread and self.animation_thread.is_alive():
             self.animation_thread.join(timeout=1)
 
+        # Shutdown OSC server
         if self.osc_server:
-            self.osc_server.shutdown()
-            print("✓ OSC server stopped")
+            try:
+                self.osc_server.shutdown()
+                print("✓ Arduino OSC server stopped")
+            except Exception as e:
+                print(f"⚠ Error stopping OSC server: {e}")
+            finally:
+                self.osc_server = None
 
         # Disconnect broker (handles LED cleanup and serial close)
         if self.broker:
             self.broker.disconnect()
+            self.broker = None
+
+        print("✓ Arduino fully disconnected")
 
 
 def main():
