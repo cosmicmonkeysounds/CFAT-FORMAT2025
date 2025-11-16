@@ -67,6 +67,7 @@ class CarpetHotelArduino:
         self.animation_mode = "OFF"  # 'OFF', 'STABLE', 'TRANSITION_UP', 'TRANSITION_DOWN'
         self.animation_thread: Optional[threading.Thread] = None
         self.animation_running = False
+        self.transition_start_time = 0.0  # Track when transition animation started
 
     def set_message_callback(self, callback):
         """
@@ -261,6 +262,8 @@ class CarpetHotelArduino:
             self.animation_mode = "STABLE"
         elif mode == "TRANSITION":
             self.animation_mode = f"TRANSITION_{direction.upper()}"
+            # Reset transition start time when entering transition mode
+            self.transition_start_time = time.time()
         elif mode == "OFF":
             self.animation_mode = "OFF"
             # Turn off all LEDs
@@ -326,7 +329,7 @@ class CarpetHotelArduino:
 
     def _animate_stable(self, elapsed: float):
         """
-        Stable animation: Slow gentle sinwave pulse of green LED between 127-200.
+        Stable animation: Slow gentle sinwave pulse of yellow LED between 20% (51) and 100% (255).
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
@@ -336,9 +339,9 @@ class CarpetHotelArduino:
         phase = (elapsed % period) / period * 2 * math.pi  # 0 to 2π
 
         # Sin wave oscillates between -1 and 1
-        # Map to 127 (min) to 200 (max)
-        min_brightness = 127
-        max_brightness = 200
+        # Map to 51 (20%) to 255 (100%)
+        min_brightness = 51  # 20% of 255
+        max_brightness = 255  # 100%
         brightness_range = max_brightness - min_brightness
 
         sin_value = math.sin(phase)  # -1 to 1
@@ -347,25 +350,37 @@ class CarpetHotelArduino:
 
         # Debug output (frequently at first, then less often)
         if elapsed < 5.0 or (int(elapsed) % 5 == 0 and (elapsed % 5) < 0.1):
-            self.log.debug(f"STABLE animation - Green: {brightness}, elapsed: {elapsed:.1f}s")
-            print(f"[Animation] STABLE - Green brightness: {brightness}, elapsed: {elapsed:.1f}s")
+            self.log.debug(f"STABLE animation - Yellow: {brightness}, elapsed: {elapsed:.1f}s")
+            print(f"[Animation] STABLE - Yellow brightness: {brightness}, elapsed: {elapsed:.1f}s")
 
-        # Set green LED, keep others off
+        # Set yellow LED, keep others off
         self.set_led("red", 0)
-        self.set_led("yellow", 0)
-        self.set_led("green", brightness)
+        self.set_led("yellow", brightness)
+        self.set_led("green", 0)
 
     def _animate_transition_up(self, elapsed: float):
         """
         Transition UP animation: Sinwave propagating red → yellow → green.
-        Faster wave that travels through the colors in sequence.
+        Gets faster and more chaotic the longer the transition runs.
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
         """
-        # Fast wave - 0.6 second period (faster than stable)
-        period = 0.6
-        wave_phase = (elapsed % period) / period * 2 * math.pi  # 0 to 2π
+        # Calculate time in transition mode
+        transition_elapsed = time.time() - self.transition_start_time if self.transition_start_time > 0 else 0
+
+        # Period gets faster over time: starts at 0.6s, decreases to 0.2s over 10 seconds
+        # Using exponential decay for smooth acceleration
+        base_period = 0.6
+        min_period = 0.15
+        speed_factor = 1.0 - math.exp(-transition_elapsed / 3.0)  # 0 to ~1 over time
+        period = base_period - (base_period - min_period) * speed_factor
+
+        # Add chaos: random phase offset that increases with time
+        chaos_amount = min(transition_elapsed / 5.0, 1.0)  # 0 to 1 over 5 seconds
+        chaos = random.uniform(-chaos_amount, chaos_amount) * math.pi / 4
+
+        wave_phase = (elapsed % period) / period * 2 * math.pi + chaos  # 0 to 2π + chaos
 
         # Create 3 waves offset by 120 degrees (2π/3) to create propagation effect
         # Red leads, then yellow, then green
@@ -374,11 +389,14 @@ class CarpetHotelArduino:
         green_phase = wave_phase - (4 * math.pi / 3)
 
         # Calculate brightness for each LED using sine wave
-        # Map from 0 to 200 (skip very dim values for visibility)
+        # Add random flicker that increases with chaos
         def phase_to_brightness(phase):
             sin_value = math.sin(phase)  # -1 to 1
             normalized = (sin_value + 1) / 2  # 0 to 1
-            return int(normalized * 200)
+            brightness = normalized * 200
+            # Add random flicker (more as chaos increases)
+            flicker = random.uniform(-chaos_amount * 40, chaos_amount * 40)
+            return int(max(0, min(255, brightness + flicker)))
 
         red_brightness = phase_to_brightness(red_phase)
         yellow_brightness = phase_to_brightness(yellow_phase)
@@ -391,14 +409,26 @@ class CarpetHotelArduino:
     def _animate_transition_down(self, elapsed: float):
         """
         Transition DOWN animation: Sinwave propagating green → yellow → red.
-        Faster wave that travels through the colors in reverse sequence.
+        Gets faster and more chaotic the longer the transition runs.
 
         Args:
             elapsed: Time elapsed since animation start (seconds)
         """
-        # Fast wave - 0.6 second period (faster than stable)
-        period = 0.6
-        wave_phase = (elapsed % period) / period * 2 * math.pi  # 0 to 2π
+        # Calculate time in transition mode
+        transition_elapsed = time.time() - self.transition_start_time if self.transition_start_time > 0 else 0
+
+        # Period gets faster over time: starts at 0.6s, decreases to 0.2s over 10 seconds
+        # Using exponential decay for smooth acceleration
+        base_period = 0.6
+        min_period = 0.15
+        speed_factor = 1.0 - math.exp(-transition_elapsed / 3.0)  # 0 to ~1 over time
+        period = base_period - (base_period - min_period) * speed_factor
+
+        # Add chaos: random phase offset that increases with time
+        chaos_amount = min(transition_elapsed / 5.0, 1.0)  # 0 to 1 over 5 seconds
+        chaos = random.uniform(-chaos_amount, chaos_amount) * math.pi / 4
+
+        wave_phase = (elapsed % period) / period * 2 * math.pi + chaos  # 0 to 2π + chaos
 
         # Create 3 waves offset by 120 degrees (2π/3) to create propagation effect
         # Green leads, then yellow, then red (reverse of UP)
@@ -407,11 +437,14 @@ class CarpetHotelArduino:
         red_phase = wave_phase - (4 * math.pi / 3)
 
         # Calculate brightness for each LED using sine wave
-        # Map from 0 to 200 (skip very dim values for visibility)
+        # Add random flicker that increases with chaos
         def phase_to_brightness(phase):
             sin_value = math.sin(phase)  # -1 to 1
             normalized = (sin_value + 1) / 2  # 0 to 1
-            return int(normalized * 200)
+            brightness = normalized * 200
+            # Add random flicker (more as chaos increases)
+            flicker = random.uniform(-chaos_amount * 40, chaos_amount * 40)
+            return int(max(0, min(255, brightness + flicker)))
 
         red_brightness = phase_to_brightness(red_phase)
         yellow_brightness = phase_to_brightness(yellow_phase)

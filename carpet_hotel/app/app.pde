@@ -655,7 +655,7 @@ class SharedState {
     println("Starting transition from scene " + currentScene + " to scene " + newScene);
     startScene = currentScene;
     targetScene = newScene;
-    animationDirection = (newScene > currentScene) ? 1 : -1;
+    animationDirection = (newScene > currentScene) ? -1 : 1;  // REVERSED: Higher scene = scroll down
     totalDistance = abs(newScene - currentScene);
     animationProgress = 0.0;
     isAnimating = true;
@@ -923,34 +923,34 @@ class FloorWindow extends PApplet {
 
   void renderAnimatedTransition() {
     // Calculate which floor we're between
-    int currentFloor = sharedState.startScene + (int)sharedState.animationProgress * sharedState.animationDirection;
+    // animationProgress goes from 0 to totalDistance regardless of direction
+    // We need to calculate the actual scene number we're at
+    int sceneDirection = (sharedState.targetScene > sharedState.startScene) ? 1 : -1;
+    int currentFloor = sharedState.startScene + (int)sharedState.animationProgress * sceneDirection;
     float fractionalProgress = sharedState.animationProgress - floor(sharedState.animationProgress);
 
     // Calculate vertical offset for smooth scrolling
-    // When going UP (higher floor), floors should scroll DOWN on screen (negative direction)
-    // When going DOWN (lower floor), floors should scroll UP on screen (positive direction)
-    float offsetPixels = fractionalProgress * VIDEO_HEIGHT * (-sharedState.animationDirection);
+    // Animation direction is now reversed: -1 for going to higher floors, +1 for lower
+    // Floors scroll in the same direction as animationDirection
+    float offsetPixels = fractionalProgress * VIDEO_HEIGHT * sharedState.animationDirection;
 
-    // Each window needs to render 2 videos during transition:
-    // 1. The video currently visible in this window
-    // 2. The video that's sliding in from off-screen
+    // Render multiple videos to ensure smooth scrolling through all intermediate floors
+    // We need to render all videos that might be visible in the viewport
+    // Render from 2 videos before to 2 videos after to avoid gaps
+    for (int floorOffset = -2; floorOffset <= 2; floorOffset++) {
+      int floor = currentFloor + floorOffset * sceneDirection;
+      int videoIdx = floor + windowIndex;
 
-    // Current video for this window
-    int currentVideoIdx = currentFloor + windowIndex;
+      // Calculate Y position for this floor
+      // Since sceneDirection and animationDirection are always opposite, they cancel out
+      float yPosition = offsetPixels + (floorOffset * VIDEO_HEIGHT);
 
-    // Next video that's sliding in (offset by screen height)
-    int nextFloor = currentFloor + sharedState.animationDirection;
-    int nextVideoIdx = nextFloor + windowIndex;
-
-    // Render both videos with proper offset
-    if (sharedState.animationDirection > 0) {
-      // Going UP: new floor slides in from BOTTOM
-      renderVideoWithEffects(currentVideoIdx, 0, offsetPixels);
-      renderVideoWithEffects(nextVideoIdx, 0, offsetPixels + VIDEO_HEIGHT);
-    } else {
-      // Going DOWN: new floor slides in from TOP
-      renderVideoWithEffects(currentVideoIdx, 0, offsetPixels);
-      renderVideoWithEffects(nextVideoIdx, 0, offsetPixels - VIDEO_HEIGHT);
+      // Only render if this video index is valid and might be visible
+      if (videoIdx >= 0 && videoIdx < sharedState.videoNames.size()) {
+        // Ensure video is loaded
+        sharedState.ensureVideoLoaded(videoIdx);
+        renderVideoWithEffects(videoIdx, 0, yPosition);
+      }
     }
   }
 
@@ -1080,7 +1080,7 @@ class FloorWindow extends PApplet {
     if (sharedState.isAnimating) {
       float pct = (sharedState.animationProgress / sharedState.totalDistance) * 100;
       text("Animating: " + sharedState.startScene + " -> " + sharedState.targetScene + " (" + nf(pct, 0, 1) + "%)", 20, y); y += lineHeight;
-      text("Direction: " + (sharedState.animationDirection > 0 ? "UP (higher floor)" : "DOWN (lower floor)"), 20, y); y += lineHeight;
+      text("Direction: " + (sharedState.animationDirection < 0 ? "UP (higher floor)" : "DOWN (lower floor)"), 20, y); y += lineHeight;
       text("Floors traveled: " + nf(sharedState.animationProgress, 0, 2) + " / " + sharedState.totalDistance, 20, y); y += lineHeight;
       text("Shader intensity: " + nf(sharedState.getShaderIntensity() * 100, 0, 1) + "%", 20, y); y += lineHeight;
     }
