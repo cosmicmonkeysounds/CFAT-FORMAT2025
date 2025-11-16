@@ -205,6 +205,7 @@ class CarpetHotelCore:
         dispatcher.map("/carpet/elevator/up", self._handle_elevator_up)
         dispatcher.map("/carpet/elevator/down", self._handle_elevator_down)
         dispatcher.map("/carpet/elevator/jump", self._handle_elevator_jump)
+        dispatcher.map("/carpet/goto", self._handle_goto)
 
         self.osc_server = ThreadingOSCUDPServer(
             ("127.0.0.1", self.processing_recv_port),
@@ -319,6 +320,60 @@ class CarpetHotelCore:
         self.current_scene = (self.current_scene - 1) % (max_scene + 1)
 
         self.log.info(f"Arduino DOWN → Scene {self.current_scene}")
+        print(f"[CORE] New scene: {self.current_scene}")
+
+        # Send goto command to Processing
+        if self.pde_running:
+            processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
+            processing_client.send_message("/carpet/goto", [self.current_scene])
+            print(f"[CORE] ✓ Sent /carpet/goto [{self.current_scene}] to Processing (127.0.0.1:12000)")
+        else:
+            print(f"[CORE] ✗ Processing not running - cannot send goto")
+
+        # LED animation will be switched to STABLE when Processing sends "entering_scene" state
+
+    def _handle_goto(self, address, *args):
+        """
+        Handle GOTO command from Arduino (jump to specific scene).
+
+        Args:
+            args[0]: target_scene - scene number to jump to
+        """
+        if len(args) < 1:
+            self.log.error("Goto command missing target scene argument")
+            return
+
+        target_scene = int(args[0])
+        max_scene = self.get_max_scene()
+
+        # Validate target scene is in range
+        if target_scene < 0 or target_scene > max_scene:
+            self.log.error(f"Invalid target scene: {target_scene} (max: {max_scene})")
+            return
+
+        print(f"\n[CORE] ═══ RECEIVED /carpet/goto {target_scene} ═══")
+        print(f"[CORE] Current scene: {self.current_scene}")
+        print(f"[CORE] Arduino running: {self.arduino_running}")
+        print(f"[CORE] Processing running: {self.pde_running}")
+
+        # Determine direction based on target vs current
+        if target_scene > self.current_scene:
+            direction = "up"
+        elif target_scene < self.current_scene:
+            direction = "down"
+        else:
+            # Already at target scene
+            print(f"[CORE] Already at scene {target_scene}")
+            return
+
+        # Trigger transition animation with correct direction
+        if self.arduino and self.arduino_running:
+            self.arduino.set_led_animation_mode("TRANSITION", direction=direction)
+            print(f"[CORE] Set LED animation to TRANSITION ({direction})")
+
+        # Update scene
+        self.current_scene = target_scene
+        self.log.info(f"Arduino GOTO → Scene {self.current_scene}")
         print(f"[CORE] New scene: {self.current_scene}")
 
         # Send goto command to Processing
