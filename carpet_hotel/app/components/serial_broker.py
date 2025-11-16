@@ -95,16 +95,25 @@ class SerialBroker:
             self.write_thread.join(timeout=1)
 
         # Close serial
-        if self.serial_conn and self.serial_conn.is_open:
-            # Turn off all LEDs
-            try:
-                self.serial_conn.write(b"RED:0\n")
-                self.serial_conn.write(b"YELLOW:0\n")
-                self.serial_conn.write(b"GREEN:0\n")
-            except:
-                pass
+        if self.serial_conn:
+            if self.serial_conn.is_open:
+                # Turn off all LEDs
+                try:
+                    self.serial_conn.write(b"RED:0\n")
+                    self.serial_conn.write(b"YELLOW:0\n")
+                    self.serial_conn.write(b"GREEN:0\n")
+                    time.sleep(0.1)  # Give time for commands to send
+                except:
+                    pass
 
-            self.serial_conn.close()
+                try:
+                    self.serial_conn.close()
+                    print("[SerialBroker] Serial port closed")
+                except Exception as e:
+                    print(f"[SerialBroker] Error closing serial: {e}")
+
+            # Explicitly release the connection
+            self.serial_conn = None
 
         print("[SerialBroker] ✓ Disconnected")
 

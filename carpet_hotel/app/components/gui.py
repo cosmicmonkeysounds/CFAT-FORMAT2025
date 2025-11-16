@@ -1633,42 +1633,48 @@ Arduino: Auto-detected on first connection attempt"""
 
     def create_sticky_header(self):
         """Create sticky header with START/STOP ALL at top."""
-        # Header frame with background color
-        header_frame = tk.Frame(self.root, bg='#2c3e50', height=80)
+        # Header frame with darker background for more contrast
+        header_frame = tk.Frame(self.root, bg='#1a1a1a', height=90)
         header_frame.pack(fill='x', side='top')
         header_frame.pack_propagate(False)  # Prevent frame from shrinking
 
         # Title
         title_label = tk.Label(header_frame, text="CARPET HOTEL CONTROL",
-                              font=('Arial', 22, 'bold'), bg='#2c3e50', fg='white')
+                              font=('Arial', 24, 'bold'), bg='#1a1a1a', fg='#00ff00')
         title_label.pack(side='left', padx=30, pady=20)
 
         # Button frame
-        button_frame = tk.Frame(header_frame, bg='#2c3e50')
+        button_frame = tk.Frame(header_frame, bg='#1a1a1a')
         button_frame.pack(side='right', padx=30, pady=15)
 
-        # START ALL button (green background)
+        # START ALL button (bright green with black text for maximum contrast)
         self.start_all_btn = tk.Button(button_frame, text="▶ START ALL",
                                        command=self.start_all,
-                                       font=('Arial', 16, 'bold'),
-                                       bg='#27ae60', fg='white',
-                                       activebackground='#229954',
-                                       width=15, height=2,
-                                       relief='raised', bd=3)
-        self.start_all_btn.pack(side='left', padx=10)
+                                       font=('Arial', 18, 'bold'),
+                                       bg='#00ff00', fg='black',
+                                       activebackground='#00dd00',
+                                       activeforeground='black',
+                                       width=16, height=2,
+                                       relief='raised', bd=5,
+                                       highlightbackground='#00aa00',
+                                       highlightthickness=2)
+        self.start_all_btn.pack(side='left', padx=15)
 
-        # STOP ALL button (red background)
+        # STOP ALL button (bright red with white text for maximum contrast)
         self.stop_all_btn = tk.Button(button_frame, text="■ STOP ALL",
                                       command=self.stop_all,
-                                      font=('Arial', 16, 'bold'),
-                                      bg='#e74c3c', fg='white',
-                                      activebackground='#c0392b',
-                                      width=15, height=2,
-                                      relief='raised', bd=3)
-        self.stop_all_btn.pack(side='left', padx=10)
+                                      font=('Arial', 18, 'bold'),
+                                      bg='#ff0000', fg='white',
+                                      activebackground='#dd0000',
+                                      activeforeground='white',
+                                      width=16, height=2,
+                                      relief='raised', bd=5,
+                                      highlightbackground='#aa0000',
+                                      highlightthickness=2)
+        self.stop_all_btn.pack(side='left', padx=15)
 
-        # Separator line
-        separator = ttk.Separator(self.root, orient='horizontal')
+        # Separator line (thicker and more visible)
+        separator = tk.Frame(self.root, height=3, bg='#444444')
         separator.pack(fill='x')
 
     def start_all(self):

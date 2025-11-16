@@ -19,7 +19,7 @@
       "physical_display": 3,
       "device_name": "1920x1080",
       "enabled": true,
-      "blend_mode": "difference",
+      "blend_mode": "multiply",
       "blend_sources": [
         "A",
         "B"
