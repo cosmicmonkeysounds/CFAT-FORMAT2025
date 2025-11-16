@@ -243,16 +243,49 @@ def detect_serial_ports() -> List[Dict[str, str]]:
 
 def find_arduino_port() -> Optional[str]:
     """
-    Find Arduino port automatically.
+    Find Arduino port automatically by testing each candidate port.
+    Tests ports by opening them and waiting for the "READY" message from elevator_control.ino.
 
     Returns:
         Port device path or None if not found
     """
-    ports = detect_serial_ports()
+    import serial
+    import time
 
-    for port in ports:
-        if port["is_arduino"]:
-            return port["device"]
+    ports = detect_serial_ports()
+    candidates = [p for p in ports if p["is_arduino"]]
+
+    # If no obvious Arduino candidates, try all ports
+    if not candidates:
+        candidates = ports
+
+    for port in candidates:
+        try:
+            print(f"[AutoDetect] Testing {port['device']}... ", end='', flush=True)
+
+            # Try to open the port
+            ser = serial.Serial(port["device"], 115200, timeout=0.5)
+            time.sleep(2.5)  # Wait for Arduino to reset and boot
+
+            # Read any available data for up to 3 seconds
+            start_time = time.time()
+            while time.time() - start_time < 3.0:
+                if ser.in_waiting:
+                    line = ser.readline().decode('utf-8', errors='ignore').strip()
+                    if line == "READY":
+                        ser.close()
+                        print(f"✓ Found elevator control!")
+                        return port["device"]
+                    elif line:
+                        print(f"(received: '{line}') ", end='', flush=True)
+                time.sleep(0.1)
+
+            ser.close()
+            print("✗ No READY signal")
+
+        except Exception as e:
+            print(f"✗ {e}")
+            continue
 
     return None
 

@@ -131,6 +131,10 @@ class SerialBroker:
                     line = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
 
                     if line and line != "READY":
+                        # Debug: Log all incoming messages
+                        if random.randint(0, 10) == 0 or "DOWN" in line.upper():
+                            print(f"[SerialBroker] RX: '{line}'")
+
                         # Dispatch to all registered callbacks
                         for callback in self.message_callbacks:
                             try:

@@ -635,16 +635,30 @@ class SharedState {
 
   void sendTransitionOSC() {
     // Send transition state to SuperCollider
-    int currentFloor = startScene + (int)animationProgress * animationDirection;
+    // Calculate which scene floor we're currently showing during transition
+    int scenesProgressed = (int)animationProgress;
+    int currentFloor;
+    if (targetScene > startScene) {
+      // Ascending scenes (e.g., 1 -> 10)
+      currentFloor = startScene + scenesProgressed;
+    } else {
+      // Descending scenes (e.g., 10 -> 1)
+      currentFloor = startScene - scenesProgressed;
+    }
     float fractionalProgress = animationProgress - floor(animationProgress);
+
+    // Calculate scene direction for audio (opposite of animation direction)
+    // When scenes ascend (1->2), sceneDirection = +1 (higher floor numbers)
+    // When scenes descend (2->1), sceneDirection = -1 (lower floor numbers)
+    int sceneDirection = (targetScene > startScene) ? 1 : -1;
 
     OscMessage msg = new OscMessage("/carpet/transition");
     msg.add(currentFloor);                // Current floor during transition
     msg.add(fractionalProgress);          // Progress within current floor (0.0-1.0)
-    msg.add(animationDirection);          // Direction: 1 = up, -1 = down
+    msg.add(sceneDirection);              // Scene direction: +1 = ascending, -1 = descending
     msg.add(DISPLAY_NUMBERS.length);      // Number of screens
     oscP5.send(msg, pythonAddress);       // Send to Python, which forwards to SuperCollider
-    println("[OSC-SEND] /carpet/transition " + currentFloor + " " + fractionalProgress + " " + animationDirection + " " + DISPLAY_NUMBERS.length + " (via Python)");
+    println("[OSC-SEND] /carpet/transition " + currentFloor + " " + fractionalProgress + " " + sceneDirection + " " + DISPLAY_NUMBERS.length + " (via Python)");
   }
 
   void startTransition(int newScene) {

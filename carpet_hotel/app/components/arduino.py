@@ -69,14 +69,7 @@ class CarpetHotelArduino:
         self.animation_running = False
         self.transition_start_time = 0.0  # Track when transition animation started
 
-        # Button state machine for jump feature
-        # States: NEUTRAL, HELD_UP, HELD_DOWN
-        # 0-3s: Normal 1-floor move on release
-        # 3-13s: Jump power accumulates (3s=0%, 13s=100%)
-        self.button_state = "NEUTRAL"  # NEUTRAL, HELD_UP, HELD_DOWN
-        self.button_press_time = None  # Time when current button was pressed
-        self.normal_press_threshold = 3.0  # 3 seconds
-        self.max_jump_time = 10.0  # 10 seconds after threshold
+        # Simple button state - just track current state for LED animations
         self.current_state = "STABLE"  # Track if we're in stable mode ('STABLE' or 'TRANSITION')
 
     def set_message_callback(self, callback):
@@ -142,14 +135,8 @@ class CarpetHotelArduino:
         """
         Handle incoming serial message from broker.
 
-        Button state machine:
-        - NEUTRAL: No button held
-        - HELD_UP: UP button currently held
-        - HELD_DOWN: DOWN button currently held
-
-        Timing rules (only executed if system in STABLE state):
-        - 0-3s hold: Normal 1-floor move
-        - 3-13s hold: Jump power = (time - 3s) / 10s
+        Simple logic: Button press = move 1 scene in that direction.
+        Ignore button releases and input during transitions.
 
         Args:
             message: Message from Arduino
@@ -158,128 +145,37 @@ class CarpetHotelArduino:
         message = message.strip()
         message_upper = message.upper()
 
-        print(f"[Arduino] Received: '{message_upper}' | Button state: {self.button_state} | System state: {self.current_state}")
+        # Log ALL raw messages for debugging
+        self.log.debug(f"RAW: '{message}' (upper: '{message_upper}') | System: {self.current_state}")
 
-        # ===== PRESS MESSAGES =====
+        # Ignore releases - we only care about presses
+        if "RELEASED" in message_upper:
+            return
+
+        # Ignore all input during transitions
+        if self.current_state != "STABLE":
+            self.log.debug(f"Input ignored - system in {self.current_state} state")
+            return
+
+        # ===== BUTTON PRESSES =====
         if message_upper == "UP":
-            if self.button_state == "NEUTRAL":
-                # Enter HELD_UP state
-                self.button_state = "HELD_UP"
-                self.button_press_time = time.time()
-                print(f"[Arduino] NEUTRAL → HELD_UP (press time: {self.button_press_time})")
-            else:
-                # Already holding a button, ignore
-                print(f"[Arduino] UP press ignored - already in {self.button_state} state")
+            self.log.info("UP pressed - moving up 1 scene")
+            if self.osc_client:
+                self.osc_client.send_message("/carpet/elevator/up", [])
+            self._notify("✓ UP: 1 floor")
             return
 
         elif message_upper == "DOWN":
-            if self.button_state == "NEUTRAL":
-                # Enter HELD_DOWN state
-                self.button_state = "HELD_DOWN"
-                self.button_press_time = time.time()
-                print(f"[Arduino] NEUTRAL → HELD_DOWN (press time: {self.button_press_time})")
-            else:
-                # Already holding a button, ignore
-                print(f"[Arduino] DOWN press ignored - already in {self.button_state} state")
-            return
-
-        # ===== RELEASED MESSAGES =====
-        elif message_upper == "UP_RELEASED":
-            if self.button_state != "HELD_UP":
-                # Not in UP held state, ignore release
-                print(f"[Arduino] UP_RELEASED ignored - button state is {self.button_state}")
-                return
-
-            # Calculate hold duration
-            hold_duration = time.time() - self.button_press_time if self.button_press_time else 0
-            print(f"[Arduino] UP hold duration: {hold_duration:.2f}s")
-
-            # Return to NEUTRAL state
-            self.button_state = "NEUTRAL"
-            self.button_press_time = None
-            print(f"[Arduino] HELD_UP → NEUTRAL")
-
-            # Only execute command if system is STABLE
-            if self.current_state != "STABLE":
-                print(f"[Arduino] Command ignored - system state is {self.current_state}")
-                return
-
-            # Execute move based on hold duration
-            if hold_duration < self.normal_press_threshold:
-                # Normal 1-floor move
-                print(f"[Arduino] Normal UP move - sending OSC")
-                if self.osc_client:
-                    self.osc_client.send_message("/carpet/elevator/up", [])
-                    print(f"[Arduino] ✓ OSC sent: /carpet/elevator/up")
-                self.log.success(f"UP: Normal move ({hold_duration:.1f}s)")
-                self._notify("✓ UP: 1 floor")
-            else:
-                # Jump - calculate power from time over threshold
-                jump_time = hold_duration - self.normal_press_threshold
-                jump_fraction = min(jump_time / self.max_jump_time, 1.0)
-                print(f"[Arduino] Jump UP - power {jump_fraction*100:.0f}%")
-                self._execute_jump("up", jump_fraction)
-
-            return
-
-        elif message_upper == "DOWN_RELEASED":
-            if self.button_state != "HELD_DOWN":
-                # Not in DOWN held state, ignore release
-                print(f"[Arduino] DOWN_RELEASED ignored - button state is {self.button_state}")
-                return
-
-            # Calculate hold duration
-            hold_duration = time.time() - self.button_press_time if self.button_press_time else 0
-            print(f"[Arduino] DOWN hold duration: {hold_duration:.2f}s")
-
-            # Return to NEUTRAL state
-            self.button_state = "NEUTRAL"
-            self.button_press_time = None
-            print(f"[Arduino] HELD_DOWN → NEUTRAL")
-
-            # Only execute command if system is STABLE
-            if self.current_state != "STABLE":
-                print(f"[Arduino] Command ignored - system state is {self.current_state}")
-                return
-
-            # Execute move based on hold duration
-            if hold_duration < self.normal_press_threshold:
-                # Normal 1-floor move
-                print(f"[Arduino] Normal DOWN move - sending OSC")
-                if self.osc_client:
-                    self.osc_client.send_message("/carpet/elevator/down", [])
-                    print(f"[Arduino] ✓ OSC sent: /carpet/elevator/down")
-                self.log.success(f"DOWN: Normal move ({hold_duration:.1f}s)")
-                self._notify("✓ DOWN: 1 floor")
-            else:
-                # Jump - calculate power from time over threshold
-                jump_time = hold_duration - self.normal_press_threshold
-                jump_fraction = min(jump_time / self.max_jump_time, 1.0)
-                print(f"[Arduino] Jump DOWN - power {jump_fraction*100:.0f}%")
-                self._execute_jump("down", jump_fraction)
-
+            self.log.info("DOWN pressed - moving down 1 scene")
+            if self.osc_client:
+                self.osc_client.send_message("/carpet/elevator/down", [])
+            self._notify("✓ DOWN: 1 floor")
             return
 
         else:
             # Unknown message - might be debug output
             if message:  # Ignore empty lines
                 self.log.debug(f"Arduino: {message}")
-
-    def _execute_jump(self, direction: str, jump_fraction: float):
-        """
-        Execute a jump based on hold duration over threshold.
-
-        Args:
-            direction: "up" or "down" - direction of the jump
-            jump_fraction: 0.0 to 1.0 - power (0.0 = 3s hold, 1.0 = 13s hold)
-        """
-        # Send jump command to OSC with the jump fraction
-        # Python core will calculate the actual scene to jump to
-        if self.osc_client:
-            self.osc_client.send_message("/carpet/elevator/jump", [direction, jump_fraction])
-
-        self.log.success(f"JUMP {direction.upper()} - {jump_fraction*100:.0f}% power")
-        self._notify(f"✓ JUMP {direction.upper()} - {jump_fraction*100:.0f}% power")
 
     def setup_osc(self) -> bool:
         """
