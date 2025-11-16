@@ -1114,11 +1114,10 @@ class FloorWindow extends PApplet {
   }
 
   void renderAnimatedTransition() {
-    // Calculate which floor we're between
+    // Calculate which scene we're between
     // animationProgress goes from 0 to totalDistance regardless of direction
-    // We need to calculate the actual scene number we're at
     int sceneDirection = (sharedState.targetScene > sharedState.startScene) ? 1 : -1;
-    int currentFloor = sharedState.startScene + (int)sharedState.animationProgress * sceneDirection;
+    int currentScene = sharedState.startScene + (int)sharedState.animationProgress * sceneDirection;
     float fractionalProgress = sharedState.animationProgress - floor(sharedState.animationProgress);
 
     // Calculate vertical offset for smooth scrolling
@@ -1126,18 +1125,22 @@ class FloorWindow extends PApplet {
     // Videos scroll opposite to direction (UP button makes videos scroll down)
     float offsetPixels = fractionalProgress * VIDEO_HEIGHT * (-sharedState.animationDirection);
 
-    // Render multiple videos to ensure smooth scrolling through all intermediate floors
-    // We need to render all videos that might be visible in the viewport
-    // Render from 2 videos before to 2 videos after to avoid gaps
-    // Each window shows its respective floor: window 0 = floor N, window 1 = floor N+1, etc.
+    // Calculate which video this window is currently showing
+    // Each window shows: currentScene + windowIndex
+    int baseVideoIdx = currentScene + windowIndex;
 
-    for (int floorOffset = -2; floorOffset <= 2; floorOffset++) {
-      int floor = currentFloor + floorOffset * sceneDirection;
-      int videoIdx = floor + windowIndex;
+    // Render videos in screen space around the base video
+    // screenOffset is relative to the current video position on screen
+    for (int screenOffset = -2; screenOffset <= 2; screenOffset++) {
+      // Calculate which video to show at this screen offset
+      // screenOffset=-1 (above) should show higher video numbers
+      // screenOffset=1 (below) should show lower video numbers
+      // So we SUBTRACT screenOffset to invert the relationship
+      int videoIdx = baseVideoIdx - screenOffset;
 
-      // Calculate Y position for this floor
-      // Stack floors vertically, offsetting by scroll position
-      float yPosition = offsetPixels + (floorOffset * VIDEO_HEIGHT * (-sharedState.animationDirection));
+      // Calculate Y position for this video in screen space
+      // screenOffset controls vertical stacking of videos
+      float yPosition = offsetPixels + (screenOffset * VIDEO_HEIGHT * (-sharedState.animationDirection));
 
       // Only render if this video index is valid and might be visible
       if (videoIdx >= 0 && videoIdx < sharedState.videoNames.size()) {
