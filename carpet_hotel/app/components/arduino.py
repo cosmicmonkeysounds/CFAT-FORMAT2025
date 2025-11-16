@@ -69,6 +69,14 @@ class CarpetHotelArduino:
         self.animation_running = False
         self.transition_start_time = 0.0  # Track when transition animation started
 
+        # Button hold tracking for jump feature
+        self.up_hold_duration = 0  # milliseconds
+        self.down_hold_duration = 0  # milliseconds
+        self.jump_armed = False  # True when a button is held and jump is ready
+        self.jump_button_held = None  # 'UP' or 'DOWN' - which button is held
+        self.max_jump_hold_time = 10000  # 10 seconds in milliseconds
+        self.current_state = "STABLE"  # Track if we're in stable mode
+
     def set_message_callback(self, callback):
         """
         Set callback function for message logging.
@@ -132,28 +140,109 @@ class CarpetHotelArduino:
         """
         Handle incoming serial message from broker.
 
+        Implements jump logic:
+        - When in STABLE mode, holding UP/DOWN accumulates jump power
+        - Pressing opposite button triggers jump (scaled by hold time)
+        - 10 seconds hold = jump to opposite end
+        - 5 seconds hold = jump halfway
+        - Must release held button to exit jump state
+
         Args:
             message: Message from Arduino
         """
-        # Convert serial messages to OSC (Arduino sends uppercase UP/DOWN)
+        # Parse message
+        message = message.strip()
         message_upper = message.upper()
 
-        if message_upper == "UP":
-            if self.osc_client:
-                self.osc_client.send_message("/carpet/elevator/up", [])
-            self.log.success("Button UP pressed")
-            self._notify("✓ Button UP pressed")
+        # ===== HELD MESSAGES =====
+        if message_upper.startswith("UP_HELD:"):
+            duration = int(message_upper.split(":")[1])
+            self.up_hold_duration = duration
+            if self.current_state == "STABLE":
+                self.jump_armed = True
+                self.jump_button_held = "UP"
+            return
+
+        elif message_upper.startswith("DOWN_HELD:"):
+            duration = int(message_upper.split(":")[1])
+            self.down_hold_duration = duration
+            if self.current_state == "STABLE":
+                self.jump_armed = True
+                self.jump_button_held = "DOWN"
+            return
+
+        # ===== RELEASED MESSAGES =====
+        elif message_upper.startswith("UP_RELEASED:"):
+            if self.jump_button_held == "UP":
+                # Released the held button - exit jump state
+                self.jump_armed = False
+                self.jump_button_held = None
+                self.up_hold_duration = 0
+                self.log.info("Jump state cleared (UP released)")
+            return
+
+        elif message_upper.startswith("DOWN_RELEASED:"):
+            if self.jump_button_held == "DOWN":
+                # Released the held button - exit jump state
+                self.jump_armed = False
+                self.jump_button_held = None
+                self.down_hold_duration = 0
+                self.log.info("Jump state cleared (DOWN released)")
+            return
+
+        # ===== PRESS MESSAGES (with jump logic) =====
+        elif message_upper == "UP":
+            # Check if jump is armed with DOWN held
+            if self.jump_armed and self.jump_button_held == "DOWN":
+                self._execute_jump("UP", self.down_hold_duration)
+            else:
+                # Normal UP press
+                if self.osc_client:
+                    self.osc_client.send_message("/carpet/elevator/up", [])
+                self.log.success("Button UP pressed")
+                self._notify("✓ Button UP pressed")
 
         elif message_upper == "DOWN":
-            if self.osc_client:
-                self.osc_client.send_message("/carpet/elevator/down", [])
-            self.log.success("Button DOWN pressed")
-            self._notify("✓ Button DOWN pressed")
+            # Check if jump is armed with UP held
+            if self.jump_armed and self.jump_button_held == "UP":
+                self._execute_jump("DOWN", self.up_hold_duration)
+            else:
+                # Normal DOWN press
+                if self.osc_client:
+                    self.osc_client.send_message("/carpet/elevator/down", [])
+                self.log.success("Button DOWN pressed")
+                self._notify("✓ Button DOWN pressed")
 
         else:
             # Unknown message - might be debug output
             if message:  # Ignore empty lines
                 self.log.debug(f"Arduino: {message}")
+
+    def _execute_jump(self, direction: str, hold_duration_ms: int):
+        """
+        Execute a jump based on hold duration.
+
+        Args:
+            direction: "UP" or "DOWN" - direction of the jump
+            hold_duration_ms: How long the opposite button was held (milliseconds)
+        """
+        # Calculate jump distance based on hold duration
+        # 0ms = 0%, 10000ms (10s) = 100%
+        hold_fraction = min(hold_duration_ms / self.max_jump_hold_time, 1.0)
+
+        # Send jump command to OSC with the hold fraction
+        # Python core will calculate the actual scene to jump to
+        if self.osc_client:
+            self.osc_client.send_message("/carpet/elevator/jump", [direction.lower(), hold_fraction])
+
+        self.log.success(f"JUMP {direction} - hold: {hold_duration_ms}ms ({hold_fraction*100:.1f}%)")
+        self._notify(f"✓ JUMP {direction} - {hold_fraction*100:.0f}% power")
+
+        # Clear jump state after executing
+        self.jump_armed = False
+        self.jump_button_held = None
+        self.up_hold_duration = 0
+        self.down_hold_duration = 0
 
     def setup_osc(self) -> bool:
         """
@@ -260,19 +349,22 @@ class CarpetHotelArduino:
         # Update animation mode
         if mode == "STABLE":
             self.animation_mode = "STABLE"
+            self.current_state = "STABLE"  # Track state for jump logic
         elif mode == "TRANSITION":
             self.animation_mode = f"TRANSITION_{direction.upper()}"
+            self.current_state = "TRANSITION"  # Track state for jump logic
             # Reset transition start time when entering transition mode
             self.transition_start_time = time.time()
         elif mode == "OFF":
             self.animation_mode = "OFF"
+            self.current_state = "OFF"  # Track state for jump logic
             # Turn off all LEDs
             self.set_led("red", 0)
             self.set_led("yellow", 0)
             self.set_led("green", 0)
 
-        self.log.info(f"Animation mode: {old_mode} → {self.animation_mode}")
-        print(f"[Arduino] Animation mode changed: {old_mode} → {self.animation_mode}")
+        self.log.info(f"Animation mode: {old_mode} → {self.animation_mode} (state: {self.current_state})")
+        print(f"[Arduino] Animation mode changed: {old_mode} → {self.animation_mode} (state: {self.current_state})")
 
     def start_animation_thread(self):
         """Start the LED animation thread."""

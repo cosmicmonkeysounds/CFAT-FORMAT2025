@@ -204,6 +204,7 @@ class CarpetHotelCore:
         dispatcher.map("/carpet/state", self._handle_state)
         dispatcher.map("/carpet/elevator/up", self._handle_elevator_up)
         dispatcher.map("/carpet/elevator/down", self._handle_elevator_down)
+        dispatcher.map("/carpet/elevator/jump", self._handle_elevator_jump)
 
         self.osc_server = ThreadingOSCUDPServer(
             ("127.0.0.1", self.processing_recv_port),
@@ -302,6 +303,58 @@ class CarpetHotelCore:
         self.current_scene = (self.current_scene - 1) % (max_scene + 1)
 
         self.log.info(f"Arduino DOWN → Scene {self.current_scene}")
+
+        # Send goto command to Processing
+        if self.pde_running:
+            processing_client = udp_client.SimpleUDPClient("127.0.0.1", 12000)
+            processing_client.send_message("/carpet/goto", [self.current_scene])
+
+        # LED animation will be switched to STABLE when Processing sends "entering_scene" state
+
+    def _handle_elevator_jump(self, address, *args):
+        """
+        Handle JUMP command from Arduino (hold-to-jump feature).
+
+        Args:
+            args[0]: direction - "up" or "down"
+            args[1]: hold_fraction - 0.0 to 1.0 (how long button was held)
+        """
+        if len(args) < 2:
+            self.log.error("Jump command missing arguments")
+            return
+
+        direction = args[0]  # "up" or "down"
+        hold_fraction = float(args[1])  # 0.0 to 1.0
+
+        # Get current position and limits
+        max_scene = self.get_max_scene()
+        current = self.current_scene
+
+        # Calculate jump distance based on direction and hold fraction
+        if direction == "up":
+            # UP jump: go towards higher scene numbers
+            # 0% = current, 100% = max_scene
+            available_distance = max_scene - current
+            jump_distance = int(available_distance * hold_fraction)
+            target_scene = current + jump_distance
+        else:  # direction == "down"
+            # DOWN jump: go towards lower scene numbers (scene 0)
+            # 0% = current, 100% = 0
+            available_distance = current - 0
+            jump_distance = int(available_distance * hold_fraction)
+            target_scene = current - jump_distance
+
+        # Clamp to valid range
+        target_scene = max(0, min(target_scene, max_scene))
+
+        self.log.success(f"Arduino JUMP {direction.upper()} - {hold_fraction*100:.0f}% power → Scene {target_scene} (from {current})")
+
+        # Update current scene
+        self.current_scene = target_scene
+
+        # Trigger transition animation
+        if self.arduino and self.arduino_running:
+            self.arduino.set_led_animation_mode("TRANSITION", direction=direction)
 
         # Send goto command to Processing
         if self.pde_running:

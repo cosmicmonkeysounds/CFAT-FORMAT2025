@@ -2,14 +2,16 @@
  * Elevator Control Panel for Arduino Nano
  *
  * Hardware:
- * - Pin A0: DOWN button (momentary, normally-closed)
- * - Pin A1: UP button (momentary, normally-closed)
+ * - Pin A0: UP button (momentary, normally-closed) [SWAPPED]
+ * - Pin A1: DOWN button (momentary, normally-closed) [SWAPPED]
  * - Pin D6: RED LED (PWM capable - ~)
  * - Pin D5: YELLOW LED (PWM capable - ~)
  * - Pin D3: GREEN LED (PWM capable - ~)
  *
  * Serial Protocol:
- * - Sends: "UP" or "DOWN" when buttons are pressed
+ * - Sends: "UP" / "DOWN" when buttons are pressed
+ *          "UP_HELD:duration" / "DOWN_HELD:duration" while held (every 100ms)
+ *          "UP_RELEASED:duration" / "DOWN_RELEASED:duration" when released
  * - Receives: "RED:255" / "RED:0", "YELLOW:128", "GREEN:255", etc.
  *   Values are 0-255 for PWM brightness control
  *
@@ -155,9 +157,9 @@ private:
   bool pressDetected;
 };
 
-// Pin definitions
-const int PIN_BUTTON_DOWN = A0;
-const int PIN_BUTTON_UP = A1;
+// Pin definitions (SWAPPED: UP is now A0, DOWN is A1)
+const int PIN_BUTTON_UP = A0;
+const int PIN_BUTTON_DOWN = A1;
 const int PIN_LED_RED = 6;      // D6 - PWM capable (~)
 const int PIN_LED_YELLOW = 5;   // D5 - PWM capable (~)
 const int PIN_LED_GREEN = 3;    // D3 - PWM capable (~)
@@ -165,6 +167,15 @@ const int PIN_LED_GREEN = 3;    // D3 - PWM capable (~)
 // Buttons using MomentarySwitch class (normally-closed switches)
 MomentarySwitch buttonDown(PIN_BUTTON_DOWN, false, PULLUP_UP, 50);
 MomentarySwitch buttonUp(PIN_BUTTON_UP, false, PULLUP_UP, 50);
+
+// Hold tracking
+unsigned long upPressStartTime = 0;
+unsigned long downPressStartTime = 0;
+bool upWasPressed = false;
+bool downWasPressed = false;
+const unsigned long HOLD_REPORT_INTERVAL = 100;  // Report held state every 100ms
+unsigned long lastUpHoldReport = 0;
+unsigned long lastDownHoldReport = 0;
 
 // No animation logic - Python controls LEDs directly
 
@@ -203,12 +214,60 @@ void loop() {
   buttonDown.update();
   buttonUp.update();
 
-  // Check for button presses
-  if (buttonDown.wasPressed()) {
-    Serial.println("DOWN");
-  }
+  unsigned long now = millis();
+
+  // ===== UP BUTTON =====
+  bool upPressed = buttonUp.isPressed();
+
   if (buttonUp.wasPressed()) {
+    // Button just pressed
     Serial.println("UP");
+    upPressStartTime = now;
+    upWasPressed = true;
+    lastUpHoldReport = now;
+  } else if (upPressed && upWasPressed) {
+    // Button is being held
+    unsigned long holdDuration = now - upPressStartTime;
+
+    // Report hold state periodically
+    if (now - lastUpHoldReport >= HOLD_REPORT_INTERVAL) {
+      Serial.print("UP_HELD:");
+      Serial.println(holdDuration);
+      lastUpHoldReport = now;
+    }
+  } else if (!upPressed && upWasPressed) {
+    // Button just released
+    unsigned long holdDuration = now - upPressStartTime;
+    Serial.print("UP_RELEASED:");
+    Serial.println(holdDuration);
+    upWasPressed = false;
+  }
+
+  // ===== DOWN BUTTON =====
+  bool downPressed = buttonDown.isPressed();
+
+  if (buttonDown.wasPressed()) {
+    // Button just pressed
+    Serial.println("DOWN");
+    downPressStartTime = now;
+    downWasPressed = true;
+    lastDownHoldReport = now;
+  } else if (downPressed && downWasPressed) {
+    // Button is being held
+    unsigned long holdDuration = now - downPressStartTime;
+
+    // Report hold state periodically
+    if (now - lastDownHoldReport >= HOLD_REPORT_INTERVAL) {
+      Serial.print("DOWN_HELD:");
+      Serial.println(holdDuration);
+      lastDownHoldReport = now;
+    }
+  } else if (!downPressed && downWasPressed) {
+    // Button just released
+    unsigned long holdDuration = now - downPressStartTime;
+    Serial.print("DOWN_RELEASED:");
+    Serial.println(holdDuration);
+    downWasPressed = false;
   }
 
   // Process serial commands
