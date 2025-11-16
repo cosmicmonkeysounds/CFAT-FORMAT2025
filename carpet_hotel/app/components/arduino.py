@@ -173,20 +173,22 @@ class CarpetHotelArduino:
 
         # ===== RELEASED MESSAGES =====
         elif message_upper.startswith("UP_RELEASED:"):
+            # Always clear UP state when released, regardless of jump state
+            self.up_hold_duration = 0
             if self.jump_button_held == "UP":
-                # Released the held button - exit jump state
+                # Released the held button - exit jump state completely
                 self.jump_armed = False
                 self.jump_button_held = None
-                self.up_hold_duration = 0
                 self.log.info("Jump state cleared (UP released)")
             return
 
         elif message_upper.startswith("DOWN_RELEASED:"):
+            # Always clear DOWN state when released, regardless of jump state
+            self.down_hold_duration = 0
             if self.jump_button_held == "DOWN":
-                # Released the held button - exit jump state
+                # Released the held button - exit jump state completely
                 self.jump_armed = False
                 self.jump_button_held = None
-                self.down_hold_duration = 0
                 self.log.info("Jump state cleared (DOWN released)")
             return
 
@@ -238,11 +240,13 @@ class CarpetHotelArduino:
         self.log.success(f"JUMP {direction} - hold: {hold_duration_ms}ms ({hold_fraction*100:.1f}%)")
         self._notify(f"✓ JUMP {direction} - {hold_fraction*100:.0f}% power")
 
-        # Clear jump state after executing
+        # Clear ALL jump state after executing - prevents multiple jumps
+        # User must release held button and press again to initiate new jump
         self.jump_armed = False
         self.jump_button_held = None
         self.up_hold_duration = 0
         self.down_hold_duration = 0
+        self.log.info("Jump executed - all jump state cleared")
 
     def setup_osc(self) -> bool:
         """

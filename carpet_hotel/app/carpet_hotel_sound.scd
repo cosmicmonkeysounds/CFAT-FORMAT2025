@@ -14,6 +14,7 @@ OSC Messages:
 // ===== GLOBAL STATE =====
 var audioPath, floors, players, volumes;
 var numFloors; // Will be set dynamically based on available files
+var numScreens = 2; // Number of display screens
 var masterVolume = 0.7;
 
 // ===== STARTUP MESSAGE =====
@@ -25,10 +26,10 @@ var masterVolume = 0.7;
 
     // Use system defaults for device and sample rate
     // User sets audio device via macOS System Settings
-    s.options.numOutputBusChannels = 2;  // Stereo output
+    s.options.numOutputBusChannels = 4;  // 4 channels: Screen1(0-1), Screen2(2-3)
     s.options.numInputBusChannels = 0;   // No input needed
 
-    "✓ Server configured (using system defaults)".postln;
+    "✓ Server configured (4 channels: 2 screens × stereo)".postln;
 };
 
 // ===== STEP 2: LOAD AUDIO FILES =====
@@ -80,22 +81,30 @@ var masterVolume = 0.7;
                 // Wait for buffer to load
                 s.sync;
 
-                // Create looping player for each floor (start silent)
-                players[i] = {
-                    var numChannels = buffer.numChannels;
-                    var sig = PlayBuf.ar(
-                        numChannels,
-                        buffer,
-                        BufRateScale.kr(buffer),
-                        loop: 1
-                    );
-                    var amp = \amp.kr(0.0, 0.05); // 50ms lag for smooth changes
-                    // If mono, duplicate to stereo output
-                    if(numChannels == 1, {
-                        sig = sig ! 2;  // Duplicate mono to stereo
-                    });
-                    sig * amp;
-                }.play(outbus: 0, addAction: \addToTail);
+                // Create looping players for each floor - one per screen
+                // players[floorNum] will be an IdentityDictionary with keys 'screen0', 'screen1'
+                players[i] = IdentityDictionary.new;
+
+                numScreens.do({ |screenIdx|
+                    var outbus = screenIdx * 2; // Screen 0 → bus 0-1, Screen 1 → bus 2-3
+                    var screenKey = ("screen" ++ screenIdx).asSymbol;
+
+                    players[i][screenKey] = {
+                        var numChannels = buffer.numChannels;
+                        var sig = PlayBuf.ar(
+                            numChannels,
+                            buffer,
+                            BufRateScale.kr(buffer),
+                            loop: 1
+                        );
+                        var amp = \amp.kr(0.0, 0.05); // 50ms lag for smooth changes
+                        // If mono, duplicate to stereo output
+                        if(numChannels == 1, {
+                            sig = sig ! 2;  // Duplicate mono to stereo
+                        });
+                        sig * amp;
+                    }.play(outbus: outbus, addAction: \addToTail);
+                });
 
                 volumes[i] = 0.0;
             }, {
@@ -114,73 +123,92 @@ var masterVolume = 0.7;
 
     // OSC Responder for static scenes
     OSCdef(\carpetScene, { |msg|
-        var sceneNum, numWindows, isAnimating, volumePerFloor, floorNum;
+        var sceneNum, numWindows, isAnimating, volumePerFloor;
 
         sceneNum = msg[1].asInteger;
         numWindows = msg[2].asInteger;
         isAnimating = msg[3].asInteger;
-        volumePerFloor = masterVolume / sqrt(numWindows);
+        volumePerFloor = masterVolume; // Full volume per screen in stable mode
 
-        // Set all floors to silent first
+        // Set all floors on all screens to silent first
         floors.keys.do({ |floorNum|
             if(players[floorNum].notNil, {
-                players[floorNum].set(\amp, 0.0);
+                numScreens.do({ |screenIdx|
+                    var screenKey = ("screen" ++ screenIdx).asSymbol;
+                    var player = players[floorNum][screenKey];
+                    if(player.notNil, {
+                        player.set(\amp, 0.0);
+                    });
+                });
             });
         });
 
         // Set volume for active floors in current scene
-        numWindows.do({ |i|
-            floorNum = sceneNum + i + 1; // +1 because scenes are 0-indexed but files start at 1
+        // Each screen shows one floor
+        numWindows.do({ |screenIdx|
+            var floorNum = sceneNum + screenIdx + 1; // +1 because scenes are 0-indexed but files start at 1
+            var screenKey = ("screen" ++ screenIdx).asSymbol;
+            var player;
+
             if(players[floorNum].notNil, {
-                players[floorNum].set(\amp, volumePerFloor);
+                player = players[floorNum][screenKey];
+                if(player.notNil, {
+                    player.set(\amp, volumePerFloor);
+                });
             });
         });
     }, '/carpet/scene');
 
     // OSC Responder for transitions
     OSCdef(\carpetTransition, { |msg|
-        var currentFloor, progress, direction, numWindows, nextFloor, audibleFloors, volumePerFloor;
+        var currentFloor, progress, direction, numWindows;
+        var currentFloorNum, nextFloorNum, fadeOutGain, fadeInGain;
 
         currentFloor = msg[1].asInteger;
         progress = msg[2].asFloat;
         direction = msg[3].asInteger;
         numWindows = msg[4].asInteger;
-        nextFloor = currentFloor + direction;
-        audibleFloors = Set.new;
 
-        // Calculate which floors are audible (current + next)
-        numWindows.do({ |i|
-            audibleFloors.add(currentFloor + i + 1); // +1 because scenes are 0-indexed but files start at 1
-            audibleFloors.add(nextFloor + i + 1);
-        });
-
-        // Equal power mixing
-        volumePerFloor = masterVolume / sqrt(audibleFloors.size);
+        // Smooth crossfade using sine/cosine curves
+        fadeOutGain = cos(progress * 0.5pi);  // 1.0 → 0.0
+        fadeInGain = sin(progress * 0.5pi);   // 0.0 → 1.0
 
         // Set all floors to silent first
         floors.keys.do({ |floorNum|
             if(players[floorNum].notNil, {
-                players[floorNum].set(\amp, 0.0);
+                numScreens.do({ |screenIdx|
+                    var screenKey = ("screen" ++ screenIdx).asSymbol;
+                    var player = players[floorNum][screenKey];
+                    if(player.notNil, {
+                        player.set(\amp, 0.0);
+                    });
+                });
             });
         });
 
-        // Apply crossfade with smooth curves
-        audibleFloors.do({ |floorNum|
-            var isNext, crossfadeGain, finalVolume;
+        // Crossfade between current and next floors for each screen
+        numWindows.do({ |screenIdx|
+            var screenKey = ("screen" ++ screenIdx).asSymbol;
+            var currentFloorForScreen, nextFloorForScreen;
 
-            if(players[floorNum].notNil, {
-                isNext = (floorNum >= (nextFloor + 1)) && (floorNum < (nextFloor + numWindows + 1));
+            // Calculate current and next floor numbers for this screen
+            currentFloorForScreen = currentFloor + screenIdx + 1; // +1 for file numbering
+            nextFloorForScreen = (currentFloor + direction) + screenIdx + 1;
 
-                if(isNext, {
-                    // Fading in: sine curve (0 to 1)
-                    crossfadeGain = sin(progress * 0.5pi);
-                }, {
-                    // Fading out: cosine curve (1 to 0)
-                    crossfadeGain = cos(progress * 0.5pi);
+            // Fade out current floor
+            if(players[currentFloorForScreen].notNil, {
+                var player = players[currentFloorForScreen][screenKey];
+                if(player.notNil, {
+                    player.set(\amp, fadeOutGain * masterVolume);
                 });
+            });
 
-                finalVolume = volumePerFloor * crossfadeGain;
-                players[floorNum].set(\amp, finalVolume);
+            // Fade in next floor
+            if(players[nextFloorForScreen].notNil, {
+                var player = players[nextFloorForScreen][screenKey];
+                if(player.notNil, {
+                    player.set(\amp, fadeInGain * masterVolume);
+                });
             });
         });
     }, '/carpet/transition');
@@ -200,7 +228,12 @@ var masterVolume = 0.7;
 ~setupCleanup = {
     CmdPeriod.doOnce({
         "Stopping audio engine...".postln;
-        players.do({ |player| player.free });
+        // Free all players (now dictionaries of synths)
+        players.do({ |playerDict|
+            if(playerDict.isKindOf(Dictionary), {
+                playerDict.do({ |synth| synth.free });
+            });
+        });
         floors.do({ |buffer| buffer.free });
         OSCdef(\carpetScene).free;
         OSCdef(\carpetTransition).free;

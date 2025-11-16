@@ -2,8 +2,8 @@
  * Elevator Control Panel for Arduino Nano
  *
  * Hardware:
- * - Pin A0: UP button (momentary, normally-closed) [SWAPPED]
- * - Pin A1: DOWN button (momentary, normally-closed) [SWAPPED]
+ * - Pin A0: DOWN button (momentary, normally-closed)
+ * - Pin A1: UP button (momentary, normally-closed)
  * - Pin D6: RED LED (PWM capable - ~)
  * - Pin D5: YELLOW LED (PWM capable - ~)
  * - Pin D3: GREEN LED (PWM capable - ~)
@@ -157,9 +157,9 @@ private:
   bool pressDetected;
 };
 
-// Pin definitions (SWAPPED: UP is now A0, DOWN is A1)
-const int PIN_BUTTON_UP = A0;
-const int PIN_BUTTON_DOWN = A1;
+// Pin definitions (A0 = DOWN, A1 = UP)
+const int PIN_BUTTON_DOWN = A0;
+const int PIN_BUTTON_UP = A1;
 const int PIN_LED_RED = 6;      // D6 - PWM capable (~)
 const int PIN_LED_YELLOW = 5;   // D5 - PWM capable (~)
 const int PIN_LED_GREEN = 3;    // D3 - PWM capable (~)
