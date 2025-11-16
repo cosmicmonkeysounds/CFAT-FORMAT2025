@@ -64,13 +64,25 @@ class CarpetHotelArduino:
         self.message_callback = None
 
         # LED Animation
-        self.animation_mode = "OFF"  # 'OFF', 'STABLE', 'TRANSITION_UP', 'TRANSITION_DOWN'
+        self.animation_mode = "OFF"  # 'OFF', 'STABLE', 'TRANSITION_UP', 'TRANSITION_DOWN', 'CHARGING'
         self.animation_thread: Optional[threading.Thread] = None
         self.animation_running = False
         self.transition_start_time = 0.0  # Track when transition animation started
 
         # Simple button state - just track current state for LED animations
         self.current_state = "STABLE"  # Track if we're in stable mode ('STABLE' or 'TRANSITION')
+
+        # Button hold and charge state
+        self.button_hold_state = None  # None, 'UP', or 'DOWN'
+        self.button_press_time = None  # Time when button was first pressed
+        self.charge_start_time = None  # Time when HELD state started
+        self.charge_amount = 0.0  # 0.0 to 10.0 seconds
+        self.hold_timer_thread: Optional[threading.Thread] = None
+        self.MAX_CHARGE_TIME = 10.0  # Maximum charge time in seconds
+        self.HOLD_THRESHOLD = 1.0  # Time to hold before entering HELD state
+
+        # Core reference (set later) for getting max_scene
+        self.core = None
 
     def set_message_callback(self, callback):
         """
@@ -80,6 +92,15 @@ class CarpetHotelArduino:
             callback: Function that takes (message: str) parameter
         """
         self.message_callback = callback
+
+    def set_core_reference(self, core):
+        """
+        Set reference to core for getting max_scene.
+
+        Args:
+            core: CarpetHotelCore instance
+        """
+        self.core = core
 
     def _notify(self, message: str):
         """Send message to callback if set."""
@@ -135,8 +156,9 @@ class CarpetHotelArduino:
         """
         Handle incoming serial message from broker.
 
-        Simple logic: Button press = move 1 scene in that direction.
-        Ignore button releases and input during transitions.
+        Logic:
+        - Short press (< 1s): Move 1 scene
+        - Hold (> 1s): Enter HELD state, charge for up to 10s, jump on release
 
         Args:
             message: Message from Arduino
@@ -146,36 +168,152 @@ class CarpetHotelArduino:
         message_upper = message.upper()
 
         # Log ALL raw messages for debugging
-        self.log.debug(f"RAW: '{message}' (upper: '{message_upper}') | System: {self.current_state}")
+        self.log.debug(f"RAW: '{message}' | Hold state: {self.button_hold_state}")
 
-        # Ignore releases - we only care about presses
-        if "RELEASED" in message_upper:
+        # ===== HANDLE BUTTON PRESSES =====
+        if message_upper == "UP" or message_upper == "DOWN":
+            button = message_upper  # 'UP' or 'DOWN'
+
+            # Ignore if already in HELD state (other button is being held)
+            if self.button_hold_state is not None:
+                self.log.debug(f"{button} ignored - already holding {self.button_hold_state}")
+                return
+
+            # Ignore during transitions
+            if self.current_state != "STABLE":
+                self.log.debug(f"{button} ignored - system in {self.current_state} state")
+                return
+
+            # Record button press
+            self.button_hold_state = button
+            self.button_press_time = time.time()
+            self.log.info(f"{button} pressed - starting hold timer")
+
+            # Start 1-second hold detection timer
+            self.hold_timer_thread = threading.Thread(target=self._hold_detection_timer, args=(button,), daemon=True)
+            self.hold_timer_thread.start()
             return
 
-        # Ignore all input during transitions
-        if self.current_state != "STABLE":
-            self.log.debug(f"Input ignored - system in {self.current_state} state")
-            return
+        # ===== HANDLE BUTTON RELEASES =====
+        elif "RELEASED" in message_upper:
+            if "UP" in message_upper:
+                button = "UP"
+            elif "DOWN" in message_upper:
+                button = "DOWN"
+            else:
+                return
 
-        # ===== BUTTON PRESSES =====
-        if message_upper == "UP":
-            self.log.info("UP pressed - moving up 1 scene")
-            if self.osc_client:
-                self.osc_client.send_message("/carpet/elevator/up", [])
-            self._notify("✓ UP: 1 floor")
-            return
+            # Only handle release if this button is currently being tracked
+            if self.button_hold_state != button:
+                return
 
-        elif message_upper == "DOWN":
-            self.log.info("DOWN pressed - moving down 1 scene")
-            if self.osc_client:
-                self.osc_client.send_message("/carpet/elevator/down", [])
-            self._notify("✓ DOWN: 1 floor")
+            # Calculate how long the button was held
+            if self.button_press_time:
+                hold_duration = time.time() - self.button_press_time
+            else:
+                hold_duration = 0
+
+            self.log.info(f"{button} released after {hold_duration:.2f}s")
+
+            # Check if we're in HELD state (charging)
+            if self.charge_start_time is not None:
+                # HELD state - execute jump
+                self._execute_jump(button)
+            elif hold_duration < self.HOLD_THRESHOLD:
+                # Short press - move 1 scene
+                self.log.info(f"{button} short press - moving 1 scene")
+                if self.osc_client:
+                    if button == "UP":
+                        self.osc_client.send_message("/carpet/elevator/up", [])
+                        self._notify("✓ UP: 1 floor")
+                    else:
+                        self.osc_client.send_message("/carpet/elevator/down", [])
+                        self._notify("✓ DOWN: 1 floor")
+
+            # Reset hold state
+            self._reset_hold_state()
             return
 
         else:
             # Unknown message - might be debug output
             if message:  # Ignore empty lines
                 self.log.debug(f"Arduino: {message}")
+
+    def _hold_detection_timer(self, button: str):
+        """
+        Timer that waits 1 second. If button still held, enter HELD state.
+
+        Args:
+            button: 'UP' or 'DOWN'
+        """
+        time.sleep(self.HOLD_THRESHOLD)
+
+        # Check if button is still being held
+        if self.button_hold_state == button and self.button_press_time:
+            # Enter HELD state
+            self.charge_start_time = time.time()
+            self.charge_amount = 0.0
+            self.log.info(f"{button} HELD - entering charge mode")
+            self._notify(f"🔋 {button} CHARGING...")
+
+            # Switch to CHARGING animation mode
+            self.set_led_animation_mode("CHARGING")
+
+    def _execute_jump(self, button: str):
+        """
+        Execute jump based on charge amount.
+
+        Args:
+            button: 'UP' or 'DOWN'
+        """
+        # Calculate charge duration
+        if self.charge_start_time:
+            self.charge_amount = min(time.time() - self.charge_start_time, self.MAX_CHARGE_TIME)
+        else:
+            self.charge_amount = 0.0
+
+        self.log.info(f"{button} jump with charge: {self.charge_amount:.2f}s / {self.MAX_CHARGE_TIME}s")
+
+        # Get max scene from core
+        if not self.core:
+            self.log.error("Core reference not set - cannot calculate jump")
+            self._notify("✗ Jump failed - no core reference")
+            return
+
+        max_scene = self.core.get_max_scene()
+        current_scene = self.core.current_scene
+
+        # Calculate jump distance based on charge
+        # 10 seconds = full range, 5 seconds = half range
+        charge_ratio = self.charge_amount / self.MAX_CHARGE_TIME
+        total_range = max_scene  # 0 to max_scene
+
+        if button == "UP":
+            # Jump toward max scene
+            scenes_to_jump = int(charge_ratio * total_range)
+            target_scene = min(current_scene + scenes_to_jump, max_scene)
+        else:  # DOWN
+            # Jump toward scene 0
+            scenes_to_jump = int(charge_ratio * total_range)
+            target_scene = max(current_scene - scenes_to_jump, 0)
+
+        self.log.info(f"Jumping from scene {current_scene} to {target_scene} (charge: {charge_ratio*100:.1f}%)")
+        self._notify(f"🚀 JUMP: {current_scene} → {target_scene} ({scenes_to_jump} scenes)")
+
+        # Send goto command
+        if self.osc_client:
+            self.osc_client.send_message("/carpet/goto", [target_scene])
+
+    def _reset_hold_state(self):
+        """Reset all button hold state variables."""
+        self.button_hold_state = None
+        self.button_press_time = None
+        self.charge_start_time = None
+        self.charge_amount = 0.0
+
+        # Return to normal animation mode
+        if self.animation_mode == "CHARGING":
+            self.set_led_animation_mode("STABLE")
 
     def setup_osc(self) -> bool:
         """
@@ -344,6 +482,8 @@ class CarpetHotelArduino:
                 self._animate_transition_up(elapsed)
             elif self.animation_mode == "TRANSITION_DOWN":
                 self._animate_transition_down(elapsed)
+            elif self.animation_mode == "CHARGING":
+                self._animate_charging(elapsed)
             elif self.animation_mode == "OFF":
                 # Do nothing, LEDs are already off
                 pass
@@ -479,6 +619,48 @@ class CarpetHotelArduino:
         self.set_led("red", red_brightness)
         self.set_led("yellow", yellow_brightness)
         self.set_led("green", green_brightness)
+
+    def _animate_charging(self, elapsed: float):
+        """
+        Charging animation: Yellow LED pulses faster and faster as charge increases.
+        Frequency increases from 2 Hz (0% charge) to 10 Hz (100% charge).
+
+        Args:
+            elapsed: Time elapsed since animation start (seconds)
+        """
+        # Turn off red and green
+        self.set_led("red", 0)
+        self.set_led("green", 0)
+
+        # Calculate charge percentage (0.0 to 1.0)
+        if self.charge_start_time:
+            charge_time = time.time() - self.charge_start_time
+            charge_percentage = min(charge_time / self.MAX_CHARGE_TIME, 1.0)
+        else:
+            charge_percentage = 0.0
+
+        # Frequency increases with charge: 2 Hz → 10 Hz
+        min_freq = 2.0  # Hz
+        max_freq = 10.0  # Hz
+        frequency = min_freq + (max_freq - min_freq) * charge_percentage
+
+        # Period = 1 / frequency
+        period = 1.0 / frequency
+
+        # Phase within current cycle
+        phase = (elapsed % period) / period * 2 * math.pi  # 0 to 2π
+
+        # Pulse between 20% and 100%
+        min_brightness = 51  # 20% of 255
+        max_brightness = 255  # 100%
+        range_brightness = max_brightness - min_brightness
+
+        # Calculate brightness using sine wave
+        sin_value = math.sin(phase)  # -1 to 1
+        normalized = (sin_value + 1) / 2  # 0 to 1
+        yellow_brightness = int(min_brightness + range_brightness * normalized)
+
+        self.set_led("yellow", yellow_brightness)
 
     def run_forever(self):
         """
