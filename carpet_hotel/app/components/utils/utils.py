@@ -49,9 +49,122 @@ def get_config_dir() -> Path:
 # Display Detection (macOS)
 # ============================================================================
 
+def detect_displays_java() -> List[Dict[str, any]]:
+    """
+    Detect displays using Java (same order as Processing sees them).
+
+    This is the authoritative display detection method since Processing uses Java.
+    Display indices from this function match Processing's fullScreen() indices.
+
+    Returns:
+        List of display dictionaries with keys:
+        - index: Processing display index (1, 2, 3, ...) - use these in video_config.json
+        - name: Display name with resolution
+        - resolution: (width, height) tuple
+        - main: Boolean - True if main display
+    """
+    displays = []
+
+    try:
+        import subprocess
+        import tempfile
+
+        # Create a small Java program to detect displays
+        java_code = """
+import java.awt.GraphicsEnvironment;
+import java.awt.GraphicsDevice;
+import java.awt.DisplayMode;
+
+public class DisplayDetector {
+    public static void main(String[] args) {
+        GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+        GraphicsDevice[] gs = ge.getScreenDevices();
+        GraphicsDevice defaultDevice = ge.getDefaultScreenDevice();
+
+        for (int i = 0; i < gs.length; i++) {
+            DisplayMode dm = gs[i].getDisplayMode();
+            boolean isPrimary = (gs[i] == defaultDevice);
+            System.out.println((i+1) + "|" + dm.getWidth() + "|" + dm.getHeight() + "|" + isPrimary);
+        }
+    }
+}
+"""
+
+        # Find Java in Processing's bundle or system
+        java_cmd = None
+        javac_cmd = None
+
+        # Try Processing's bundled JDK first
+        processing_jdk = Path("/Applications/Processing.app/Contents/app/resources/jdk/bin")
+        if processing_jdk.exists():
+            java_cmd = str(processing_jdk / "java")
+            javac_cmd = str(processing_jdk / "javac")
+        else:
+            # Fall back to system Java
+            java_cmd = "java"
+            javac_cmd = "javac"
+
+        # Write, compile, and run the Java program
+        with tempfile.TemporaryDirectory() as tmpdir:
+            java_file = Path(tmpdir) / "DisplayDetector.java"
+            java_file.write_text(java_code)
+
+            # Compile
+            result = subprocess.run(
+                [javac_cmd, str(java_file)],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.returncode != 0:
+                print(f"Warning: Could not compile Java display detector: {result.stderr}")
+                return []
+
+            # Run
+            result = subprocess.run(
+                [java_cmd, "-cp", tmpdir, "DisplayDetector"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if '|' in line:
+                        parts = line.split('|')
+                        index = int(parts[0])
+                        width = int(parts[1])
+                        height = int(parts[2])
+                        is_primary = parts[3] == 'true'
+
+                        name = f"{width}x{height}"
+                        if is_primary:
+                            name += " [PRIMARY]"
+
+                        displays.append({
+                            "index": index,  # Processing display index (1-based)
+                            "name": name,
+                            "resolution": (width, height),
+                            "main": is_primary
+                        })
+
+                return displays
+            else:
+                print(f"Warning: Could not run Java display detector: {result.stderr}")
+
+    except Exception as e:
+        print(f"Warning: Java display detection failed: {e}")
+
+    return []
+
+
 def detect_displays() -> List[Dict[str, any]]:
     """
     Detect all connected displays with their properties.
+
+    NOTE: This uses Python's screeninfo which may detect displays in a different
+    order than Processing/Java. For Processing-compatible indices, use detect_displays_java().
 
     Returns:
         List of display dictionaries with keys:
@@ -60,6 +173,15 @@ def detect_displays() -> List[Dict[str, any]]:
         - resolution: (width, height) tuple
         - main: Boolean - True if main display
     """
+    # Try Java detection first (matches Processing order)
+    displays = detect_displays_java()
+    if displays:
+        # Convert to 0-based indexing for compatibility
+        for d in displays:
+            d['index'] = d['index'] - 1
+        return displays
+
+    # Fallback to Python detection
     displays = []
 
     # Try screeninfo first (most reliable)

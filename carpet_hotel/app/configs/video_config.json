@@ -3,22 +3,16 @@
     "scene_displays": [
       {
         "letter": "A",
-        "physical_display": 1,
-        "device_name": "Display 1 [Primary]",
-        "enabled": true
-      },
-      {
-        "letter": "B",
-        "physical_display": 2,
-        "device_name": "Display 2",
+        "physical_display": 3,
+        "device_name": "1920x1080",
         "enabled": true
       }
     ],
     "composite_display": {
       "letter": "Z",
-      "physical_display": 3,
-      "device_name": "Display 3",
-      "enabled": true,
+      "physical_display": null,
+      "device_name": "",
+      "enabled": false,
       "blend_mode": "multiply",
       "blend_sources": [
         "A",

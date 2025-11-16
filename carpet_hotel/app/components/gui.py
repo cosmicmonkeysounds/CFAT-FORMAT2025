@@ -511,8 +511,13 @@ Arduino: Auto-detected on first connection attempt"""
         refresh_frame.pack(fill='x', pady=5)
         ttk.Button(refresh_frame, text="🔄 Detect Displays",
                   command=self.refresh_displays_hardware, width=20).pack(side='left', padx=5)
-        ttk.Label(refresh_frame, text="Available displays will appear below",
-                 foreground='gray').pack(side='left', padx=10)
+
+        # Info frame with note about display order
+        info_frame = ttk.Frame(display_frame)
+        info_frame.pack(fill='x', pady=5)
+        note_text = "ℹ Display numbers shown below match Processing's order (test each display to verify)"
+        ttk.Label(info_frame, text=note_text,
+                 foreground='#0066cc', font=('Arial', 9)).pack(side='left', padx=5)
 
         # Display list container
         self.display_list_frame = ttk.Frame(display_frame)

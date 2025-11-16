@@ -7,6 +7,9 @@ import processing.video.*;
 import oscP5.*;
 import netP5.*;
 import java.io.File;
+import java.awt.GraphicsEnvironment;
+import java.awt.GraphicsDevice;
+import java.awt.DisplayMode;
 
 // Configuration
 int[] SCENE_DISPLAY_NUMBERS = {1, 2};   // Physical displays for scene windows A, B, C...
@@ -45,6 +48,9 @@ void setup() {
 
   // Parse command line arguments (can override config)
   parseArgs();
+
+  // Print available displays for debugging
+  printAvailableDisplays();
 
   // Create tiny control window
   size(400, 300);
@@ -168,6 +174,35 @@ void loadDisplayConfig() {
     println("✗ ERROR: No scene displays configured!");
     println("Please configure displays in the GUI Hardware tab or video_config.json");
     exit();
+  }
+}
+
+void printAvailableDisplays() {
+  // Print information about available displays using Java AWT
+  println("\n=== AVAILABLE DISPLAYS (Java GraphicsEnvironment) ===");
+  try {
+    GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+    GraphicsDevice[] gs = ge.getScreenDevices();
+
+    println("Total displays detected by Java: " + gs.length);
+    println("NOTE: Java may detect displays in a different order than your OS!");
+    println("");
+    for (int i = 0; i < gs.length; i++) {
+      DisplayMode dm = gs[i].getDisplayMode();
+      String note = "";
+      // Try to identify which is primary
+      try {
+        if (gs[i] == ge.getDefaultScreenDevice()) {
+          note = " [PRIMARY]";
+        }
+      } catch (Exception e) {}
+
+      println("  Processing fullScreen index " + (i+1) + ": " + dm.getWidth() + "x" + dm.getHeight() + note);
+    }
+    println("\n  Use these indices in video_config.json for physical_display");
+    println("=== END DISPLAY LIST ===\n");
+  } catch (Exception e) {
+    println("Could not query displays: " + e.getMessage());
   }
 }
 
@@ -975,9 +1010,11 @@ class FloorWindow extends PApplet {
     this.windowIndex = index;
     this.displayNum = SCENE_DISPLAY_NUMBERS[index];
     this.displayLetter = SCENE_DISPLAY_LETTERS[index];
+    println("Creating FloorWindow " + displayLetter + " on display " + displayNum);
   }
 
   public void settings() {
+    println("FloorWindow " + displayLetter + " settings(): fullScreen(P2D, " + displayNum + ")");
     fullScreen(P2D, displayNum);
     pixelDensity(1);
   }
@@ -985,6 +1022,7 @@ class FloorWindow extends PApplet {
   public void setup() {
     background(0);
     surface.setTitle("Carpet Hotel - Scene " + displayLetter);
+    println("FloorWindow " + displayLetter + " setup complete on display " + displayNum);
   }
 
   public void draw() {
@@ -1280,6 +1318,7 @@ class CompositeWindow extends PApplet {
   boolean showDebug = false;
 
   public void settings() {
+    println("CompositeWindow settings(): fullScreen(P2D, " + COMPOSITE_DISPLAY_NUMBER + ")");
     fullScreen(P2D, COMPOSITE_DISPLAY_NUMBER);
     pixelDensity(1);
   }
@@ -1287,6 +1326,7 @@ class CompositeWindow extends PApplet {
   public void setup() {
     background(0);
     surface.setTitle("Carpet Hotel - Composite Z");
+    println("CompositeWindow setup complete on display " + COMPOSITE_DISPLAY_NUMBER);
 
     // Create offscreen buffers for each scene window
     sceneA = createGraphics(width, height, P2D);
