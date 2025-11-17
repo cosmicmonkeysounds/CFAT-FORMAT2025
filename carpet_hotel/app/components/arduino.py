@@ -59,6 +59,7 @@ class CarpetHotelArduino:
 
         # Logger
         self.log = get_logger("Arduino")
+        self.button_log = get_logger("Button")
 
         # Message callback for GUI logging
         self.message_callback = None
@@ -151,85 +152,82 @@ class CarpetHotelArduino:
 
     def _handle_serial_message(self, message: str):
         """
-        Handle incoming serial message from broker.
-
-        ULTRA SIMPLE:
-        - Button press → Record time
-        - Button release → Calculate hold, send appropriate command
-        - Each press resets everything
-
-        Args:
-            message: Message from Arduino
+        Dead simple button handler:
+        - Press UP/DOWN → Record time ONLY (no command sent)
+        - Release UP/DOWN → Check duration, send command ON RELEASE ONLY
         """
         if not message:
             return
 
         message = message.strip()
-        message_upper = message.upper()
+        msg = message.upper()
 
-        # Debug: log all messages
-        print(f"[Arduino] Message: '{message}' | State: {self.button_hold_state}")
+        self.button_log.debug(f"RAW: '{message}' (upper: '{msg}')")
 
-        # BUTTON PRESS
-        if message_upper == "UP" or message_upper == "DOWN":
-            # Ignore if another button already held
-            if self.button_hold_state is not None:
-                print(f"[Arduino] Ignoring {message_upper} - already holding {self.button_hold_state}")
+        # === PRESS - ONLY RECORD TIME ===
+        if msg == "UP" or msg == "DOWN":
+            if self.button_hold_state and self.button_hold_state != msg:
+                self.button_log.warning(f"✗ BLOCKED - {self.button_hold_state} already held")
                 return
 
-            # Record press time - that's it!
-            self.button_hold_state = message_upper
+            self.button_hold_state = msg
             self.button_press_time = time.time()
-            print(f"[Arduino] {message_upper} pressed at {self.button_press_time}")
+            self.button_log.info(f"✓ {msg} pressed (time recorded, NO command sent)")
             return
 
-        # BUTTON RELEASE
-        elif "RELEASED" in message_upper:
-            button = "UP" if "UP" in message_upper else "DOWN"
-            print(f"[Arduino] {button} release detected")
+        # === RELEASE - SEND COMMAND ===
+        if "RELEASED" in msg:
+            self.button_log.debug(f"Detected RELEASE in '{msg}'")
 
-            # Ignore if not our button
+            # Parse which button
+            if "UP" in msg and "DOWN" not in msg:
+                button = "UP"
+            elif "DOWN" in msg:
+                button = "DOWN"
+            else:
+                self.button_log.error(f"✗ Cannot parse button from '{msg}'")
+                return
+
+            self.button_log.debug(f"Parsed button: {button}")
+
+            # Check state matches
             if self.button_hold_state != button:
-                print(f"[Arduino] Ignoring release - state is {self.button_hold_state}")
+                self.button_log.warning(f"✗ Wrong button - expected {self.button_hold_state}, got {button}")
                 return
 
-            if self.button_press_time is None:
-                print(f"[Arduino] Ignoring release - no press time")
+            if not self.button_press_time:
+                self.button_log.error(f"✗ No press time recorded!")
                 return
 
-            # Calculate hold duration
-            hold_duration = time.time() - self.button_press_time
-            print(f"[Arduino] {button} held for {hold_duration:.2f}s")
+            # Calculate hold time
+            hold_time = time.time() - self.button_press_time
+            self.button_log.info(f"✓ {button} held for {hold_time:.3f}s")
 
-            # Check OSC client
-            if not self.osc_client:
-                print(f"[Arduino] ERROR: No OSC client!")
-                self._reset_hold_state()
-                return
-
-            # Send command based on hold duration
-            if hold_duration < self.HOLD_THRESHOLD:
-                # Short press: move 1 scene
-                print(f"[Arduino] Short press - sending elevator/{button.lower()}")
+            # Send command based on duration
+            if hold_time < self.HOLD_THRESHOLD:
+                self.button_log.info(f"→ SHORT PRESS → Sending /carpet/elevator/{button.lower()}")
                 if button == "UP":
                     self.osc_client.send_message("/carpet/elevator/up", [])
                 else:
                     self.osc_client.send_message("/carpet/elevator/down", [])
             else:
-                # Long press: jump
-                charge_time = hold_duration - self.HOLD_THRESHOLD
-                print(f"[Arduino] Long press - jumping with {charge_time:.2f}s charge")
-                self._execute_jump(button, charge_time)
+                charge = hold_time - self.HOLD_THRESHOLD
+                self.button_log.info(f"→ LONG PRESS → Jump (charge={charge:.2f}s)")
+                self._execute_jump(button, charge)
 
-            # Reset
-            self._reset_hold_state()
-            print(f"[Arduino] State reset")
+            # Clear state
+            self.button_hold_state = None
+            self.button_press_time = None
+            self.button_log.debug(f"✓ State cleared")
             return
+
+        # Unknown message
+        self.button_log.debug(f"? Unknown message: '{msg}'")
 
     def _execute_jump(self, button: str, charge_time: float):
         """Execute jump based on charge time."""
         if not self.core or not self.osc_client:
-            print(f"[Arduino] Cannot jump - core={self.core}, osc={self.osc_client}")
+            self.button_log.error(f"Cannot jump - core={self.core}, osc={self.osc_client}")
             return
 
         # Clamp and calculate ratio
@@ -249,14 +247,8 @@ class CarpetHotelArduino:
 
         # Clamp and send
         target = max(0, min(target, max_scene))
-        print(f"[Arduino] Jump {button}: {current} → {target} (charge: {charge_ratio*100:.0f}%)")
+        self.button_log.info(f"Jump {button}: {current} → {target} (charge: {charge_ratio*100:.0f}%)")
         self.osc_client.send_message("/carpet/goto", [target])
-
-    def _reset_hold_state(self):
-        """Reset all button hold state variables."""
-        print(f"[Arduino] Resetting state (was: {self.button_hold_state})")
-        self.button_hold_state = None
-        self.button_press_time = None
 
     def setup_osc(self) -> bool:
         """
