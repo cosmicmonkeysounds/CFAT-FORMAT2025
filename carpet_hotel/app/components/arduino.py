@@ -153,149 +153,110 @@ class CarpetHotelArduino:
         """
         Handle incoming serial message from broker.
 
-        Simple logic:
-        - Button press → Record press time
-        - Button release → Check hold duration:
-            * < 1s: Move 1 scene
-            * >= 1s: Jump based on charge amount (hold_time - 1s)
+        ULTRA SIMPLE:
+        - Button press → Record time
+        - Button release → Calculate hold, send appropriate command
+        - Each press resets everything
 
         Args:
             message: Message from Arduino
         """
-        # Parse message
+        if not message:
+            return
+
         message = message.strip()
         message_upper = message.upper()
 
-        # Log ALL raw messages for debugging
-        self.log.debug(f"RAW: '{message}' | Hold state: {self.button_hold_state} | Press time: {self.button_press_time}")
+        # Debug: log all messages
+        print(f"[Arduino] Message: '{message}' | State: {self.button_hold_state}")
 
-        # ===== HANDLE BUTTON PRESSES =====
+        # BUTTON PRESS
         if message_upper == "UP" or message_upper == "DOWN":
-            button = message_upper  # 'UP' or 'DOWN'
-
-            # Ignore if another button is being held
+            # Ignore if another button already held
             if self.button_hold_state is not None:
-                self.log.debug(f"{button} ignored - already holding {self.button_hold_state}")
+                print(f"[Arduino] Ignoring {message_upper} - already holding {self.button_hold_state}")
                 return
 
-            # Ignore during transitions
-            if self.current_state != "STABLE":
-                self.log.debug(f"{button} ignored - system in {self.current_state} state")
-                return
-
-            # Record button press - just save the time, nothing else
-            self.button_hold_state = button
+            # Record press time - that's it!
+            self.button_hold_state = message_upper
             self.button_press_time = time.time()
-            self.log.info(f"{button} pressed at {self.button_press_time}")
+            print(f"[Arduino] {message_upper} pressed at {self.button_press_time}")
             return
 
-        # ===== HANDLE BUTTON RELEASES =====
+        # BUTTON RELEASE
         elif "RELEASED" in message_upper:
-            if "UP" in message_upper:
-                button = "UP"
-            elif "DOWN" in message_upper:
-                button = "DOWN"
-            else:
-                return
+            button = "UP" if "UP" in message_upper else "DOWN"
+            print(f"[Arduino] {button} release detected")
 
-            # Only handle release if this button is currently being tracked
+            # Ignore if not our button
             if self.button_hold_state != button:
+                print(f"[Arduino] Ignoring release - state is {self.button_hold_state}")
                 return
 
-            # Calculate how long the button was held
             if self.button_press_time is None:
-                self.log.error("Button released but no press time recorded")
+                print(f"[Arduino] Ignoring release - no press time")
+                return
+
+            # Calculate hold duration
+            hold_duration = time.time() - self.button_press_time
+            print(f"[Arduino] {button} held for {hold_duration:.2f}s")
+
+            # Check OSC client
+            if not self.osc_client:
+                print(f"[Arduino] ERROR: No OSC client!")
                 self._reset_hold_state()
                 return
 
-            hold_duration = time.time() - self.button_press_time
-            self.log.info(f"{button} released after {hold_duration:.2f}s")
-
-            # Decision point: was it held for >= 1s?
+            # Send command based on hold duration
             if hold_duration < self.HOLD_THRESHOLD:
-                # Short press - move 1 scene
-                self.log.info(f"{button} short press ({hold_duration:.2f}s) - moving 1 scene")
-                if self.osc_client:
-                    if button == "UP":
-                        self.osc_client.send_message("/carpet/elevator/up", [])
-                        self._notify("✓ UP: 1 floor")
-                    else:
-                        self.osc_client.send_message("/carpet/elevator/down", [])
-                        self._notify("✓ DOWN: 1 floor")
+                # Short press: move 1 scene
+                print(f"[Arduino] Short press - sending elevator/{button.lower()}")
+                if button == "UP":
+                    self.osc_client.send_message("/carpet/elevator/up", [])
+                else:
+                    self.osc_client.send_message("/carpet/elevator/down", [])
             else:
-                # Long press - execute jump based on charge time
-                # Charge time = hold_duration - HOLD_THRESHOLD
+                # Long press: jump
                 charge_time = hold_duration - self.HOLD_THRESHOLD
-                self.log.info(f"{button} long press ({hold_duration:.2f}s) - charge time: {charge_time:.2f}s")
+                print(f"[Arduino] Long press - jumping with {charge_time:.2f}s charge")
                 self._execute_jump(button, charge_time)
 
-            # Reset hold state
+            # Reset
             self._reset_hold_state()
+            print(f"[Arduino] State reset")
             return
-
-        else:
-            # Unknown message - might be debug output
-            if message:  # Ignore empty lines
-                self.log.debug(f"Arduino: {message}")
 
     def _execute_jump(self, button: str, charge_time: float):
-        """
-        Execute jump based on charge amount.
-
-        Args:
-            button: 'UP' or 'DOWN'
-            charge_time: Time held beyond 1s threshold (in seconds)
-        """
-        # Clamp charge time to max
-        charge_time = min(charge_time, self.MAX_CHARGE_TIME)
-
-        self.log.info(f"{button} jump with charge: {charge_time:.2f}s / {self.MAX_CHARGE_TIME}s")
-
-        # Get max scene from core
-        if not self.core:
-            self.log.error("Core reference not set - cannot calculate jump")
-            self._notify("✗ Jump failed - no core reference")
+        """Execute jump based on charge time."""
+        if not self.core or not self.osc_client:
+            print(f"[Arduino] Cannot jump - core={self.core}, osc={self.osc_client}")
             return
 
-        max_scene = self.core.get_max_scene()
-        current_scene = self.core.current_scene
-
-        # Calculate jump distance based on charge
-        # 10 seconds = full jump to opposite end
-        # 5 seconds = jump halfway to opposite end
+        # Clamp and calculate ratio
+        charge_time = min(charge_time, self.MAX_CHARGE_TIME)
         charge_ratio = charge_time / self.MAX_CHARGE_TIME
 
+        # Calculate target
+        max_scene = self.core.get_max_scene()
+        current = self.core.current_scene
+
         if button == "UP":
-            # Jump toward max scene
-            # Calculate distance from current to max
-            distance_to_max = max_scene - current_scene
-            scenes_to_jump = int(charge_ratio * distance_to_max)
-            target_scene = current_scene + scenes_to_jump
-        else:  # DOWN
-            # Jump toward scene 0
-            # Calculate distance from current to 0
-            distance_to_zero = current_scene
-            scenes_to_jump = int(charge_ratio * distance_to_zero)
-            target_scene = current_scene - scenes_to_jump
+            distance = max_scene - current
+            target = current + int(charge_ratio * distance)
+        else:
+            distance = current
+            target = current - int(charge_ratio * distance)
 
-        # Clamp to valid range (prevent over/underflow)
-        target_scene = max(0, min(target_scene, max_scene))
-
-        self.log.info(f"Jumping from scene {current_scene} to {target_scene} (charge: {charge_ratio*100:.1f}%, {abs(target_scene - current_scene)} scenes)")
-        self._notify(f"🚀 JUMP: {current_scene} → {target_scene} ({abs(target_scene - current_scene)} scenes)")
-
-        # Send goto command
-        if self.osc_client:
-            self.osc_client.send_message("/carpet/goto", [target_scene])
+        # Clamp and send
+        target = max(0, min(target, max_scene))
+        print(f"[Arduino] Jump {button}: {current} → {target} (charge: {charge_ratio*100:.0f}%)")
+        self.osc_client.send_message("/carpet/goto", [target])
 
     def _reset_hold_state(self):
         """Reset all button hold state variables."""
+        print(f"[Arduino] Resetting state (was: {self.button_hold_state})")
         self.button_hold_state = None
         self.button_press_time = None
-
-        # Return to normal animation mode if in charging
-        if self.animation_mode == "CHARGING":
-            self.set_led_animation_mode("STABLE")
 
     def setup_osc(self) -> bool:
         """
@@ -445,14 +406,6 @@ class CarpetHotelArduino:
         while self.animation_running and self.running:
             elapsed = time.time() - start_time
             iteration += 1
-
-            # Auto-trigger CHARGING mode if button held > 1s
-            if (self.button_hold_state is not None and
-                self.button_press_time is not None and
-                self.animation_mode not in ["CHARGING", "TRANSITION_UP", "TRANSITION_DOWN"]):
-                hold_duration = time.time() - self.button_press_time
-                if hold_duration >= self.HOLD_THRESHOLD:
-                    self.set_led_animation_mode("CHARGING")
 
             # Log mode changes
             if self.animation_mode != last_mode:
