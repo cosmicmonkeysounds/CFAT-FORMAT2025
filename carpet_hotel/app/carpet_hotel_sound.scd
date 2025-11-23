@@ -9,6 +9,7 @@ Architecture:
 - Two audio busses representing "floors" (like displays in Processing)
 - Scene changes move which WAV files are active on each bus
 - Crossfading during transitions (like video movement)
+- 3-band dynamic EQ + limiter on each bus
 
 Routing Modes:
 - Quad:   Bus 1 → channels 0+1, Bus 2 → channels 2+3
@@ -27,6 +28,7 @@ var numFloors = 0;  // Detected dynamically
 var numBusses = 2;  // Two audio busses (like two displays)
 var masterVolume = 0.7;
 var routingMode = \quad;  // \quad or \stereo (passed via command-line)
+var processingBusses, eqSynths, limiterSynths;  // Audio processing
 
 // ===== STARTUP MESSAGE =====
 "=== CARPET HOTEL AUDIO ENGINE ===".postln;
@@ -59,9 +61,124 @@ if(thisProcess.argv.size > 0, {
     });
 
     s.options.numInputBusChannels = 0;   // No input needed
+    s.options.numAudioBusChannels = 2048;  // Plenty of busses for processing
 };
 
-// ===== STEP 2: LOAD AUDIO FILES =====
+// ===== STEP 1B: DEFINE SYNTHDEFS =====
+~defineSynthDefs = {
+    "Defining SynthDefs...".postln;
+
+    // 3-band Dynamic EQ
+    SynthDef(\dynamicEQ, {
+        arg inBus, outBus,
+        // Band 1 (Low)
+        freq1=120, q1=1.0, gain1=0.0, thresh1=(-20), attack1=0.01, release1=0.1,
+        // Band 2 (Mid)
+        freq2=1000, q2=1.0, gain2=0.0, thresh2=(-20), attack2=0.01, release2=0.1,
+        // Band 3 (High)
+        freq3=8000, q3=1.0, gain3=0.0, thresh3=(-20), release3=0.1, attack3=0.01;
+
+        var in, sig, band1, band2, band3, env1, env2, env3;
+        var comp1, comp2, comp3, mixed;
+        var numChannels = 2;  // Stereo processing
+
+        in = In.ar(inBus, numChannels);
+
+        // Band 1: Low frequencies
+        band1 = BPF.ar(in, freq1, 1.0/q1);
+        env1 = Amplitude.ar(band1, attack1, release1);
+        comp1 = (env1.ampdb - thresh1).max(0) / thresh1.abs;
+        comp1 = comp1 * gain1;  // Apply gain based on threshold excess
+
+        // Band 2: Mid frequencies
+        band2 = BPF.ar(in, freq2, 1.0/q2);
+        env2 = Amplitude.ar(band2, attack2, release2);
+        comp2 = (env2.ampdb - thresh2).max(0) / thresh2.abs;
+        comp2 = comp2 * gain2;
+
+        // Band 3: High frequencies
+        band3 = BPF.ar(in, freq3, 1.0/q3);
+        env3 = Amplitude.ar(band3, attack3, release3);
+        comp3 = (env3.ampdb - thresh3).max(0) / thresh3.abs;
+        comp3 = comp3 * gain3;
+
+        // Apply dynamic gain to each band
+        band1 = band1 * comp1.dbamp;
+        band2 = band2 * comp2.dbamp;
+        band3 = band3 * comp3.dbamp;
+
+        // Mix processed bands back with original
+        sig = in + band1 + band2 + band3;
+
+        Out.ar(outBus, sig);
+    }).add;
+
+    // Limiter
+    SynthDef(\limiter, {
+        arg inBus, outBus,
+        threshold=(-0.5), releaseTime=0.01;
+
+        var in, limited;
+        var numChannels = 2;  // Stereo processing
+
+        in = In.ar(inBus, numChannels);
+        limited = Limiter.ar(in, threshold.dbamp, releaseTime);
+
+        Out.ar(outBus, limited);
+    }).add;
+
+    s.sync;
+    "✓ SynthDefs compiled".postln;
+};
+
+// ===== STEP 2: CREATE PROCESSING CHAIN =====
+~createProcessingChain = {
+    "Creating audio processing chain...".postln;
+
+    // Create internal busses for processing
+    processingBusses = Array.fill(numBusses, { Bus.audio(s, 2) });  // Stereo busses
+
+    // Initialize arrays for processing synths
+    eqSynths = Array.newClear(numBusses);
+    limiterSynths = Array.newClear(numBusses);
+
+    numBusses.do({ |busIdx|
+        var eqBus, finalOut;
+
+        // Create intermediate bus for EQ
+        eqBus = Bus.audio(s, 2);
+
+        // Determine final output channels
+        if(routingMode == \quad, {
+            finalOut = busIdx * 2;  // Bus 0→ch0+1, Bus 1→ch2+3
+        }, {
+            finalOut = busIdx;  // Bus 0→ch0, Bus 1→ch1
+        });
+
+        // Processing chain: processingBus → EQ → eqBus → Limiter → output
+        eqSynths[busIdx] = Synth(\dynamicEQ, [
+            \inBus, processingBusses[busIdx].index,
+            \outBus, eqBus.index,
+            // Default EQ settings
+            \freq1, 100, \q1, 0.45, \gain1, 10.0, \thresh1, -35, \attack1, 0.01, \release1, 0.1,
+            \freq2, 1500, \q2, 0.57, \gain2, -4.0, \thresh2, -35, \attack2, 0.005, \release2, 0.05,
+            \freq3, 12000, \q3, 0.5, \gain3, 6.0, \thresh3, -45, \attack3, 0.001, \release3, 0.1
+        ], addAction: \addToTail);
+
+        limiterSynths[busIdx] = Synth(\limiter, [
+            \inBus, eqBus.index,
+            \outBus, finalOut,
+            \threshold, -10.0,
+            \releaseTime, 0.01
+        ], addAction: \addToTail);
+
+        ("  ✓ Bus " ++ (busIdx + 1) ++ " processing chain created").postln;
+    });
+
+    "✓ Processing chain ready".postln;
+};
+
+// ===== STEP 3: LOAD AUDIO FILES =====
 ~loadAudioFiles = {
     var carpetFiles, floorNumbers;
 
@@ -124,18 +241,10 @@ if(thisProcess.argv.size > 0, {
 
                     // Create looping players for each floor - one per bus
                     numBusses.do({ |busIdx|
-                        var outChannels, synth;
-
-                        // Determine output channels based on routing mode
-                        if(routingMode == \quad, {
-                            // Quad mode: each bus gets 2 channels
-                            outChannels = busIdx * 2;  // Bus 0→ch0+1, Bus 1→ch2+3
-                        }, {
-                            // Stereo mode: each bus gets 1 channel
-                            outChannels = busIdx;  // Bus 0→ch0, Bus 1→ch1
-                        });
+                        var synth;
 
                         // Create synth for this floor on this bus
+                        // Output to processing bus instead of direct output
                         synth = {
                             var numChannels = buffer.numChannels;
                             var sig = PlayBuf.ar(
@@ -146,21 +255,13 @@ if(thisProcess.argv.size > 0, {
                             );
                             var amp = \amp.kr(0.0, 0.1);  // 100ms lag for smooth crossfades
 
-                            // Handle mono/stereo conversion based on routing mode
-                            if(routingMode == \quad, {
-                                // Quad mode: output stereo to two channels
-                                if(numChannels == 1, {
-                                    sig = sig ! 2;  // Duplicate mono to stereo
-                                });
-                                sig * amp;
-                            }, {
-                                // Stereo mode: output mono to one channel
-                                if(numChannels == 2, {
-                                    sig = Mix(sig);  // Mix stereo to mono
-                                });
-                                sig * amp;
+                            // Always output stereo to processing bus
+                            if(numChannels == 1, {
+                                sig = sig ! 2;  // Duplicate mono to stereo
                             });
-                        }.play(outbus: outChannels, addAction: \addToTail);
+
+                            sig * amp;
+                        }.play(outbus: processingBusses[busIdx].index, addAction: \addToHead);
 
                         // Store synth
                         busPlayers[busIdx][idx] = synth;
@@ -175,7 +276,7 @@ if(thisProcess.argv.size > 0, {
     });
 };
 
-// ===== STEP 3: SETUP OSC HANDLERS =====
+// ===== STEP 4: SETUP OSC HANDLERS =====
 ~setupOSC = {
     "Setting up OSC handlers...".postln;
 
@@ -274,7 +375,7 @@ if(thisProcess.argv.size > 0, {
     "✓ OSC handlers ready".postln;
 };
 
-// ===== STEP 4: CLEANUP =====
+// ===== STEP 5: CLEANUP =====
 ~setupCleanup = {
     CmdPeriod.doOnce({
         "Stopping audio engine...".postln;
@@ -285,6 +386,13 @@ if(thisProcess.argv.size > 0, {
                 if(synth.notNil, { synth.free });
             });
         });
+
+        // Free processing synths
+        eqSynths.do({ |synth| if(synth.notNil, { synth.free }); });
+        limiterSynths.do({ |synth| if(synth.notNil, { synth.free }); });
+
+        // Free busses
+        processingBusses.do({ |bus| if(bus.notNil, { bus.free }); });
 
         // Free all buffers
         floors.do({ |buffer|
@@ -313,11 +421,14 @@ s.waitForBoot({
     SystemClock.sched(1.0, { 1.0 });
 
     // Setup everything else
+    ~defineSynthDefs.value;
+    ~createProcessingChain.value;
     ~loadAudioFiles.value;
     ~setupOSC.value;
     ~setupCleanup.value;
 
     "\n=== READY ===".postln;
+    "Audio Chain: Floors → Dynamic EQ (3-band) → Limiter → Output".postln;
     "Press Cmd+. to stop\n".postln;
 });
 
