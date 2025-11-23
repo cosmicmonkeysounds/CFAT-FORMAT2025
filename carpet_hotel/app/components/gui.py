@@ -444,14 +444,8 @@ class CarpetHotelGUI:
         # Save setting
         self.settings.set("master_volume", volume)
 
-        # Send to SuperCollider if running
-        if self.audio_running and OSC_AVAILABLE:
-            try:
-                client = udp_client.SimpleUDPClient("127.0.0.1", 57120)
-                client.send_message("/carpet/volume", [volume])
-                self.log_to_widget(self.audio_log, f"Volume: {int(volume * 100)}%")
-            except Exception as e:
-                self.log_to_widget(self.audio_log, f"✗ Error setting volume: {e}")
+        # Note: SuperCollider now runs at fixed 100% volume
+        # Volume control removed from OSC messaging
 
     def on_audio_routing_change(self, event=None):
         """Handle audio routing mode change."""
@@ -1170,7 +1164,7 @@ Arduino: Auto-detected on first connection attempt"""
 
         ttk.Button(input_frame, text="Send", command=self.send_raw_osc, width=10).pack(side='left', padx=5)
 
-        ttk.Label(osc_frame, text='Example: /carpet/volume 0.5  or  /carpet/scene 0 2 0',
+        ttk.Label(osc_frame, text='Example: /carpet/scene 0 2 0  or  /carpet/goto 5',
                  foreground='gray', font=('Arial', 9)).pack(anchor='w', padx=5)
 
         # Pack canvas and scrollbar in container
@@ -1528,7 +1522,7 @@ Arduino: Auto-detected on first connection attempt"""
 
         try:
             # Send to SuperCollider (audio commands)
-            if '/carpet/volume' in address or '/carpet/scene' in address or '/carpet/transition' in address:
+            if '/carpet/scene' in address or '/carpet/transition' in address:
                 client = udp_client.SimpleUDPClient("127.0.0.1", 57120)
                 client.send_message(address, args)
                 self.log_to_widget(self.command_log, f"→ SC: {address} {args}")

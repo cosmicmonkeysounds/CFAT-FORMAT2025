@@ -118,9 +118,6 @@ void setup() {
   println("  R: Reload config file");
   println("  SPACE: Print info");
   println("  ESC or QUADRUPLE-CLICK: Close all windows");
-
-  // Send initial volume to SuperCollider
-  sendVolumeOSC();
 }
 
 void loadDisplayConfig() {
@@ -343,20 +340,7 @@ void mousePressed() {
 }
 
 void mouseWheel(MouseEvent event) {
-  if (TEST_MODE) {
-    // Adjust volume with mouse wheel
-    float delta = event.getCount() * -0.05; // Negative for natural scrolling
-    masterVolume = constrain(masterVolume + delta, 0.0, 1.0);
-    println("Volume: " + int(masterVolume * 100) + "%");
-    sendVolumeOSC();
-  }
-}
-
-void sendVolumeOSC() {
-  OscMessage msg = new OscMessage("/carpet/volume");
-  msg.add(masterVolume);
-  oscP5.send(msg, pythonAddress);  // Send to Python, which forwards to SuperCollider
-  println("[OSC-SEND] /carpet/volume " + masterVolume + " (via Python)");
+  // Mouse wheel events (currently unused)
 }
 
 // OSC event handler for messages from Python

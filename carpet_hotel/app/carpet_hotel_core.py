@@ -200,7 +200,6 @@ class CarpetHotelCore:
         dispatcher = Dispatcher()
         dispatcher.map("/carpet/scene", self._handle_scene)
         dispatcher.map("/carpet/transition", self._handle_transition)
-        dispatcher.map("/carpet/volume", self._handle_volume)
         dispatcher.map("/carpet/state", self._handle_state)
         dispatcher.map("/carpet/elevator/up", self._handle_elevator_up)
         dispatcher.map("/carpet/elevator/down", self._handle_elevator_down)
@@ -243,19 +242,6 @@ class CarpetHotelCore:
         # Forward directly to SuperCollider (don't spam console)
         if self.sc_client and self.sc_running:
             self.sc_client.send_message("/carpet/transition", args)
-
-    def _handle_volume(self, address, *args):
-        """Handle volume change from Processing."""
-        if len(args) >= 1:
-            volume = float(args[0])
-
-            # Update global state
-            self.master_volume = volume
-
-            # Forward to SuperCollider
-            if self.sc_client and self.sc_running:
-                self.sc_client.send_message("/carpet/volume", [volume])
-                self.log.info(f"Volume {int(volume * 100)}% → SuperCollider")
 
     def _handle_state(self, address, *args):
         """Handle state updates from Processing."""
@@ -466,10 +452,6 @@ class CarpetHotelCore:
                 0  # not animating
             ])
             self.log.success(f"Initial scene {self.current_scene} → SuperCollider")
-
-            # Send initial volume
-            self.sc_client.send_message("/carpet/volume", [self.master_volume])
-            self.log.success(f"Initial volume {int(self.master_volume * 100)}% → SuperCollider")
 
     # ========================================================================
     # Component Management

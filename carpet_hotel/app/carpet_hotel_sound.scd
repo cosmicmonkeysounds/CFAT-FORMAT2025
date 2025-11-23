@@ -33,7 +33,6 @@ Routing Modes:
 OSC Messages:
 - /carpet/scene [sceneNum, numBusses, isAnimating]
 - /carpet/transition [currentFloor, progress, direction, numBusses]
-- /carpet/volume [volume]
 */
 
 (
@@ -41,7 +40,7 @@ OSC Messages:
 var audioPath, floors, busPlayers;
 var numFloors = 0;  // Detected dynamically
 var numBusses = 2;  // Two audio busses (like two displays)
-var masterVolume = 0.7;
+var masterVolume = 1.0;  // Fixed at 100%
 var routingMode = \quad;  // \quad or \stereo (passed via command-line)
 var processingBusses, masterBusses, eqBusses, eqSynths, limiterSynths;  // Audio processing
 var reverbSendBusses, reverbProcessedBusses;  // Reverb busses
@@ -578,15 +577,6 @@ if(thisProcess.argv.size > 0, {
         });
     }, '/carpet/transition');
 
-    // Master volume control via OSC
-    OSCdef(\carpetVolume, { |msg|
-        var newVolume;
-
-        newVolume = msg[1].asFloat.clip(0.0, 1.0);
-        masterVolume = newVolume;
-        ("Volume: " ++ (masterVolume * 100).round(1) ++ "%").postln;
-    }, '/carpet/volume');
-
     "✓ OSC handlers ready".postln;
 };
 
@@ -616,7 +606,6 @@ if(thisProcess.argv.size > 0, {
         // Free OSC responders
         OSCdef(\carpetScene).free;
         OSCdef(\carpetTransition).free;
-        OSCdef(\carpetVolume).free;
     });
 };
 
