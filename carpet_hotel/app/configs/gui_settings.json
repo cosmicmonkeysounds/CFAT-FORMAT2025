@@ -1,5 +1,6 @@
 {
   "audio_device": "Default",
+  "audio_routing": "stereo",
   "master_volume": 0.7,
   "active_displays": [
     {
@@ -26,7 +27,7 @@
   "enable_keyboard": true,
   "serial_port": "Auto-detect",
   "window_width": 1247,
-  "window_height": 1326,
+  "window_height": 1027,
   "window_x": 5,
-  "window_y": 30
+  "window_y": 25
 }

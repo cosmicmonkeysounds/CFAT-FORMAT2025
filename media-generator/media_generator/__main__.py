@@ -19,7 +19,10 @@ from media_generator.audio_separator import (
     separate_audio_batch,
     separate_audio_from_directory,
     SeparationConfig,
-    AudioFormat as SeparatorAudioFormat
+    AudioFormat as SeparatorAudioFormat,
+    remove_audio_batch,
+    remove_audio_from_directory,
+    RemovalConfig
 )
 
 
@@ -104,10 +107,11 @@ def interactive_mode() -> Optional[List[str]]:
     print("    3️⃣  Animation (GIF)")
     print("    4️⃣  Audio (WAV, OGG, MP3, AAC, FLAC)")
     print("    5️⃣  Extract Audio from Videos (Audio Separator)")
+    print("    6️⃣  Remove Audio from Videos (Create Silent Videos)")
 
-    choice = padded_input("Enter choice (1-5):")
+    choice = padded_input("Enter choice (1-6):")
 
-    if choice not in ['1', '2', '3', '4', '5']:
+    if choice not in ['1', '2', '3', '4', '5', '6']:
         print("\n  ❌ Invalid choice. Exiting.\n")
         return None
 
@@ -408,6 +412,100 @@ def interactive_mode() -> Optional[List[str]]:
 
         return args
 
+    # Remove Audio
+    elif choice == '6':
+        args.append('--remove-audio')
+
+        section_header("Step 3: Select Video Files or Directory")
+
+        print("\n  How do you want to specify videos?\n")
+        print("    1️⃣  Specific video file(s)")
+        print("    2️⃣  Directory containing videos")
+
+        source_choice = padded_input("Enter choice (1-2) [default: 2]:") or '2'
+
+        if source_choice == '1':
+            video_files = padded_input("Video file path(s) (comma-separated):")
+            args.extend(['--video-files', video_files])
+        else:
+            video_dir = padded_input("Directory path containing videos:")
+            args.extend(['--video-dir', video_dir])
+
+            recursive = padded_input("Search subdirectories recursively? (y/n) [default: n]:").lower()
+            if recursive == 'y':
+                args.append('--recursive')
+
+        section_header("Step 4: Video Output Configuration")
+
+        print("\n  Do you want to overwrite the original files?\n")
+        print("    1️⃣  No - Create new files (with suffix/prefix)")
+        print("    2️⃣  Yes - Overwrite original files (DESTRUCTIVE!)")
+
+        overwrite_choice = padded_input("Enter choice (1-2) [default: 1]:") or '1'
+
+        if overwrite_choice == '2':
+            args.append('--rm-overwrite')
+
+            print("\n  ⚠️  WARNING: This will PERMANENTLY replace your original video files!")
+            confirm_overwrite = padded_input("Are you sure? Type 'yes' to confirm:").lower()
+
+            if confirm_overwrite != 'yes':
+                print("\n  ❌ Cancelled.\n")
+                return None
+
+            print("\n  Video codec:\n")
+            print("    1️⃣  Copy (fast, no re-encoding)")
+            print("    2️⃣  H.264 (re-encode, high compatibility)")
+            print("    3️⃣  H.265 (re-encode, better compression)")
+            print("    4️⃣  MPEG-4 (re-encode, universal)")
+
+            codec_choice = padded_input("Enter choice (1-4) [default: 1]:") or '1'
+            codec_map = {'1': 'copy', '2': 'libx264', '3': 'libx265', '4': 'mpeg4'}
+            args.extend(['--rm-codec', codec_map.get(codec_choice, 'copy')])
+
+        else:
+            print("\n  Video codec:\n")
+            print("    1️⃣  Copy (fast, no re-encoding)")
+            print("    2️⃣  H.264 (re-encode, high compatibility)")
+            print("    3️⃣  H.265 (re-encode, better compression)")
+            print("    4️⃣  MPEG-4 (re-encode, universal)")
+
+            codec_choice = padded_input("Enter choice (1-4) [default: 1]:") or '1'
+            codec_map = {'1': 'copy', '2': 'libx264', '3': 'libx265', '4': 'mpeg4'}
+            args.extend(['--rm-codec', codec_map.get(codec_choice, 'copy')])
+
+            output_dir = padded_input("Output directory [default: same as video]:") or ''
+            if output_dir:
+                args.extend(['--rm-output-dir', output_dir])
+
+            prefix = padded_input("Filename prefix [default: none]:") or ''
+            if prefix:
+                args.extend(['--rm-prefix', prefix])
+
+            suffix = padded_input("Filename suffix [default: _no_audio]:") or '_no_audio'
+            args.extend(['--rm-suffix', suffix])
+
+        # Skip general output options for removal
+        print("\n" + "═" * 70)
+        print("  📋 Summary")
+        print("═" * 70)
+        print(f"\n  Video codec: {codec_map.get(codec_choice, 'copy').upper()}")
+        if overwrite_choice == '2':
+            print("  Mode: OVERWRITE (original files will be replaced)")
+        else:
+            if output_dir:
+                print(f"  Output directory: {output_dir}/")
+            print(f"  Suffix: {suffix}")
+        print("\n" + "═" * 70)
+
+        confirm = padded_input("Proceed with audio removal? (y/n) [default: y]:").lower() or 'y'
+
+        if confirm != 'y':
+            print("\n  ❌ Cancelled.\n")
+            return None
+
+        return args
+
     # Output options
     section_header("Step 4: Output Settings")
 
@@ -659,6 +757,20 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument('--sep-channels', type=int, choices=[1, 2],
                        help='Number of channels for separated audio: 1=mono, 2=stereo (default: keep original)')
 
+    # Audio removal options
+    parser.add_argument('--remove-audio', action='store_true',
+                       help='Remove audio from videos to create silent videos')
+    parser.add_argument('--rm-codec', type=str, default='copy',
+                       help='Video codec for removal: "copy" for fast stream copy (default), or codec name like "libx264", "libx265", "mpeg4" for re-encoding')
+    parser.add_argument('--rm-output-dir', type=str,
+                       help='Output directory for videos without audio (default: same as video)')
+    parser.add_argument('--rm-prefix', type=str, default='',
+                       help='Prefix for output video filenames')
+    parser.add_argument('--rm-suffix', type=str, default='_no_audio',
+                       help='Suffix for output video filenames (before extension, default: _no_audio)')
+    parser.add_argument('--rm-overwrite', action='store_true',
+                       help='Overwrite original video files in-place (DESTRUCTIVE! Ignores prefix/suffix/output-dir options)')
+
     return parser
 
 
@@ -715,6 +827,56 @@ def run_audio_separator(args: argparse.Namespace) -> None:
 
 
 # =============================================================================
+# Audio Removal Logic
+# =============================================================================
+
+def run_audio_removal(args: argparse.Namespace) -> None:
+    """Run the audio removal with the given configuration."""
+    # Build removal config
+    config = RemovalConfig(
+        output_dir=Path(args.rm_output_dir) if args.rm_output_dir else None,
+        prefix=args.rm_prefix,
+        suffix=args.rm_suffix,
+        codec=args.rm_codec,
+        overwrite=args.rm_overwrite
+    )
+
+    # Process video files or directory
+    if args.video_files:
+        # Split comma-separated file paths and create Path objects
+        video_paths = [Path(p.strip()) for p in args.video_files.split(',')]
+
+        # Validate files exist
+        for path in video_paths:
+            if not path.exists():
+                print(f"Error: Video file not found: {path}", file=sys.stderr)
+                sys.exit(1)
+
+        results = remove_audio_batch(video_paths, config, verbose=True)
+
+    elif args.video_dir:
+        video_dir = Path(args.video_dir)
+
+        if not video_dir.exists() or not video_dir.is_dir():
+            print(f"Error: Directory not found or not a directory: {video_dir}", file=sys.stderr)
+            sys.exit(1)
+
+        results = remove_audio_from_directory(
+            directory=video_dir,
+            config=config,
+            recursive=args.recursive,
+            verbose=True
+        )
+    else:
+        print("Error: Either --video-files or --video-dir must be specified with --remove-audio", file=sys.stderr)
+        sys.exit(1)
+
+    # Exit with error code if any failed
+    if any(not r.success for r in results):
+        sys.exit(1)
+
+
+# =============================================================================
 # Main Entry Point
 # =============================================================================
 
@@ -734,6 +896,11 @@ def main():
     # Check if running audio separator
     if args.separate_audio:
         run_audio_separator(args)
+        return
+
+    # Check if running audio removal
+    if args.remove_audio:
+        run_audio_removal(args)
         return
 
     # Validate

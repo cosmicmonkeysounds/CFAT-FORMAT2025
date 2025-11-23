@@ -5,6 +5,8 @@ Extract audio from video files in batch with support for multiple output formats
 
 import subprocess
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -50,6 +52,25 @@ class SeparationResult:
     audio_path: Optional[Path]
     success: bool
     error: Optional[str] = None
+
+
+@dataclass
+class RemovalResult:
+    """Result of audio removal for a single file."""
+    input_path: Path
+    output_path: Optional[Path]
+    success: bool
+    error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RemovalConfig:
+    """Configuration for audio removal."""
+    output_dir: Optional[Path] = None  # None = same as source
+    prefix: str = ''  # Prefix for output filenames
+    suffix: str = '_no_audio'  # Suffix before extension
+    codec: str = 'copy'  # Video codec: 'copy' for stream copy (fast), or codec name for re-encode
+    overwrite: bool = False  # If True, overwrite original files (ignores prefix/suffix/output_dir)
 
 
 # =============================================================================
@@ -240,6 +261,215 @@ def separate_audio_from_directory(
         return []
 
     return separate_audio_batch(video_paths, config, verbose)
+
+
+# =============================================================================
+# Audio Removal Functions
+# =============================================================================
+
+def remove_audio_from_video(video_path: Path, output_path: Path, config: RemovalConfig) -> Tuple[bool, Optional[str]]:
+    """
+    Remove audio from a single video file.
+    Returns (success, error_message) tuple.
+    """
+    if not video_path.exists():
+        return False, f"Video file not found: {video_path}"
+
+    # If overwriting, use a temporary file first
+    if config.overwrite:
+        # Create temp file in same directory as source for atomic replace
+        temp_fd, temp_path_str = tempfile.mkstemp(
+            suffix=video_path.suffix,
+            dir=video_path.parent,
+            prefix='.tmp_'
+        )
+        os.close(temp_fd)  # Close the file descriptor
+        temp_path = Path(temp_path_str)
+        actual_output = temp_path
+    else:
+        actual_output = output_path
+
+    # Build ffmpeg command
+    cmd = [FFMPEG_PATH, '-y', '-i', str(video_path)]
+
+    # Video codec
+    if config.codec == 'copy':
+        cmd.extend(['-c:v', 'copy'])
+    else:
+        cmd.extend(['-c:v', config.codec])
+
+    # Remove all audio streams
+    cmd.extend(['-an', str(actual_output)])
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+
+        if result.returncode != 0:
+            if config.overwrite and temp_path.exists():
+                temp_path.unlink()
+            return False, f"FFmpeg error: {result.stderr}"
+
+        if not actual_output.exists() or actual_output.stat().st_size == 0:
+            if config.overwrite and temp_path.exists():
+                temp_path.unlink()
+            return False, "Output file was not created or is empty"
+
+        # If overwriting, replace the original file with temp file
+        if config.overwrite:
+            try:
+                shutil.move(str(temp_path), str(video_path))
+            except Exception as e:
+                if temp_path.exists():
+                    temp_path.unlink()
+                return False, f"Failed to overwrite original file: {str(e)}"
+
+        return True, None
+
+    except subprocess.TimeoutExpired:
+        if config.overwrite and temp_path.exists():
+            temp_path.unlink()
+        return False, "FFmpeg process timed out after 5 minutes"
+    except Exception as e:
+        if config.overwrite and 'temp_path' in locals() and temp_path.exists():
+            temp_path.unlink()
+        return False, f"Unexpected error: {str(e)}"
+
+
+def generate_removal_output_path(video_path: Path, config: RemovalConfig) -> Path:
+    """Generate output path for video without audio."""
+    # If overwriting, return the original path
+    if config.overwrite:
+        return video_path
+
+    # Determine output directory
+    output_dir = config.output_dir if config.output_dir else video_path.parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build filename
+    stem = video_path.stem
+    extension = video_path.suffix
+    filename = f"{config.prefix}{stem}{config.suffix}{extension}"
+
+    return output_dir / filename
+
+
+def remove_audio_batch(
+    video_paths: List[Path],
+    config: RemovalConfig = RemovalConfig(),
+    verbose: bool = True
+) -> List[RemovalResult]:
+    """
+    Remove audio from multiple video files.
+
+    Args:
+        video_paths: List of video file paths
+        config: Configuration for audio removal
+        verbose: Print progress information
+
+    Returns:
+        List of RemovalResult objects
+    """
+    results: List[RemovalResult] = []
+    total = len(video_paths)
+
+    if verbose:
+        print(f"Removing audio from {total} video file(s)...")
+        print(f"Video codec: {config.codec.upper()}")
+        if config.overwrite:
+            print("Mode: OVERWRITE (files will be replaced in-place)")
+        elif config.output_dir:
+            print(f"Output directory: {config.output_dir}")
+        print()
+
+    for idx, video_path in enumerate(video_paths, 1):
+        if verbose:
+            print(f"[{idx}/{total}] Processing: {video_path.name}")
+
+        output_path = generate_removal_output_path(video_path, config)
+        success, error = remove_audio_from_video(video_path, output_path, config)
+
+        result = RemovalResult(
+            input_path=video_path,
+            output_path=output_path if success else None,
+            success=success,
+            error=error
+        )
+        results.append(result)
+
+        if verbose:
+            if success:
+                if config.overwrite:
+                    print(f"  ✓ Overwritten: {output_path.name}")
+                else:
+                    print(f"  ✓ Saved: {output_path.name}")
+            else:
+                print(f"  ✗ Failed: {error}")
+
+        if verbose:
+            print()
+
+    # Print summary
+    if verbose:
+        successful = sum(1 for r in results if r.success)
+        failed = total - successful
+        print("=" * 60)
+        print(f"Summary: {successful} succeeded, {failed} failed")
+        print("=" * 60)
+
+    return results
+
+
+def remove_audio_from_directory(
+    directory: Path,
+    config: RemovalConfig = RemovalConfig(),
+    recursive: bool = False,
+    video_extensions: Optional[List[str]] = None,
+    verbose: bool = True
+) -> List[RemovalResult]:
+    """
+    Remove audio from all video files in a directory.
+
+    Args:
+        directory: Directory containing video files
+        config: Configuration for audio removal
+        recursive: Search subdirectories
+        video_extensions: List of video extensions to process (default: common formats)
+        verbose: Print progress information
+
+    Returns:
+        List of RemovalResult objects
+    """
+    if video_extensions is None:
+        video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v']
+
+    # Normalize extensions to lowercase
+    video_extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}'
+                       for ext in video_extensions]
+
+    # Find video files
+    video_paths: List[Path] = []
+
+    if recursive:
+        for ext in video_extensions:
+            video_paths.extend(directory.rglob(f'*{ext}'))
+    else:
+        for ext in video_extensions:
+            video_paths.extend(directory.glob(f'*{ext}'))
+
+    # Sort for consistent ordering
+    video_paths.sort()
+
+    if not video_paths:
+        if verbose:
+            print(f"No video files found in {directory}")
+        return []
+
+    return remove_audio_batch(video_paths, config, verbose)
 
 
 # =============================================================================

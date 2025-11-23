@@ -1020,8 +1020,8 @@ class Floor {
         // Just filename, use dataPath()
         video = new Movie(parent, parent.dataPath(videoFile));
       }
-      video.volume(0);  // Mute video - audio handled by SuperCollider
       video.loop();
+      video.volume(0.0);  // Mute video - audio handled by SuperCollider
       video.play();
     }
   }

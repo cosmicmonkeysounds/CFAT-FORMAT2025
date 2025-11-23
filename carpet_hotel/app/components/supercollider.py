@@ -28,25 +28,26 @@ class CarpetHotelSuperCollider:
     before running. See AUDIO_SETUP.md for configuration instructions.
     """
 
-    def __init__(self):
+    def __init__(self, audio_routing: str = "quad"):
         """
         Initialize SuperCollider manager.
+
+        Args:
+            audio_routing: Audio routing mode - "quad" or "stereo" (default: "quad")
 
         Audio device and sample rate are determined by macOS system defaults.
         """
         self.sclang_path = find_sclang()
         self.sc_script = get_app_dir() / "carpet_hotel_sound.scd"
+        self.audio_routing = audio_routing
 
         # ProcessWrapper with sclang pattern for forceful cleanup
         self.process = ProcessWrapper("SuperCollider", process_name_pattern="sclang")
         self.initialized = False
 
-    def start(self, output_bus: int = 0) -> bool:
+    def start(self) -> bool:
         """
         Start SuperCollider audio engine.
-
-        Args:
-            output_bus: Audio output bus offset (default: 0)
 
         Returns:
             True if started successfully
@@ -61,17 +62,17 @@ class CarpetHotelSuperCollider:
 
         print(f"Starting SuperCollider...")
         print(f"  Using system default audio device")
-        print(f"  Output bus offset: {output_bus}")
+        print(f"  Audio routing: {self.audio_routing.upper()}")
 
-        # Build command with script path and bus argument
-        # Pass bus as command-line argument so thisProcess.argv can access it
-        cmd = [self.sclang_path, str(self.sc_script), str(output_bus)]
+        # Build command with script path and routing argument
+        # Pass routing mode as command-line argument so thisProcess.argv can access it
+        cmd = [self.sclang_path, str(self.sc_script), self.audio_routing]
 
-        # Start process - script will be loaded automatically with bus argument
+        # Start process - script will be loaded automatically with routing argument
         if not self.process.start(cmd):
             return False
 
-        print(f"  ✓ SuperCollider script loading with bus argument")
+        print(f"  ✓ SuperCollider script loading with routing mode: {self.audio_routing}")
 
         # Wait for initialization
         if not self.wait_for_init():

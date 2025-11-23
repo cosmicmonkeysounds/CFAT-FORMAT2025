@@ -475,7 +475,7 @@ class CarpetHotelCore:
     # Component Management
     # ========================================================================
 
-    def start_supercollider(self, output_bus: int = 0) -> bool:
+    def start_supercollider(self, audio_routing: str = "quad") -> bool:
         """
         Start SuperCollider audio engine.
 
@@ -483,7 +483,7 @@ class CarpetHotelCore:
         via macOS System Settings before running.
 
         Args:
-            output_bus: Audio output bus offset (default: 0)
+            audio_routing: Audio routing mode - "quad" or "stereo" (default: "quad")
 
         Returns:
             True if started successfully
@@ -492,9 +492,9 @@ class CarpetHotelCore:
             print("⚠ SuperCollider already running")
             return True
 
-        self.supercollider = CarpetHotelSuperCollider()
+        self.supercollider = CarpetHotelSuperCollider(audio_routing=audio_routing)
 
-        if self.supercollider.start(output_bus=output_bus):
+        if self.supercollider.start():
             self.sc_running = True
 
             # Setup OSC if not already done

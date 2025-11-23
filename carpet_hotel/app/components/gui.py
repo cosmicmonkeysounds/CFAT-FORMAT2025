@@ -388,22 +388,23 @@ class CarpetHotelGUI:
                                                   state='readonly', width=40)
         self.audio_device_dropdown.pack(side='left', padx=5)
 
-        # Audio output bus selection
-        bus_frame = ttk.Frame(config_frame)
-        bus_frame.pack(fill='x', pady=5)
+        # Audio routing mode selection
+        routing_frame = ttk.Frame(config_frame)
+        routing_frame.pack(fill='x', pady=5)
 
-        ttk.Label(bus_frame, text="Output Bus:", width=15).pack(side='left', padx=5)
-        self.audio_bus_var = tk.IntVar(value=0)
-        self.audio_bus_dropdown = ttk.Combobox(bus_frame,
-                                               textvariable=self.audio_bus_var,
-                                               state='readonly', width=40)
-        # Create bus options (0-15 is typical for most systems)
-        bus_options = [f"{i} - {'Stereo' if i % 2 == 0 else 'Mono'} Bus {i//2 + 1}" for i in range(16)]
-        bus_options[0] = "0 - Default (Main Output)"
-        self.audio_bus_dropdown['values'] = bus_options
-        self.audio_bus_dropdown.current(0)
-        self.audio_bus_dropdown.pack(side='left', padx=5)
-        self.audio_bus_dropdown.bind('<<ComboboxSelected>>', self.on_audio_bus_change)
+        ttk.Label(routing_frame, text="Audio Routing:", width=15).pack(side='left', padx=5)
+        self.audio_routing_var = tk.StringVar(value="quad")
+        self.audio_routing_dropdown = ttk.Combobox(routing_frame,
+                                                    textvariable=self.audio_routing_var,
+                                                    state='readonly', width=40)
+        routing_options = [
+            "quad - Bus 1→Ch 0+1, Bus 2→Ch 2+3 (4 channels)",
+            "stereo - Bus 1→Ch 0, Bus 2→Ch 1 (2 channels)"
+        ]
+        self.audio_routing_dropdown['values'] = routing_options
+        self.audio_routing_dropdown.current(0)
+        self.audio_routing_dropdown.pack(side='left', padx=5)
+        self.audio_routing_dropdown.bind('<<ComboboxSelected>>', self.on_audio_routing_change)
 
         # Volume control
         volume_frame = ttk.Frame(config_frame)
@@ -452,34 +453,37 @@ class CarpetHotelGUI:
             except Exception as e:
                 self.log_to_widget(self.audio_log, f"✗ Error setting volume: {e}")
 
-    def on_audio_bus_change(self, event=None):
-        """Handle audio bus change."""
-        bus = self.audio_bus_var.get()
+    def on_audio_routing_change(self, event=None):
+        """Handle audio routing mode change."""
+        routing_str = self.audio_routing_var.get()
+        # Extract mode from string (e.g., "quad - ..." → "quad")
+        routing = routing_str.split(" - ")[0]
 
         # Save setting
-        self.settings.set("audio_output_bus", bus)
+        self.settings.set("audio_routing", routing)
         self.settings.save()
 
         # Log the change
-        self.log_to_widget(self.audio_log, f"Output bus set to: {bus}")
+        self.log_to_widget(self.audio_log, f"Audio routing set to: {routing.upper()}")
 
-        # Note: SuperCollider will need to be restarted to apply bus changes
+        # Note: SuperCollider will need to be restarted to apply routing changes
         if self.audio_running:
-            self.log_to_widget(self.audio_log, "⚠ Restart audio to apply bus change")
+            self.log_to_widget(self.audio_log, "⚠ Restart audio to apply routing change")
 
     def start_audio(self):
         """Start SuperCollider audio system."""
         if self.audio_running:
             return
 
-        # Get the selected bus
-        output_bus = self.audio_bus_var.get()
+        # Get the selected routing mode
+        routing_str = self.audio_routing_var.get()
+        routing = routing_str.split(" - ")[0]  # Extract "quad" or "stereo"
 
         self.log_to_widget(self.audio_log, "Starting SuperCollider audio system...")
-        self.log_to_widget(self.audio_log, f"(Output bus: {output_bus})")
+        self.log_to_widget(self.audio_log, f"(Audio routing: {routing.upper()})")
 
         def start_thread():
-            success = self.core.start_supercollider(output_bus=output_bus)
+            success = self.core.start_supercollider(audio_routing=routing)
 
             if success:
                 self.audio_running = True
@@ -1782,9 +1786,15 @@ Arduino: Auto-detected on first connection attempt"""
         if audio_device:
             self.audio_device_var.set(audio_device)
 
-        # Apply saved audio output bus
-        audio_bus = self.settings.get("audio_output_bus", 0)
-        self.audio_bus_var.set(audio_bus)
+        # Apply saved audio routing
+        audio_routing = self.settings.get("audio_routing", DEFAULT_SETTINGS.get("audio_routing", "quad"))
+        # Map routing mode to dropdown value
+        routing_map = {
+            "quad": "quad - Bus 1→Ch 0+1, Bus 2→Ch 2+3 (4 channels)",
+            "stereo": "stereo - Bus 1→Ch 0, Bus 2→Ch 1 (2 channels)"
+        }
+        if audio_routing in routing_map:
+            self.audio_routing_var.set(routing_map[audio_routing])
 
         # Apply saved serial port
         serial_port = self.settings.get("serial_port", DEFAULT_SETTINGS["serial_port"])

@@ -107,6 +107,7 @@ class SettingsManager:
 DEFAULT_SETTINGS = {
     # Audio settings
     "audio_device": "Default",
+    "audio_routing": "quad",  # "quad" or "stereo"
     "master_volume": 0.7,
 
     # Video settings
