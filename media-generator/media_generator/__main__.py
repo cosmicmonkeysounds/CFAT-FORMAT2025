@@ -15,6 +15,12 @@ from typing import Optional, List, Tuple
 from media_generator.audio import AudioConfig, MediaOutput, write_audio_file
 from media_generator.video import VideoConfig, write_video_file, embed_audio_in_video
 from media_generator.image import write_image_file, write_svg_file, write_gif_file
+from media_generator.audio_separator import (
+    separate_audio_batch,
+    separate_audio_from_directory,
+    SeparationConfig,
+    AudioFormat as SeparatorAudioFormat
+)
 
 
 # =============================================================================
@@ -97,10 +103,11 @@ def interactive_mode() -> Optional[List[str]]:
     print("    2️⃣  Image (JPG, PNG, WebP, BMP, TIFF, SVG)")
     print("    3️⃣  Animation (GIF)")
     print("    4️⃣  Audio (WAV, OGG, MP3, AAC, FLAC)")
+    print("    5️⃣  Extract Audio from Videos (Audio Separator)")
 
-    choice = padded_input("Enter choice (1-4):")
+    choice = padded_input("Enter choice (1-5):")
 
-    if choice not in ['1', '2', '3', '4']:
+    if choice not in ['1', '2', '3', '4', '5']:
         print("\n  ❌ Invalid choice. Exiting.\n")
         return None
 
@@ -331,6 +338,76 @@ def interactive_mode() -> Optional[List[str]]:
             max_freq = padded_input("Maximum frequency (Hz) [default: 1000]:") or '1000'
             args.extend(['--min-freq', min_freq, '--max-freq', max_freq])
 
+    # Audio Separator
+    elif choice == '5':
+        args.append('--separate-audio')
+
+        section_header("Step 3: Select Video Files or Directory")
+
+        print("\n  How do you want to specify videos?\n")
+        print("    1️⃣  Specific video file(s)")
+        print("    2️⃣  Directory containing videos")
+
+        source_choice = padded_input("Enter choice (1-2) [default: 2]:") or '2'
+
+        if source_choice == '1':
+            video_files = padded_input("Video file path(s) (comma-separated):")
+            args.extend(['--video-files', video_files])
+        else:
+            video_dir = padded_input("Directory path containing videos:")
+            args.extend(['--video-dir', video_dir])
+
+            recursive = padded_input("Search subdirectories recursively? (y/n) [default: n]:").lower()
+            if recursive == 'y':
+                args.append('--recursive')
+
+        section_header("Step 4: Audio Output Configuration")
+
+        print("\n  Choose audio format:\n")
+        print("    1️⃣  WAV (uncompressed, high quality)")
+        print("    2️⃣  MP3 (compressed, universal)")
+        print("    3️⃣  AAC (compressed, high quality)")
+        print("    4️⃣  M4A (Apple-friendly)")
+        print("    5️⃣  OGG (Vorbis, compressed)")
+        print("    6️⃣  FLAC (lossless, compressed)")
+
+        sep_fmt_choice = padded_input("Enter choice (1-6) [default: 1]:") or '1'
+        sep_fmt_map = {'1': 'wav', '2': 'mp3', '3': 'aac', '4': 'm4a', '5': 'ogg', '6': 'flac'}
+        args.extend(['--sep-format', sep_fmt_map.get(sep_fmt_choice, 'wav')])
+
+        if sep_fmt_choice in ['2', '3', '4']:
+            bitrate = padded_input("Bitrate [default: 192k]:") or '192k'
+            args.extend(['--sep-bitrate', bitrate])
+
+        output_dir = padded_input("Output directory [default: same as video]:") or ''
+        if output_dir:
+            args.extend(['--sep-output-dir', output_dir])
+
+        prefix = padded_input("Filename prefix [default: none]:") or ''
+        if prefix:
+            args.extend(['--sep-prefix', prefix])
+
+        suffix = padded_input("Filename suffix [default: none]:") or ''
+        if suffix:
+            args.extend(['--sep-suffix', suffix])
+
+        # Skip general output options for separator
+        print("\n" + "═" * 70)
+        print("  📋 Summary")
+        print("═" * 70)
+        print(f"\n  Audio format: {sep_fmt_map.get(sep_fmt_choice, 'wav').upper()}")
+        if output_dir:
+            print(f"  Output directory: {output_dir}/")
+        print("\n" + "═" * 70)
+
+        confirm = padded_input("Proceed with audio separation? (y/n) [default: y]:").lower() or 'y'
+
+        if confirm != 'y':
+            print("\n  ❌ Cancelled.\n")
+            return None
+
+        return args
+
     # Output options
     section_header("Step 4: Output Settings")
 
@@ -556,7 +633,85 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument('--aac-bitrate', type=str, default='192k',
                        help='Bitrate for AAC/M4A files (default: 192k)')
 
+    # Audio separator options
+    parser.add_argument('--separate-audio', action='store_true',
+                       help='Run audio separator to extract audio from videos')
+    parser.add_argument('--video-files', type=str,
+                       help='Comma-separated list of video file paths to extract audio from')
+    parser.add_argument('--video-dir', type=str,
+                       help='Directory containing video files to extract audio from')
+    parser.add_argument('--recursive', action='store_true',
+                       help='Search subdirectories recursively when using --video-dir')
+    parser.add_argument('--sep-format', type=str,
+                       choices=['wav', 'mp3', 'aac', 'm4a', 'ogg', 'flac'],
+                       default='wav',
+                       help='Output audio format for separator (default: wav)')
+    parser.add_argument('--sep-bitrate', type=str, default='192k',
+                       help='Bitrate for lossy audio formats in separator (default: 192k)')
+    parser.add_argument('--sep-output-dir', type=str,
+                       help='Output directory for separated audio files (default: same as video)')
+    parser.add_argument('--sep-prefix', type=str, default='',
+                       help='Prefix for separated audio filenames')
+    parser.add_argument('--sep-suffix', type=str, default='',
+                       help='Suffix for separated audio filenames (before extension)')
+    parser.add_argument('--sep-sample-rate', type=int,
+                       help='Sample rate for separated audio in Hz (default: keep original)')
+    parser.add_argument('--sep-channels', type=int, choices=[1, 2],
+                       help='Number of channels for separated audio: 1=mono, 2=stereo (default: keep original)')
+
     return parser
+
+
+# =============================================================================
+# Audio Separator Logic
+# =============================================================================
+
+def run_audio_separator(args: argparse.Namespace) -> None:
+    """Run the audio separator with the given configuration."""
+    # Build separation config
+    config = SeparationConfig(
+        output_format=SeparatorAudioFormat(args.sep_format),
+        bitrate=args.sep_bitrate,
+        sample_rate=args.sep_sample_rate if hasattr(args, 'sep_sample_rate') else None,
+        channels=args.sep_channels if hasattr(args, 'sep_channels') else None,
+        output_dir=Path(args.sep_output_dir) if args.sep_output_dir else None,
+        prefix=args.sep_prefix,
+        suffix=args.sep_suffix
+    )
+
+    # Process video files or directory
+    if args.video_files:
+        # Split comma-separated file paths and create Path objects
+        video_paths = [Path(p.strip()) for p in args.video_files.split(',')]
+
+        # Validate files exist
+        for path in video_paths:
+            if not path.exists():
+                print(f"Error: Video file not found: {path}", file=sys.stderr)
+                sys.exit(1)
+
+        results = separate_audio_batch(video_paths, config, verbose=True)
+
+    elif args.video_dir:
+        video_dir = Path(args.video_dir)
+
+        if not video_dir.exists() or not video_dir.is_dir():
+            print(f"Error: Directory not found or not a directory: {video_dir}", file=sys.stderr)
+            sys.exit(1)
+
+        results = separate_audio_from_directory(
+            directory=video_dir,
+            config=config,
+            recursive=args.recursive,
+            verbose=True
+        )
+    else:
+        print("Error: Either --video-files or --video-dir must be specified with --separate-audio", file=sys.stderr)
+        sys.exit(1)
+
+    # Exit with error code if any failed
+    if any(not r.success for r in results):
+        sys.exit(1)
 
 
 # =============================================================================
@@ -575,6 +730,11 @@ def main():
         args = parser.parse_args(interactive_args)
     else:
         args = parser.parse_args()
+
+    # Check if running audio separator
+    if args.separate_audio:
+        run_audio_separator(args)
+        return
 
     # Validate
     if args.n is None:

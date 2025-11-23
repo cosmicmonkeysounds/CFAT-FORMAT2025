@@ -24,9 +24,9 @@
     }
   ],
   "enable_keyboard": true,
-  "serial_port": "/dev/cu.usbserial-2130 - USB2.0-Serial",
-  "window_width": 1000,
-  "window_height": 900,
+  "serial_port": "Auto-detect",
+  "window_width": 1247,
+  "window_height": 1326,
   "window_x": 5,
   "window_y": 30
 }

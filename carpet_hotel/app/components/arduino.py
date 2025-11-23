@@ -152,102 +152,99 @@ class CarpetHotelArduino:
 
     def _handle_serial_message(self, message: str):
         """
-        Dead simple button handler:
-        - Press UP/DOWN → Record time ONLY (no command sent)
-        - Release UP/DOWN → Check duration, send command ON RELEASE ONLY
+        ULTRA SIMPLE: Only respond to RELEASED messages.
+        Ignore everything else.
         """
         if not message:
             return
 
-        message = message.strip()
-        msg = message.upper()
+        msg = message.strip().upper()
 
-        self.button_log.debug(f"RAW: '{message}' (upper: '{msg}')")
+        # DEBUG: Log ALL incoming serial messages
+        print(f"\n[DEBUG] Serial RX: '{msg}'")
+        print(f"[DEBUG] Current state: button_hold_state={self.button_hold_state}, press_time={self.button_press_time}")
 
-        # === PRESS - ONLY RECORD TIME ===
+        # ONLY handle button presses to record time
         if msg == "UP" or msg == "DOWN":
-            if self.button_hold_state and self.button_hold_state != msg:
-                self.button_log.warning(f"✗ BLOCKED - {self.button_hold_state} already held")
-                return
-
+            print(f"[DEBUG] → PRESS detected: {msg}")
+            # Reset ALL state on any button press (user requirement)
+            # This cancels any ongoing charge from the other button
             self.button_hold_state = msg
             self.button_press_time = time.time()
-            self.button_log.info(f"✓ {msg} pressed (time recorded, NO command sent)")
+            print(f"[DEBUG] → State reset and recorded for {msg}, NO OSC sent")
             return
 
-        # === RELEASE - SEND COMMAND ===
-        if "RELEASED" in msg:
-            self.button_log.debug(f"Detected RELEASE in '{msg}'")
+        # ONLY handle RELEASED messages - this is where ALL commands are sent
+        if "RELEASED" not in msg:
+            print(f"[DEBUG] → Ignoring non-RELEASED message")
+            return  # Ignore everything that isn't a RELEASED message
 
-            # Parse which button
-            if "UP" in msg and "DOWN" not in msg:
-                button = "UP"
-            elif "DOWN" in msg:
-                button = "DOWN"
-            else:
-                self.button_log.error(f"✗ Cannot parse button from '{msg}'")
-                return
+        # Parse button from RELEASED message
+        button = "UP" if "UP" in msg else "DOWN" if "DOWN" in msg else None
+        if not button:
+            print(f"[DEBUG] → Could not parse button from RELEASED message")
+            return
 
-            self.button_log.debug(f"Parsed button: {button}")
+        print(f"[DEBUG] → RELEASE detected: {button}")
 
-            # Check state matches
-            if self.button_hold_state != button:
-                self.button_log.warning(f"✗ Wrong button - expected {self.button_hold_state}, got {button}")
-                return
-
-            if not self.button_press_time:
-                self.button_log.error(f"✗ No press time recorded!")
-                return
-
-            # Calculate hold time
-            hold_time = time.time() - self.button_press_time
-            self.button_log.info(f"✓ {button} held for {hold_time:.3f}s")
-
-            # Send command based on duration
-            if hold_time < self.HOLD_THRESHOLD:
-                self.button_log.info(f"→ SHORT PRESS → Sending /carpet/elevator/{button.lower()}")
-                if button == "UP":
-                    self.osc_client.send_message("/carpet/elevator/up", [])
-                else:
-                    self.osc_client.send_message("/carpet/elevator/down", [])
-            else:
-                charge = hold_time - self.HOLD_THRESHOLD
-                self.button_log.info(f"→ LONG PRESS → Jump (charge={charge:.2f}s)")
-                self._execute_jump(button, charge)
-
-            # Clear state
+        # Check we have a valid press time
+        if not self.button_press_time or self.button_hold_state != button:
+            print(f"[DEBUG] → ERROR: No matching press for {button}")
             self.button_hold_state = None
             self.button_press_time = None
-            self.button_log.debug(f"✓ State cleared")
             return
 
-        # Unknown message
-        self.button_log.debug(f"? Unknown message: '{msg}'")
+        # Calculate hold duration
+        hold_time = time.time() - self.button_press_time
+        print(f"[DEBUG] → Hold time: {hold_time:.3f}s")
+
+        # SHORT PRESS: Move 1 scene
+        if hold_time < self.HOLD_THRESHOLD:
+            print(f"[DEBUG] → SHORT PRESS: Sending /carpet/elevator/{button.lower()}")
+            if button == "UP":
+                self.osc_client.send_message("/carpet/elevator/up", [])
+            else:
+                self.osc_client.send_message("/carpet/elevator/down", [])
+        # LONG PRESS: Jump
+        else:
+            charge_time = min(hold_time - self.HOLD_THRESHOLD, self.MAX_CHARGE_TIME)
+            print(f"[DEBUG] → LONG PRESS: Calling execute_jump with charge_time={charge_time:.3f}s")
+            self._execute_jump(button, charge_time)
+
+        # Clear state
+        self.button_hold_state = None
+        self.button_press_time = None
+        print(f"[DEBUG] → State cleared\n")
 
     def _execute_jump(self, button: str, charge_time: float):
-        """Execute jump based on charge time."""
+        """
+        Execute jump based on charge time.
+        10 second charge = jump ALL scenes with wrapping.
+        """
         if not self.core or not self.osc_client:
-            self.button_log.error(f"Cannot jump - core={self.core}, osc={self.osc_client}")
+            print(f"[DEBUG] → JUMP ABORTED: core={self.core}, osc_client={self.osc_client}")
             return
 
-        # Clamp and calculate ratio
-        charge_time = min(charge_time, self.MAX_CHARGE_TIME)
+        # Calculate jump ratio (0.0 to 1.0)
         charge_ratio = charge_time / self.MAX_CHARGE_TIME
 
-        # Calculate target
+        # Get scene info
         max_scene = self.core.get_max_scene()
+        num_scenes = max_scene + 1  # Total number of scenes (0-indexed)
         current = self.core.current_scene
 
-        if button == "UP":
-            distance = max_scene - current
-            target = current + int(charge_ratio * distance)
-        else:
-            distance = current
-            target = current - int(charge_ratio * distance)
+        # Calculate how many scenes to jump
+        # Full charge (10s) = jump all scenes (wrap around)
+        scenes_to_jump = int(charge_ratio * num_scenes)
 
-        # Clamp and send
-        target = max(0, min(target, max_scene))
-        self.button_log.info(f"Jump {button}: {current} → {target} (charge: {charge_ratio*100:.0f}%)")
+        # Apply jump with wrapping
+        if button == "UP":
+            target = (current + scenes_to_jump) % num_scenes
+        else:  # DOWN
+            target = (current - scenes_to_jump) % num_scenes
+
+        print(f"[DEBUG] → JUMP: {current} → {target} ({scenes_to_jump} scenes, charge={charge_ratio*100:.0f}%)")
+        print(f"[DEBUG] → Sending /carpet/goto [{target}]")
         self.osc_client.send_message("/carpet/goto", [target])
 
     def setup_osc(self) -> bool:
