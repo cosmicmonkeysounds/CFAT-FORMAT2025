@@ -9,11 +9,26 @@ Architecture:
 - Two audio busses representing "floors" (like displays in Processing)
 - Scene changes move which WAV files are active on each bus
 - Crossfading during transitions (like video movement)
-- 3-band dynamic EQ + limiter on each bus
+
+Signal Chain (per bus):
+  SOURCE GROUP:  Floors → Doppler → Processing Bus
+  ROUTING GROUP: Processing Bus → Dry Route → Master Bus
+                 Processing Bus → Reverb Send → Reverb Send Bus
+  REVERB GROUP:  Reverb Send Bus → Reverb → Freq Shift → Master Bus
+  MASTER GROUP:  Master Bus (dry+wet mix) → Dynamic EQ → EQ Bus → Limiter → Output
+
+Node groups ensure proper execution order for clean signal flow.
+
+Transition Effects:
+- Reverb Send: 0.0 → 1.0 (equal gain) → 0.0 (sine curve)
+- Reverb: FreeVerb (room=0.9, mix=0.5)
+- Frequency Shift: ±5 Hz, direction-based
+- Doppler: ±15% pitch shift on dry signal
+- Dry and wet signals mix at master bus, then processed together through EQ→Limiter
 
 Routing Modes:
-- Quad:   Bus 1 → channels 0+1, Bus 2 → channels 2+3
-- Stereo: Bus 1 → channel 0,    Bus 2 → channel 1
+- Quad:   Bus 1 (dry+wet) → channels 0+1, Bus 2 (dry+wet) → channels 2+3
+- Stereo: Bus 1 (dry+wet) → channel 0,    Bus 2 (dry+wet) → channel 1
 
 OSC Messages:
 - /carpet/scene [sceneNum, numBusses, isAnimating]
@@ -28,7 +43,11 @@ var numFloors = 0;  // Detected dynamically
 var numBusses = 2;  // Two audio busses (like two displays)
 var masterVolume = 0.7;
 var routingMode = \quad;  // \quad or \stereo (passed via command-line)
-var processingBusses, eqSynths, limiterSynths;  // Audio processing
+var processingBusses, masterBusses, eqBusses, eqSynths, limiterSynths;  // Audio processing
+var reverbSendBusses, reverbProcessedBusses;  // Reverb busses
+var reverbSendSynths, reverbProcessSynths;  // Array of reverb synths (one per bus)
+var dryRouteSynths;  // Dry signal routing synths
+var sourceGroup, routingGroup, reverbGroup, masterGroup;  // Node groups for ordering
 
 // Doppler effect settings
 var dopplerEnabled = true;
@@ -144,6 +163,73 @@ if(thisProcess.argv.size > 0, {
         Out.ar(outBus, limited);  // Mono output
     }).add;
 
+    // Reverb - Stereo
+    SynthDef(\stereoReverb, {
+        arg inBus, outBus,
+        mix=0.33, room=0.5, damp=0.5;
+
+        var in, reverb;
+
+        in = In.ar(inBus, 2);  // Stereo input
+        reverb = FreeVerb2.ar(in[0], in[1], mix, room, damp);
+
+        Out.ar(outBus, reverb);  // Stereo output
+    }).add;
+
+    // Frequency Shifter - Stereo
+    SynthDef(\freqShifter, {
+        arg inBus, outBus,
+        shift=0.0;  // Frequency shift in Hz
+
+        var in, shifted;
+
+        in = In.ar(inBus, 2);  // Stereo input
+        // Apply frequency shifting to both channels
+        shifted = FreqShift.ar(in, shift);
+
+        Out.ar(outBus, shifted);  // Stereo output
+    }).add;
+
+    // Reverb router - Routes stereo reverb to quad or stereo output
+    SynthDef(\reverbRouter, {
+        arg inBus, outBus, mode=0;  // mode: 0=stereo, 1=quad
+
+        var in;
+
+        in = In.ar(inBus, 2);  // Stereo input
+
+        // mode == 0: Stereo (2 channels)
+        // mode == 1: Quad (duplicate stereo to 4 channels)
+        if(mode == 0, {
+            Out.ar(outBus, in);  // Stereo output
+        }, {
+            Out.ar(outBus, [in[0], in[1], in[0], in[1]]);  // Quad: duplicate L/R
+        });
+    }).add;
+
+    // Reverb send - Sends signal from processing bus to reverb
+    SynthDef(\reverbSend, {
+        arg inBus, outBus, sendLevel=0.0;
+
+        var in;
+
+        in = In.ar(inBus, 2);  // Stereo input
+        Out.ar(outBus, in * sendLevel);  // Send to reverb with variable level
+    }).add;
+
+    // Amp control - Controls amplitude with lag for crossfading
+    SynthDef(\ampControl, {
+        arg inBus, outBus, amp=1.0, lagTime=0.1;
+
+        var in, sig, ampLag;
+
+        in = In.ar(inBus, 2);  // Stereo input
+        ampLag = Lag.kr(amp, lagTime);  // Apply lag to amp parameter
+        sig = in * ampLag;
+
+        ReplaceOut.ar(outBus, sig);  // Replace on same bus
+    }).add;
+
     s.sync;
     "✓ SynthDefs compiled".postln;
 };
@@ -152,46 +238,73 @@ if(thisProcess.argv.size > 0, {
 ~createProcessingChain = {
     "Creating audio processing chain...".postln;
 
+    // Create node groups for proper execution order
+    sourceGroup = Group.new(s);  // Audio file players
+    routingGroup = Group.after(sourceGroup);  // Dry routing + reverb sends
+    reverbGroup = Group.after(routingGroup);  // Reverb processors
+    masterGroup = Group.after(reverbGroup);  // EQ + Limiters
+
+    "  ✓ Created execution groups".postln;
+
     // Create internal busses for processing
-    processingBusses = Array.fill(numBusses, { Bus.audio(s, 2) });  // Stereo busses
+    processingBusses = Array.fill(numBusses, { Bus.audio(s, 2) });  // Where audio files play
+    masterBusses = Array.fill(numBusses, { Bus.audio(s, 2) });  // Dry + wet mix here
+    eqBusses = Array.fill(numBusses, { Bus.audio(s, 2) });  // After EQ, before limiter
+
+    // Create reverb busses (one per audio bus)
+    reverbSendBusses = Array.fill(numBusses, { Bus.audio(s, 2) });  // Send busses
+    reverbProcessedBusses = Array.fill(numBusses, { Bus.audio(s, 2) });  // After reverb+freqshift
 
     // Initialize arrays for processing synths
     eqSynths = Array.newClear(numBusses);
     limiterSynths = Array.newClear(numBusses);
+    reverbSendSynths = Array.newClear(numBusses);
+    reverbProcessSynths = Array.newClear(numBusses);
+    dryRouteSynths = Array.newClear(numBusses);
 
     numBusses.do({ |busIdx|
-        var eqBus, finalOut, limiterDef;
-
-        // Create intermediate bus for EQ
-        eqBus = Bus.audio(s, 2);
+        var finalOut, limiterDef;
 
         // Determine final output channels and limiter type
         if(routingMode == \quad, {
-            // Quad mode: stereo busses
+            // Quad mode: stereo outputs
             finalOut = busIdx * 2;  // Bus 0→ch0+1, Bus 1→ch2+3
             limiterDef = \limiterStereo;
         }, {
-            // Stereo mode: mono busses
+            // Stereo mode: mono outputs
             finalOut = busIdx;  // Bus 0→ch0 (left), Bus 1→ch1 (right)
             limiterDef = \limiterMono;
         });
 
-        // Processing chain: processingBus → EQ → eqBus → Limiter → output
-        eqSynths[busIdx] = Synth(\dynamicEQ, [
+        // 1. Route dry signal directly to master bus (in routing group)
+        dryRouteSynths[busIdx] = {
+            var in = In.ar(processingBusses[busIdx].index, 2);
+            Out.ar(masterBusses[busIdx].index, in);
+        }.play(target: routingGroup);
+
+        // 2. Create reverb send for this bus (in routing group)
+        reverbSendSynths[busIdx] = Synth(\reverbSend, [
             \inBus, processingBusses[busIdx].index,
-            \outBus, eqBus.index,
+            \outBus, reverbSendBusses[busIdx].index,
+            \sendLevel, 0.0  // Start with no send
+        ], target: routingGroup);
+
+        // 3. Master chain: masterBus → EQ → eqBus → Limiter → output
+        eqSynths[busIdx] = Synth(\dynamicEQ, [
+            \inBus, masterBusses[busIdx].index,
+            \outBus, eqBusses[busIdx].index,  // Output to separate EQ bus
             // Default EQ settings
             \freq1, 100, \q1, 0.45, \gain1, 10.0, \thresh1, -35, \attack1, 0.01, \release1, 0.1,
             \freq2, 1500, \q2, 0.57, \gain2, -2.0, \thresh2, -40, \attack2, 0.005, \release2, 0.15,
             \freq3, 12000, \q3, 0.5, \gain3, 6.0, \thresh3, -45, \attack3, 0.001, \release3, 0.1
-        ], addAction: \addToTail);
+        ], target: masterGroup);
 
-        limiterSynths[busIdx] = Synth(limiterDef, [
-            \inBus, eqBus.index,
+        limiterSynths[busIdx] = Synth.after(eqSynths[busIdx], limiterDef, [
+            \inBus, eqBusses[busIdx].index,  // Read from EQ bus
             \outBus, finalOut,
             \threshold, -10.0,
             \releaseTime, 0.01
-        ], addAction: \addToTail);
+        ]);
 
         if(routingMode == \quad, {
             ("  ✓ Bus " ++ (busIdx + 1) ++ " (STEREO) → outputs " ++ finalOut ++ "+" ++ (finalOut + 1)).postln;
@@ -199,6 +312,31 @@ if(thisProcess.argv.size > 0, {
             ("  ✓ Bus " ++ (busIdx + 1) ++ " (MONO) → output " ++ finalOut).postln;
         });
     });
+
+    // Create reverb processing: sends → reverb → freq shift → master busses
+    // Each bus has its own reverb path that routes back to its master bus
+
+    numBusses.do({ |busIdx|
+        // Process each bus's reverb send (in reverb group)
+        reverbProcessSynths[busIdx] = {
+            arg shift=0.0;
+            var in, reverb, shifted;
+
+            // 1. Read from reverb send bus
+            in = In.ar(reverbSendBusses[busIdx].index, 2);
+
+            // 2. Apply reverb
+            reverb = FreeVerb2.ar(in[0], in[1], mix: 0.5, room: 0.9, damp: 0.5);
+
+            // 3. Apply frequency shift (will be modulated during transitions)
+            shifted = FreqShift.ar(reverb, shift);
+
+            // 4. Output to this bus's master (mixes with dry signal)
+            Out.ar(masterBusses[busIdx].index, shifted);
+        }.play(target: reverbGroup);
+    });
+
+    "  ✓ Reverb chain: Sends → Reverb → FreqShift → Master Busses".postln;
 
     "✓ Processing chain ready".postln;
 };
@@ -269,7 +407,7 @@ if(thisProcess.argv.size > 0, {
                         var synth;
 
                         // Create synth for this floor on this bus
-                        // Output to processing bus instead of direct output
+                        // Output to processing bus (in source group)
                         synth = {
                             var numChannels = buffer.numChannels;
                             var rate = \rate.kr(1.0, 0.05);  // Playback rate for doppler (50ms lag)
@@ -287,7 +425,7 @@ if(thisProcess.argv.size > 0, {
                             });
 
                             sig * amp;
-                        }.play(outbus: processingBusses[busIdx].index, addAction: \addToHead);
+                        }.play(outbus: processingBusses[busIdx].index, target: sourceGroup);
 
                         // Store synth
                         busPlayers[busIdx][idx] = synth;
@@ -313,6 +451,18 @@ if(thisProcess.argv.size > 0, {
         sceneNum = msg[1].asInteger;
         numWindows = msg[2].asInteger;
         isAnimating = msg[3].asInteger;
+
+        // Reset to dry signal only (no reverb in static scenes)
+        numBusses.do({ |busIdx|
+            // No reverb sends
+            if(reverbSendSynths[busIdx].notNil, {
+                reverbSendSynths[busIdx].set(\sendLevel, 0.0);
+            });
+            // Reset freq shift
+            if(reverbProcessSynths[busIdx].notNil, {
+                reverbProcessSynths[busIdx].set(\shift, 0.0);
+            });
+        });
 
         // Silent all floors on all busses first and reset pitch
         numBusses.do({ |busIdx|
@@ -344,6 +494,7 @@ if(thisProcess.argv.size > 0, {
         var currentFloor, progress, direction, numWindows;
         var currentFloorIdx, nextFloorIdx, fadeOutGain, fadeInGain;
         var dopplerCurve, dopplerShift, currentRate, nextRate;
+        var reverbSend, freqShiftAmount;
 
         currentFloor = msg[1].asInteger;
         progress = msg[2].asFloat;
@@ -353,6 +504,14 @@ if(thisProcess.argv.size > 0, {
         // Smooth crossfade using sine/cosine curves
         fadeOutGain = cos(progress * 0.5pi);  // 1.0 → 0.0
         fadeInGain = sin(progress * 0.5pi);   // 0.0 → 1.0
+
+        // Calculate reverb send level (peaks in the middle of transition)
+        // Goes from silence (0.0) to equal gain (1.0)
+        reverbSend = sin(progress * pi);  // Max 1.0 send level (equal to dry)
+
+        // Frequency shift amount (subtle, peaks in middle)
+        // ±5 Hz max shift
+        freqShiftAmount = sin(progress * pi) * 5.0 * direction;
 
         // Calculate doppler shift (peaks at 50% progress)
         if(dopplerEnabled, {
@@ -371,6 +530,16 @@ if(thisProcess.argv.size > 0, {
         }, {
             currentRate = 1.0;
             nextRate = 1.0;
+        });
+
+        // Set reverb send levels and freq shift for all busses
+        numBusses.do({ |busIdx|
+            if(reverbSendSynths[busIdx].notNil, {
+                reverbSendSynths[busIdx].set(\sendLevel, reverbSend);
+            });
+            if(reverbProcessSynths[busIdx].notNil, {
+                reverbProcessSynths[busIdx].set(\shift, freqShiftAmount);
+            });
         });
 
         // Silent all floors on all busses first
@@ -426,19 +595,18 @@ if(thisProcess.argv.size > 0, {
     CmdPeriod.doOnce({
         "Stopping audio engine...".postln;
 
-        // Free all synths on all busses
-        numBusses.do({ |busIdx|
-            busPlayers[busIdx].do({ |synth|
-                if(synth.notNil, { synth.free });
-            });
-        });
-
-        // Free processing synths
-        eqSynths.do({ |synth| if(synth.notNil, { synth.free }); });
-        limiterSynths.do({ |synth| if(synth.notNil, { synth.free }); });
+        // Free groups (which frees all synths inside them)
+        if(sourceGroup.notNil, { sourceGroup.free });
+        if(routingGroup.notNil, { routingGroup.free });
+        if(reverbGroup.notNil, { reverbGroup.free });
+        if(masterGroup.notNil, { masterGroup.free });
 
         // Free busses
         processingBusses.do({ |bus| if(bus.notNil, { bus.free }); });
+        masterBusses.do({ |bus| if(bus.notNil, { bus.free }); });
+        eqBusses.do({ |bus| if(bus.notNil, { bus.free }); });
+        reverbSendBusses.do({ |bus| if(bus.notNil, { bus.free }); });
+        reverbProcessedBusses.do({ |bus| if(bus.notNil, { bus.free }); });
 
         // Free all buffers
         floors.do({ |buffer|
@@ -474,7 +642,11 @@ s.waitForBoot({
     ~setupCleanup.value;
 
     "\n=== READY ===".postln;
-    "Audio Chain: Floors → Doppler → Dynamic EQ (3-band) → Limiter → Output".postln;
+    "Execution Groups:".postln;
+    "  SOURCE → ROUTING → REVERB → MASTER".postln;
+    "Signal Flow (per bus):".postln;
+    "  Floors → [dry→Master, send→Reverb→Master] → DynEQ → Limiter → Out".postln;
+    "Transitions: Reverb 0→1→0, FreqShift ±5Hz, Doppler ±15%".postln;
     if(dopplerEnabled, {
         ("Doppler effect: ENABLED (±" ++ (dopplerIntensity * 100) ++ "% pitch shift)").postln;
     }, {
