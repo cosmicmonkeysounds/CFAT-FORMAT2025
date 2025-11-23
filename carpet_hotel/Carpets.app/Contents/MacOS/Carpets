@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Get the directory where this app bundle is located
+APP_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+
+# Open Terminal and run the actual launch script
+osascript <<EOF
+tell application "Terminal"
+    activate
+    do script "cd '$APP_DIR' && ./launch_macos.sh"
+end tell
+EOF
+```
