@@ -44,7 +44,7 @@ var masterVolume = 1.0;  // Fixed at 100%
 var routingMode = \quad;  // \quad or \stereo (passed via command-line)
 var processingBusses, masterBusses, eqBusses, eqSynths, limiterSynths;  // Audio processing
 var reverbSendBusses, reverbProcessedBusses;  // Reverb busses
-var reverbSendSynths, reverbProcessSynths;  // Array of reverb synths (one per bus)
+var reverbSendSynths, reverbProcessSynths, reverbAmpSynths;  // Array of reverb synths (one per bus)
 var dryRouteSynths;  // Dry signal routing synths
 var sourceGroup, routingGroup, reverbGroup, masterGroup;  // Node groups for ordering
 
@@ -259,6 +259,7 @@ if(thisProcess.argv.size > 0, {
     limiterSynths = Array.newClear(numBusses);
     reverbSendSynths = Array.newClear(numBusses);
     reverbProcessSynths = Array.newClear(numBusses);
+    reverbAmpSynths = Array.newClear(numBusses);
     dryRouteSynths = Array.newClear(numBusses);
 
     numBusses.do({ |busIdx|
@@ -312,7 +313,7 @@ if(thisProcess.argv.size > 0, {
         });
     });
 
-    // Create reverb processing: sends → reverb → freq shift → master busses
+    // Create reverb processing: sends → reverb → freq shift → amp control → master busses
     // Each bus has its own reverb path that routes back to its master bus
 
     numBusses.do({ |busIdx|
@@ -330,9 +331,17 @@ if(thisProcess.argv.size > 0, {
             // 3. Apply frequency shift (will be modulated during transitions)
             shifted = FreqShift.ar(reverb, shift);
 
-            // 4. Output to this bus's master (mixes with dry signal)
-            Out.ar(masterBusses[busIdx].index, shifted);
+            // 4. Output to reverb processed bus (before amp control)
+            Out.ar(reverbProcessedBusses[busIdx].index, shifted);
         }.play(target: reverbGroup);
+
+        // Add amp control on reverb output (allows fading out the tail)
+        reverbAmpSynths[busIdx] = Synth.after(reverbProcessSynths[busIdx], \ampControl, [
+            \inBus, reverbProcessedBusses[busIdx].index,
+            \outBus, masterBusses[busIdx].index,  // Output to master bus
+            \amp, 0.0,  // Start silent
+            \lagTime, 0.5  // 500ms fade for smooth reverb tail fadeout
+        ]);
     });
 
     "  ✓ Reverb chain: Sends → Reverb → FreqShift → Master Busses".postln;
@@ -457,6 +466,10 @@ if(thisProcess.argv.size > 0, {
             if(reverbSendSynths[busIdx].notNil, {
                 reverbSendSynths[busIdx].set(\sendLevel, 0.0);
             });
+            // Fade out reverb output (tail)
+            if(reverbAmpSynths[busIdx].notNil, {
+                reverbAmpSynths[busIdx].set(\amp, 0.0);
+            });
             // Reset freq shift
             if(reverbProcessSynths[busIdx].notNil, {
                 reverbProcessSynths[busIdx].set(\shift, 0.0);
@@ -493,7 +506,7 @@ if(thisProcess.argv.size > 0, {
         var currentFloor, progress, direction, numWindows;
         var currentFloorIdx, nextFloorIdx, fadeOutGain, fadeInGain;
         var dopplerCurve, dopplerShift, currentRate, nextRate;
-        var reverbSend, freqShiftAmount;
+        var reverbSend, wetAmp, freqShiftAmount;
 
         currentFloor = msg[1].asInteger;
         progress = msg[2].asFloat;
@@ -507,6 +520,7 @@ if(thisProcess.argv.size > 0, {
         // Calculate reverb send level (peaks in the middle of transition)
         // Goes from silence (0.0) to equal gain (1.0)
         reverbSend = sin(progress * pi);  // Max 1.0 send level (equal to dry)
+        wetAmp = reverbSend;  // Same envelope: fade reverb output with send
 
         // Frequency shift amount (subtle, peaks in middle)
         // ±5 Hz max shift
@@ -531,10 +545,13 @@ if(thisProcess.argv.size > 0, {
             nextRate = 1.0;
         });
 
-        // Set reverb send levels and freq shift for all busses
+        // Set reverb send levels, output amp, and freq shift for all busses
         numBusses.do({ |busIdx|
             if(reverbSendSynths[busIdx].notNil, {
                 reverbSendSynths[busIdx].set(\sendLevel, reverbSend);
+            });
+            if(reverbAmpSynths[busIdx].notNil, {
+                reverbAmpSynths[busIdx].set(\amp, wetAmp);  // Fade reverb output with wet signal
             });
             if(reverbProcessSynths[busIdx].notNil, {
                 reverbProcessSynths[busIdx].set(\shift, freqShiftAmount);
