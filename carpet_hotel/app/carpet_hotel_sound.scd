@@ -113,18 +113,31 @@ if(thisProcess.argv.size > 0, {
         Out.ar(outBus, sig);
     }).add;
 
-    // Limiter
-    SynthDef(\limiter, {
+    // Limiter - Stereo
+    SynthDef(\limiterStereo, {
         arg inBus, outBus,
         threshold=(-0.5), releaseTime=0.01;
 
         var in, limited;
-        var numChannels = 2;  // Stereo processing
 
-        in = In.ar(inBus, numChannels);
+        in = In.ar(inBus, 2);  // Stereo input
         limited = Limiter.ar(in, threshold.dbamp, releaseTime);
 
-        Out.ar(outBus, limited);
+        Out.ar(outBus, limited);  // Stereo output
+    }).add;
+
+    // Limiter - Mono
+    SynthDef(\limiterMono, {
+        arg inBus, outBus,
+        threshold=(-0.5), releaseTime=0.01;
+
+        var in, limited;
+
+        in = In.ar(inBus, 2);  // Stereo input
+        in = Mix(in);  // Mix to mono
+        limited = Limiter.ar(in, threshold.dbamp, releaseTime);
+
+        Out.ar(outBus, limited);  // Mono output
     }).add;
 
     s.sync;
@@ -143,16 +156,20 @@ if(thisProcess.argv.size > 0, {
     limiterSynths = Array.newClear(numBusses);
 
     numBusses.do({ |busIdx|
-        var eqBus, finalOut;
+        var eqBus, finalOut, limiterDef;
 
         // Create intermediate bus for EQ
         eqBus = Bus.audio(s, 2);
 
-        // Determine final output channels
+        // Determine final output channels and limiter type
         if(routingMode == \quad, {
+            // Quad mode: stereo busses
             finalOut = busIdx * 2;  // Bus 0→ch0+1, Bus 1→ch2+3
+            limiterDef = \limiterStereo;
         }, {
-            finalOut = busIdx;  // Bus 0→ch0, Bus 1→ch1
+            // Stereo mode: mono busses
+            finalOut = busIdx;  // Bus 0→ch0 (left), Bus 1→ch1 (right)
+            limiterDef = \limiterMono;
         });
 
         // Processing chain: processingBus → EQ → eqBus → Limiter → output
@@ -165,14 +182,18 @@ if(thisProcess.argv.size > 0, {
             \freq3, 12000, \q3, 0.5, \gain3, 6.0, \thresh3, -45, \attack3, 0.001, \release3, 0.1
         ], addAction: \addToTail);
 
-        limiterSynths[busIdx] = Synth(\limiter, [
+        limiterSynths[busIdx] = Synth(limiterDef, [
             \inBus, eqBus.index,
             \outBus, finalOut,
             \threshold, -10.0,
             \releaseTime, 0.01
         ], addAction: \addToTail);
 
-        ("  ✓ Bus " ++ (busIdx + 1) ++ " processing chain created").postln;
+        if(routingMode == \quad, {
+            ("  ✓ Bus " ++ (busIdx + 1) ++ " (STEREO) → outputs " ++ finalOut ++ "+" ++ (finalOut + 1)).postln;
+        }, {
+            ("  ✓ Bus " ++ (busIdx + 1) ++ " (MONO) → output " ++ finalOut).postln;
+        });
     });
 
     "✓ Processing chain ready".postln;
