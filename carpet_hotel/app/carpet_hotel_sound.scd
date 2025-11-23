@@ -226,7 +226,7 @@ if(thisProcess.argv.size > 0, {
         ampLag = Lag.kr(amp, lagTime);  // Apply lag to amp parameter
         sig = in * ampLag;
 
-        ReplaceOut.ar(outBus, sig);  // Replace on same bus
+        Out.ar(outBus, sig);  // Add to bus (mix with dry signal)
     }).add;
 
     s.sync;
