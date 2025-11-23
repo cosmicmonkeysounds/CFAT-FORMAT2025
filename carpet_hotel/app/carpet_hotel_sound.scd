@@ -138,7 +138,7 @@ if(thisProcess.argv.size > 0, {
     // Limiter - Stereo
     SynthDef(\limiterStereo, {
         arg inBus, outBus,
-        threshold=(-0.5), releaseTime=0.01;
+        threshold=(-10.0), releaseTime=0.01;
 
         var in, limited;
 
@@ -151,7 +151,7 @@ if(thisProcess.argv.size > 0, {
     // Limiter - Mono
     SynthDef(\limiterMono, {
         arg inBus, outBus,
-        threshold=(-0.5), releaseTime=0.01;
+        threshold=(-10.0), releaseTime=0.01;
 
         var in, limited;
 
@@ -165,7 +165,7 @@ if(thisProcess.argv.size > 0, {
     // Reverb - Stereo
     SynthDef(\stereoReverb, {
         arg inBus, outBus,
-        mix=0.33, room=0.5, damp=0.5;
+        mix=0.95, room=0.5, damp=0.5;
 
         var in, reverb;
 
@@ -178,7 +178,7 @@ if(thisProcess.argv.size > 0, {
     // Frequency Shifter - Stereo
     SynthDef(\freqShifter, {
         arg inBus, outBus,
-        shift=0.0;  // Frequency shift in Hz
+        shift=10.0;  // Frequency shift in Hz
 
         var in, shifted;
 
@@ -206,6 +206,16 @@ if(thisProcess.argv.size > 0, {
         });
     }).add;
 
+    // Dry route - Routes dry signal directly to master bus
+    SynthDef(\dryRoute, {
+        arg inBus, outBus;
+
+        var in;
+
+        in = In.ar(inBus, 2);  // Stereo input
+        Out.ar(outBus, in);  // Route to master bus
+    }).add;
+
     // Reverb send - Sends signal from processing bus to reverb
     SynthDef(\reverbSend, {
         arg inBus, outBus, sendLevel=0.0;
@@ -214,6 +224,20 @@ if(thisProcess.argv.size > 0, {
 
         in = In.ar(inBus, 2);  // Stereo input
         Out.ar(outBus, in * sendLevel);  // Send to reverb with variable level
+    }).add;
+
+    // Reverb processor - Reverb + Frequency shift
+    SynthDef(\reverbProcess, {
+        arg inBus, outBus, shift=0.0;
+
+        var in, reverb, shifted;
+
+        in = In.ar(inBus, 2);  // Stereo input
+        reverb = FreeVerb2.ar(in[0], in[1], mix: 0.95, room: 0.9, damp: 0.5);
+        shifted = FreqShift.ar(reverb, shift);
+        shifted = LeakDC.ar(shifted);  // Remove DC offset to prevent buildup
+
+        Out.ar(outBus, shifted);  // Output to reverb processed bus
     }).add;
 
     // Amp control - Controls amplitude with lag for crossfading
@@ -277,10 +301,10 @@ if(thisProcess.argv.size > 0, {
         });
 
         // 1. Route dry signal directly to master bus (in routing group)
-        dryRouteSynths[busIdx] = {
-            var in = In.ar(processingBusses[busIdx].index, 2);
-            Out.ar(masterBusses[busIdx].index, in);
-        }.play(target: routingGroup);
+        dryRouteSynths[busIdx] = Synth(\dryRoute, [
+            \inBus, processingBusses[busIdx].index,
+            \outBus, masterBusses[busIdx].index
+        ], target: routingGroup);
 
         // 2. Create reverb send for this bus (in routing group)
         reverbSendSynths[busIdx] = Synth(\reverbSend, [
@@ -318,30 +342,20 @@ if(thisProcess.argv.size > 0, {
 
     numBusses.do({ |busIdx|
         // Process each bus's reverb send (in reverb group)
-        reverbProcessSynths[busIdx] = {
-            arg shift=0.0;
-            var in, reverb, shifted;
-
-            // 1. Read from reverb send bus
-            in = In.ar(reverbSendBusses[busIdx].index, 2);
-
-            // 2. Apply reverb
-            reverb = FreeVerb2.ar(in[0], in[1], mix: 0.5, room: 0.9, damp: 0.5);
-
-            // 3. Apply frequency shift (will be modulated during transitions)
-            shifted = FreqShift.ar(reverb, shift);
-
-            // 4. Output to reverb processed bus (before amp control)
-            Out.ar(reverbProcessedBusses[busIdx].index, shifted);
-        }.play(target: reverbGroup);
+        reverbProcessSynths[busIdx] = Synth(\reverbProcess, [
+            \inBus, reverbSendBusses[busIdx].index,
+            \outBus, reverbProcessedBusses[busIdx].index,
+            \shift, 0.0
+        ], target: reverbGroup);
 
         // Add amp control on reverb output (allows fading out the tail)
-        reverbAmpSynths[busIdx] = Synth.after(reverbProcessSynths[busIdx], \ampControl, [
+        // Place explicitly at tail of reverb group to ensure proper execution order
+        reverbAmpSynths[busIdx] = Synth(\ampControl, [
             \inBus, reverbProcessedBusses[busIdx].index,
             \outBus, masterBusses[busIdx].index,  // Output to master bus
             \amp, 0.0,  // Start silent
             \lagTime, 0.5  // 500ms fade for smooth reverb tail fadeout
-        ]);
+        ], target: reverbGroup, addAction: \addToTail);
     });
 
     "  ✓ Reverb chain: Sends → Reverb → FreqShift → Master Busses".postln;
@@ -524,7 +538,7 @@ if(thisProcess.argv.size > 0, {
 
         // Frequency shift amount (subtle, peaks in middle)
         // ±5 Hz max shift
-        freqShiftAmount = sin(progress * pi) * 5.0 * direction;
+        freqShiftAmount = sin(progress * pi) * 15.0 * direction;
 
         // Calculate doppler shift (peaks at 50% progress)
         if(dopplerEnabled, {
