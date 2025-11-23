@@ -30,6 +30,10 @@ var masterVolume = 0.7;
 var routingMode = \quad;  // \quad or \stereo (passed via command-line)
 var processingBusses, eqSynths, limiterSynths;  // Audio processing
 
+// Doppler effect settings
+var dopplerEnabled = true;
+var dopplerIntensity = 1.0;  // Max pitch shift: ±15% (1.15x / 0.85x)
+
 // ===== STARTUP MESSAGE =====
 "=== CARPET HOTEL AUDIO ENGINE ===".postln;
 
@@ -178,7 +182,7 @@ if(thisProcess.argv.size > 0, {
             \outBus, eqBus.index,
             // Default EQ settings
             \freq1, 100, \q1, 0.45, \gain1, 10.0, \thresh1, -35, \attack1, 0.01, \release1, 0.1,
-            \freq2, 1500, \q2, 0.57, \gain2, -4.0, \thresh2, -35, \attack2, 0.005, \release2, 0.05,
+            \freq2, 1500, \q2, 0.57, \gain2, -2.0, \thresh2, -40, \attack2, 0.005, \release2, 0.15,
             \freq3, 12000, \q3, 0.5, \gain3, 6.0, \thresh3, -45, \attack3, 0.001, \release3, 0.1
         ], addAction: \addToTail);
 
@@ -268,10 +272,11 @@ if(thisProcess.argv.size > 0, {
                         // Output to processing bus instead of direct output
                         synth = {
                             var numChannels = buffer.numChannels;
+                            var rate = \rate.kr(1.0, 0.05);  // Playback rate for doppler (50ms lag)
                             var sig = PlayBuf.ar(
                                 numChannels,
                                 buffer,
-                                BufRateScale.kr(buffer),
+                                BufRateScale.kr(buffer) * rate,  // Modulate rate for doppler
                                 loop: 1
                             );
                             var amp = \amp.kr(0.0, 0.1);  // 100ms lag for smooth crossfades
@@ -309,11 +314,11 @@ if(thisProcess.argv.size > 0, {
         numWindows = msg[2].asInteger;
         isAnimating = msg[3].asInteger;
 
-        // Silent all floors on all busses first
+        // Silent all floors on all busses first and reset pitch
         numBusses.do({ |busIdx|
             busPlayers[busIdx].keysValuesDo({ |floorIdx, synth|
                 if(synth.notNil, {
-                    synth.set(\amp, 0.0);
+                    synth.set(\amp, 0.0, \rate, 1.0);  // Reset pitch when silent
                 });
             });
         });
@@ -328,7 +333,7 @@ if(thisProcess.argv.size > 0, {
             if((floorIdx >= 0) && (floorIdx < numFloors), {
                 synth = busPlayers[busIdx][floorIdx];
                 if(synth.notNil, {
-                    synth.set(\amp, masterVolume);
+                    synth.set(\amp, masterVolume, \rate, 1.0);  // Normal pitch in stable scene
                 });
             });
         });
@@ -338,6 +343,7 @@ if(thisProcess.argv.size > 0, {
     OSCdef(\carpetTransition, { |msg|
         var currentFloor, progress, direction, numWindows;
         var currentFloorIdx, nextFloorIdx, fadeOutGain, fadeInGain;
+        var dopplerCurve, dopplerShift, currentRate, nextRate;
 
         currentFloor = msg[1].asInteger;
         progress = msg[2].asFloat;
@@ -347,6 +353,25 @@ if(thisProcess.argv.size > 0, {
         // Smooth crossfade using sine/cosine curves
         fadeOutGain = cos(progress * 0.5pi);  // 1.0 → 0.0
         fadeInGain = sin(progress * 0.5pi);   // 0.0 → 1.0
+
+        // Calculate doppler shift (peaks at 50% progress)
+        if(dopplerEnabled, {
+            // Sine curve that peaks at 0.5: 0.0 → 1.0 → 0.0
+            dopplerCurve = sin(progress * pi);
+
+            // Direction-based shift:
+            // Ascending (+1): pitch shifts UP (feels like approaching)
+            // Descending (-1): pitch shifts DOWN (feels like receding)
+            dopplerShift = dopplerCurve * dopplerIntensity * direction;
+
+            // Current floor: moving away (opposite shift)
+            currentRate = 1.0 - dopplerShift;
+            // Next floor: moving toward (same shift)
+            nextRate = 1.0 + dopplerShift;
+        }, {
+            currentRate = 1.0;
+            nextRate = 1.0;
+        });
 
         // Silent all floors on all busses first
         numBusses.do({ |busIdx|
@@ -366,19 +391,19 @@ if(thisProcess.argv.size > 0, {
             currentFloorForBus = currentFloor + busIdx;
             nextFloorForBus = (currentFloor + direction) + busIdx;
 
-            // Fade out current floor
+            // Fade out current floor with doppler
             if((currentFloorForBus >= 0) && (currentFloorForBus < numFloors), {
                 currentSynth = busPlayers[busIdx][currentFloorForBus];
                 if(currentSynth.notNil, {
-                    currentSynth.set(\amp, fadeOutGain * masterVolume);
+                    currentSynth.set(\amp, fadeOutGain * masterVolume, \rate, currentRate);
                 });
             });
 
-            // Fade in next floor
+            // Fade in next floor with doppler
             if((nextFloorForBus >= 0) && (nextFloorForBus < numFloors), {
                 nextSynth = busPlayers[busIdx][nextFloorForBus];
                 if(nextSynth.notNil, {
-                    nextSynth.set(\amp, fadeInGain * masterVolume);
+                    nextSynth.set(\amp, fadeInGain * masterVolume, \rate, nextRate);
                 });
             });
         });
@@ -449,7 +474,12 @@ s.waitForBoot({
     ~setupCleanup.value;
 
     "\n=== READY ===".postln;
-    "Audio Chain: Floors → Dynamic EQ (3-band) → Limiter → Output".postln;
+    "Audio Chain: Floors → Doppler → Dynamic EQ (3-band) → Limiter → Output".postln;
+    if(dopplerEnabled, {
+        ("Doppler effect: ENABLED (±" ++ (dopplerIntensity * 100) ++ "% pitch shift)").postln;
+    }, {
+        "Doppler effect: DISABLED".postln;
+    });
     "Press Cmd+. to stop\n".postln;
 });
 
