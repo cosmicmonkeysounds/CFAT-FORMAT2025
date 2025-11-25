@@ -581,9 +581,6 @@ class CarpetHotelCore:
 
         self.arduino = CarpetHotelArduino(serial_port=serial_port)
 
-        # Set core reference for jump calculations
-        self.arduino.set_core_reference(self)
-
         if self.arduino.connect():
             self.arduino_running = True
             # Start background thread to poll serial messages
