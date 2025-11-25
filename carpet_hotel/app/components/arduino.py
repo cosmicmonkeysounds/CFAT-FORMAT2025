@@ -75,7 +75,7 @@ class CarpetHotelArduino:
 
         # Debouncing: Track last button press time to prevent duplicates
         self.last_button_time = {"UP": 0, "DOWN": 0}
-        self.BUTTON_DEBOUNCE = 0.3  # Minimum 300ms between button presses
+        self.BUTTON_DEBOUNCE = 0.15  # Minimum 150ms between button presses
 
     def set_message_callback(self, callback):
         """
@@ -152,22 +152,31 @@ class CarpetHotelArduino:
         if msg == "UP":
             # Check debounce time
             if current_time - self.last_button_time["UP"] < self.BUTTON_DEBOUNCE:
-                print(f"[Button] UP ignored - too soon after last press ({current_time - self.last_button_time['UP']:.3f}s)")
+                print(f"[Button] UP ignored - debounce ({current_time - self.last_button_time['UP']:.3f}s < {self.BUTTON_DEBOUNCE}s)")
                 return
 
             self.last_button_time["UP"] = current_time
-            print(f"[Button] UP pressed → sending /carpet/elevator/up")
+            print(f"[Button] ▲ UP pressed → sending /carpet/elevator/up")
             self.osc_client.send_message("/carpet/elevator/up", [])
 
         elif msg == "DOWN":
             # Check debounce time
             if current_time - self.last_button_time["DOWN"] < self.BUTTON_DEBOUNCE:
-                print(f"[Button] DOWN ignored - too soon after last press ({current_time - self.last_button_time['DOWN']:.3f}s)")
+                print(f"[Button] DOWN ignored - debounce ({current_time - self.last_button_time['DOWN']:.3f}s < {self.BUTTON_DEBOUNCE}s)")
                 return
 
             self.last_button_time["DOWN"] = current_time
-            print(f"[Button] DOWN pressed → sending /carpet/elevator/down")
+            print(f"[Button] ▼ DOWN pressed → sending /carpet/elevator/down")
             self.osc_client.send_message("/carpet/elevator/down", [])
+
+        elif msg in ["UP_RELEASED", "DOWN_RELEASED"]:
+            # Ignore button release events (we only act on press)
+            pass
+
+        else:
+            # Log any other messages for debugging
+            if msg and msg != "READY":
+                print(f"[Button] Unknown message: '{msg}'")
 
     def setup_osc(self) -> bool:
         """
