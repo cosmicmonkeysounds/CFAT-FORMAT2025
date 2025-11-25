@@ -73,6 +73,10 @@ class CarpetHotelArduino:
         # Simple button state - just track current state for LED animations
         self.current_state = "STABLE"  # Track if we're in stable mode ('STABLE' or 'TRANSITION')
 
+        # Debouncing: Track last button press time to prevent duplicates
+        self.last_button_time = {"UP": 0, "DOWN": 0}
+        self.BUTTON_DEBOUNCE = 0.3  # Minimum 300ms between button presses
+
     def set_message_callback(self, callback):
         """
         Set callback function for message logging.
@@ -142,11 +146,26 @@ class CarpetHotelArduino:
 
         msg = message.strip().upper()
 
-        # Simple button handling: send OSC on button press
+        # Simple button handling: send OSC on button press (with debouncing)
+        current_time = time.time()
+
         if msg == "UP":
+            # Check debounce time
+            if current_time - self.last_button_time["UP"] < self.BUTTON_DEBOUNCE:
+                print(f"[Button] UP ignored - too soon after last press ({current_time - self.last_button_time['UP']:.3f}s)")
+                return
+
+            self.last_button_time["UP"] = current_time
             print(f"[Button] UP pressed → sending /carpet/elevator/up")
             self.osc_client.send_message("/carpet/elevator/up", [])
+
         elif msg == "DOWN":
+            # Check debounce time
+            if current_time - self.last_button_time["DOWN"] < self.BUTTON_DEBOUNCE:
+                print(f"[Button] DOWN ignored - too soon after last press ({current_time - self.last_button_time['DOWN']:.3f}s)")
+                return
+
+            self.last_button_time["DOWN"] = current_time
             print(f"[Button] DOWN pressed → sending /carpet/elevator/down")
             self.osc_client.send_message("/carpet/elevator/down", [])
 
