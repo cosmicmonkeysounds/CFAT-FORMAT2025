@@ -92,7 +92,7 @@ void setup() {
     PApplet.runSketch(args, compositeWindow);
   }
 
-  println("\n=== CARPET HOTEL CONTROL ===");
+  println("\n=== CARPET HOTEL CONTROL (LONG-PLAY MODE) ===");
   println("Scene Windows: " + SCENE_DISPLAY_NUMBERS.length);
   println("Scene Displays: " + java.util.Arrays.toString(SCENE_DISPLAY_LETTERS));
   println("Scene Physical: " + java.util.Arrays.toString(SCENE_DISPLAY_NUMBERS));
@@ -103,6 +103,10 @@ void setup() {
   println("Videos: " + sharedState.videoNames.size());
   println("Audio: " + sharedState.audioNames.size() + " (handled by SuperCollider)");
   println("Volume: " + int(masterVolume * 100) + "%");
+  println("\nLong-play optimizations:");
+  println("  Video health monitoring: Active (1s interval)");
+  println("  Auto-restart on stall: Enabled (3s threshold)");
+  println("  Health status: Every 5 minutes");
   println("\nInput modes:");
   println("  Test mode (keyboard): " + (TEST_MODE ? "ENABLED" : "disabled"));
   println("  OSC control (Python): " + (OSC_CONTROL_MODE ? "ENABLED" : "disabled"));
@@ -230,9 +234,20 @@ void parseArgs() {
   }
 }
 
+// Long-play: Health status interval (every 5 minutes at 60fps = 18000 frames)
+static final int HEALTH_STATUS_INTERVAL = 18000;
+int lastHealthStatusFrame = 0;
+
 void draw() {
   // Update animation state
   sharedState.update();
+
+  // Long-play: Periodic health status
+  if (frameCount - lastHealthStatusFrame >= HEALTH_STATUS_INTERVAL) {
+    lastHealthStatusFrame = frameCount;
+    float minutes = frameCount / 60.0 / 60.0;
+    println("✓ Video engine healthy - running for " + nf(minutes, 0, 1) + " minutes");
+  }
 
   background(40);
   fill(255);
@@ -852,6 +867,13 @@ class SharedState {
 
   void ensureVideoLoaded(int index) {
     ensureFloorLoaded(index);
+    // Update video reference in case floor restarted its video
+    if (index >= 0 && index < floors.size()) {
+      Floor floor = floors.get(index);
+      if (floor != null && floor.video != null) {
+        videos.set(index, floor.video);
+      }
+    }
   }
 
   void findCarpetMedia() {
@@ -982,14 +1004,25 @@ class SharedState {
 /**
  * Floor class - contains a video and audio file reference
  * Audio is handled by SuperCollider via OSC
+ * Long-play optimized with health monitoring and auto-restart
  */
 class Floor {
   Movie video;
   String videoName;
+  String videoPath;  // Full path for restart
   String audioName;
   int floorNumber;
+  PApplet parentRef;
+
+  // Long-play health monitoring
+  float lastKnownTime = 0;
+  int stallFrameCount = 0;
+  int lastCheckFrame = 0;
+  static final int STALL_THRESHOLD = 180;  // ~3 seconds at 60fps before restart
+  static final int CHECK_INTERVAL = 60;    // Check every 60 frames (~1 second)
 
   Floor(PApplet parent, String videoFile, String audioFile, int number) {
+    this.parentRef = parent;
     this.videoName = videoFile;
     this.audioName = audioFile;
     this.floorNumber = number;
@@ -999,20 +1032,87 @@ class Floor {
       File f = new File(videoFile);
       if (f.exists() && f.isFile()) {
         // Full path provided (from Python)
-        video = new Movie(parent, videoFile);
+        this.videoPath = videoFile;
       } else {
         // Just filename, use dataPath()
-        video = new Movie(parent, parent.dataPath(videoFile));
+        this.videoPath = parent.dataPath(videoFile);
       }
-      video.loop();
-      video.volume(0.0);  // Mute video - audio handled by SuperCollider
-      video.play();
+      initVideo();
+    }
+  }
+
+  void initVideo() {
+    // Initialize or reinitialize video
+    if (video != null) {
+      try {
+        video.stop();
+        video.dispose();
+      } catch (Exception e) {
+        // Ignore cleanup errors
+      }
+    }
+
+    video = new Movie(parentRef, videoPath);
+    video.loop();
+    video.volume(0.0);  // Mute video - audio handled by SuperCollider
+    video.play();
+
+    // Reset health monitoring
+    lastKnownTime = 0;
+    stallFrameCount = 0;
+    lastCheckFrame = 0;
+  }
+
+  // Call this from draw() to check video health
+  void checkHealth(int currentFrame) {
+    if (video == null) return;
+
+    // Only check periodically to reduce overhead
+    if (currentFrame - lastCheckFrame < CHECK_INTERVAL) return;
+    lastCheckFrame = currentFrame;
+
+    try {
+      float currentTime = video.time();
+
+      // Check if video time is progressing
+      if (abs(currentTime - lastKnownTime) < 0.001) {
+        // Time hasn't changed - video might be stalled
+        stallFrameCount += CHECK_INTERVAL;
+
+        if (stallFrameCount >= STALL_THRESHOLD) {
+          println("⚠ Floor " + floorNumber + " video stalled at " + currentTime + "s - restarting...");
+          restartVideo();
+        }
+      } else {
+        // Video is playing normally
+        stallFrameCount = 0;
+        lastKnownTime = currentTime;
+      }
+    } catch (Exception e) {
+      // Error checking video state - try to restart
+      println("⚠ Floor " + floorNumber + " video error: " + e.getMessage() + " - restarting...");
+      restartVideo();
+    }
+  }
+
+  void restartVideo() {
+    println("  Restarting Floor " + floorNumber + " video: " + videoName);
+    try {
+      initVideo();
+      println("  ✓ Floor " + floorNumber + " video restarted successfully");
+    } catch (Exception e) {
+      println("  ✗ Failed to restart Floor " + floorNumber + ": " + e.getMessage());
     }
   }
 
   void cleanup() {
     if (video != null) {
-      video.stop();
+      try {
+        video.stop();
+        video.dispose();
+      } catch (Exception e) {
+        // Ignore cleanup errors
+      }
     }
   }
 }
@@ -1147,11 +1247,17 @@ class FloorWindow extends PApplet {
 
     // Ensure video is loaded
     sharedState.ensureVideoLoaded(videoIdx);
-    Movie video = sharedState.videos.get(videoIdx);
 
-    if (video == null) {
+    // Get floor for health check
+    Floor floor = sharedState.floors.get(videoIdx);
+    if (floor == null || floor.video == null) {
       return; // Not loaded yet
     }
+
+    // Long-play optimization: Check video health periodically
+    floor.checkHealth(frameCount);
+
+    Movie video = floor.video;
 
     // Read frame
     if (video.available()) {

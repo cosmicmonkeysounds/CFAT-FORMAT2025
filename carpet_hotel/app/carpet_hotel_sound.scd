@@ -52,6 +52,10 @@ var sourceGroup, routingGroup, reverbGroup, masterGroup;  // Node groups for ord
 var dopplerEnabled = true;
 var dopplerIntensity = 1.0;  // Max pitch shift: ±15% (1.15x / 0.85x)
 
+// Long-play optimization: Health monitoring
+var healthCheckRoutine;
+var lastHealthCheck = 0;
+
 // ===== STARTUP MESSAGE =====
 "=== CARPET HOTEL AUDIO ENGINE ===".postln;
 
@@ -261,6 +265,53 @@ if(thisProcess.argv.size > 0, {
         Out.ar(outBus, sig);  // Add to bus (mix with dry signal)
     }).add;
 
+    // Long-play optimized looping buffer player
+    // Uses proper SynthDef instead of function-style to prevent GC issues
+    SynthDef(\loopPlayer, {
+        arg bufnum, outBus, amp=0.0, rate=1.0, lagTime=0.1;
+
+        var sig, numChannels, ampLag, rateLag;
+
+        // Lagged controls for smooth transitions
+        ampLag = Lag.kr(amp, lagTime);
+        rateLag = Lag.kr(rate, 0.05);  // 50ms lag for pitch
+
+        // Play buffer in loop mode with rate control for doppler
+        sig = PlayBuf.ar(
+            2,  // Force stereo output
+            bufnum,
+            BufRateScale.kr(bufnum) * rateLag,
+            loop: 1,
+            doneAction: 0  // Don't free synth when buffer ends (shouldn't happen with loop:1)
+        );
+
+        // Output with amplitude control
+        Out.ar(outBus, sig * ampLag);
+    }).add;
+
+    // Mono version of looping buffer player (duplicates mono to stereo)
+    SynthDef(\loopPlayerMono, {
+        arg bufnum, outBus, amp=0.0, rate=1.0, lagTime=0.1;
+
+        var sig, ampLag, rateLag;
+
+        // Lagged controls for smooth transitions
+        ampLag = Lag.kr(amp, lagTime);
+        rateLag = Lag.kr(rate, 0.05);
+
+        // Play mono buffer and duplicate to stereo
+        sig = PlayBuf.ar(
+            1,
+            bufnum,
+            BufRateScale.kr(bufnum) * rateLag,
+            loop: 1,
+            doneAction: 0
+        );
+
+        // Duplicate mono to stereo output
+        Out.ar(outBus, (sig ! 2) * ampLag);
+    }).add;
+
     s.sync;
     "✓ SynthDefs compiled".postln;
 };
@@ -430,34 +481,27 @@ if(thisProcess.argv.size > 0, {
                     s.sync;
 
                     floors[idx] = buffer;  // Store by index (0-based)
-                    ("  ✓ Loaded floor " ++ idx ++ ": " ++ matchingFile.fileName).postln;
+                    ("  ✓ Loaded floor " ++ idx ++ ": " ++ matchingFile.fileName ++ " (" ++ buffer.numChannels ++ " ch)").postln;
 
                     // Create looping players for each floor - one per bus
+                    // Uses proper SynthDef for long-play stability (prevents GC issues)
                     numBusses.do({ |busIdx|
-                        var synth;
+                        var synth, synthDef;
 
-                        // Create synth for this floor on this bus
-                        // Output to processing bus (in source group)
-                        synth = {
-                            var numChannels = buffer.numChannels;
-                            var rate = \rate.kr(1.0, 0.05);  // Playback rate for doppler (50ms lag)
-                            var sig = PlayBuf.ar(
-                                numChannels,
-                                buffer,
-                                BufRateScale.kr(buffer) * rate,  // Modulate rate for doppler
-                                loop: 1
-                            );
-                            var amp = \amp.kr(0.0, 0.1);  // 100ms lag for smooth crossfades
+                        // Choose appropriate SynthDef based on channel count
+                        synthDef = if(buffer.numChannels == 1, { \loopPlayerMono }, { \loopPlayer });
 
-                            // Always output stereo to processing bus
-                            if(numChannels == 1, {
-                                sig = sig ! 2;  // Duplicate mono to stereo
-                            });
+                        // Create synth using proper SynthDef (not function-style)
+                        // This prevents garbage collection issues during long playback
+                        synth = Synth(synthDef, [
+                            \bufnum, buffer,
+                            \outBus, processingBusses[busIdx].index,
+                            \amp, 0.0,
+                            \rate, 1.0,
+                            \lagTime, 0.1
+                        ], target: sourceGroup);
 
-                            sig * amp;
-                        }.play(outbus: processingBusses[busIdx].index, target: sourceGroup);
-
-                        // Store synth
+                        // Store synth reference
                         busPlayers[busIdx][idx] = synth;
                     });
                 });
@@ -624,6 +668,12 @@ if(thisProcess.argv.size > 0, {
     CmdPeriod.doOnce({
         "Stopping audio engine...".postln;
 
+        // Stop health check routine
+        if(healthCheckRoutine.notNil, {
+            healthCheckRoutine.stop;
+            "  ✓ Health monitoring stopped".postln;
+        });
+
         // Free groups (which frees all synths inside them)
         if(sourceGroup.notNil, { sourceGroup.free });
         if(routingGroup.notNil, { routingGroup.free });
@@ -645,6 +695,8 @@ if(thisProcess.argv.size > 0, {
         // Free OSC responders
         OSCdef(\carpetScene).free;
         OSCdef(\carpetTransition).free;
+
+        "✓ Audio engine stopped cleanly".postln;
     });
 };
 
@@ -659,9 +711,6 @@ s.waitForBoot({
     "Audio server ready!".postln;
     ("Sample rate: " ++ s.sampleRate ++ " Hz").postln;
 
-    // Keep sclang alive (MUST be inside waitForBoot)
-    SystemClock.sched(1.0, { 1.0 });
-
     // Setup everything else
     ~defineSynthDefs.value;
     ~createProcessingChain.value;
@@ -669,7 +718,47 @@ s.waitForBoot({
     ~setupOSC.value;
     ~setupCleanup.value;
 
-    "\n=== READY ===".postln;
+    // Long-play optimization: Robust keep-alive with health monitoring
+    // Runs every 30 seconds to check server health and prevent timeout
+    healthCheckRoutine = Routine({
+        var checkCount = 0;
+        inf.do({
+            checkCount = checkCount + 1;
+
+            // Check if server is still running
+            if(s.serverRunning.not, {
+                "⚠ WARNING: Server stopped unexpectedly! Attempting restart...".postln;
+                s.boot;
+            });
+
+            // Check if source group still exists (synths haven't been freed)
+            if(sourceGroup.notNil, {
+                // Query the group - this also keeps the connection alive
+                sourceGroup.queryTree;
+            });
+
+            // Periodic health status (every 5 minutes = 10 checks)
+            if(checkCount % 10 == 0, {
+                var mins = (checkCount * 30 / 60).round(0.1);
+                ("✓ Audio engine healthy - running for " ++ mins ++ " minutes").postln;
+            });
+
+            // Wait 30 seconds before next check
+            30.wait;
+        });
+    }).play(SystemClock);
+
+    // Secondary keep-alive: Simple tick every 5 seconds
+    // This is a backup in case the health routine somehow stops
+    SystemClock.sched(5.0, {
+        if(s.serverRunning, {
+            5.0;  // Reschedule in 5 seconds
+        }, {
+            nil;  // Stop if server is down
+        });
+    });
+
+    "\n=== READY (LONG-PLAY MODE) ===".postln;
     "Execution Groups:".postln;
     "  SOURCE → ROUTING → REVERB → MASTER".postln;
     "Signal Flow (per bus):".postln;
@@ -680,6 +769,7 @@ s.waitForBoot({
     }, {
         "Doppler effect: DISABLED".postln;
     });
+    "Health monitoring: Active (30s interval)".postln;
     "Press Cmd+. to stop\n".postln;
 });
 
