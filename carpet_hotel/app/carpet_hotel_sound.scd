@@ -84,6 +84,14 @@ if(thisProcess.argv.size > 0, {
 
     s.options.numInputBusChannels = 0;   // No input needed
     s.options.numAudioBusChannels = 2048;  // Plenty of busses for processing
+
+    // Bluetooth-friendly settings to prevent clicking/dropouts
+    s.options.sampleRate = 48000;  // Bluetooth devices prefer 48kHz (default: 44100)
+    s.options.hardwareBufferSize = 1024;  // Larger I/O buffer for Bluetooth (default: 512)
+    s.options.memSize = 8192 * 16;  // Increase memory for larger buffers
+
+    "✓ Sample rate: 48000 Hz (Bluetooth-friendly)".postln;
+    "✓ Hardware buffer: 1024 samples (" ++ (1024 / 48000.0 * 1000).round(0.1) ++ "ms latency)".postln;
 };
 
 // ===== STEP 1B: DEFINE SYNTHDEFS =====
