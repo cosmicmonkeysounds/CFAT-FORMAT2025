@@ -73,7 +73,7 @@ class CarpetHotelGUI:
         self.hardware_running = False
 
         # Auto-restart timer (30 minutes = 1800 seconds)
-        self.auto_restart_interval = 30 * 60  # 30 minutes in seconds
+        self.auto_restart_interval = 10 * 60  # 10 minutes in seconds
         self.video_start_time = None
         self.audio_start_time = None
         self._restart_check_id = None
