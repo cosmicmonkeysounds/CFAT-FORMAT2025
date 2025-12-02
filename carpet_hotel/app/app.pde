@@ -387,7 +387,14 @@ void oscEvent(OscMessage msg) {
 }
 
 void movieEvent(Movie m) {
-  m.read();
+  // Wrap in try-catch to prevent one bad video from blocking all others
+  try {
+    if (m != null && m.available()) {
+      m.read();
+    }
+  } catch (Exception e) {
+    println("⚠ movieEvent error: " + e.getMessage());
+  }
 }
 
 
@@ -732,6 +739,10 @@ class SharedState {
     return max(1, videoNames.size() - SCENE_DISPLAY_NUMBERS.length + 1);
   }
 
+  // Track frames for periodic cleanup during transitions
+  int lastCleanupFrame = 0;
+  static final int CLEANUP_INTERVAL = 120;  // Cleanup every 2 seconds at 60fps
+
   void update() {
     if (isAnimating) {
       // Calculate distance-based speed multiplier
@@ -740,12 +751,29 @@ class SharedState {
       // Increment animation progress with distance-adjusted speed
       animationProgress += config.animationSpeed * speedMultiplier;
 
+      // During long transitions, periodically clean up distant videos
+      // This prevents GStreamer resource exhaustion on wrap-around
+      if (parent.frameCount - lastCleanupFrame >= CLEANUP_INTERVAL) {
+        lastCleanupFrame = parent.frameCount;
+        // Calculate current position during animation
+        int sceneDirection = (targetScene > startScene) ? 1 : -1;
+        int currentAnimScene = startScene + (int)animationProgress * sceneDirection;
+        // Temporarily set currentScene for cleanup calculation, then restore
+        int savedScene = currentScene;
+        currentScene = currentAnimScene;
+        unloadDistantVideos();
+        currentScene = savedScene;
+      }
+
       // Check if animation is complete
       if (animationProgress >= totalDistance) {
         animationProgress = totalDistance;
         isAnimating = false;
         currentScene = targetScene;
         println("Arrived at scene " + currentScene);
+
+        // Unload distant videos to free GStreamer resources
+        unloadDistantVideos();
 
         // Notify Python if in OSC control mode
         if (OSC_CONTROL_MODE) {
@@ -813,45 +841,11 @@ class SharedState {
       return; // Already there or currently animating
     }
 
-    // Calculate direct distance vs wrap-around distance
-    int numScenes = getNumScenes();
-    int directDistance = abs(newScene - currentScene);
-    int wrapDistance = numScenes - directDistance;
-
-    // If wrap-around is shorter (or equal), do an instant jump instead of animating
-    // This handles going from scene 32 -> 0 or 0 -> 32
-    if (wrapDistance < directDistance || directDistance > numScenes / 2) {
-      println("Wrap-around detected: " + currentScene + " -> " + newScene + " (direct=" + directDistance + ", wrap=" + wrapDistance + ")");
-      println("Performing instant jump instead of long animation");
-
-      // Instant jump - just set the scene directly
-      currentScene = newScene;
-      lastSentScene = -1;  // Force OSC update
-
-      // Preload videos for the new scene
-      for (int i = 0; i < SCENE_DISPLAY_NUMBERS.length; i++) {
-        int videoIdx = newScene + i;
-        if (videoIdx >= 0 && videoIdx < videoNames.size()) {
-          ensureVideoLoaded(videoIdx);
-        }
-      }
-
-      // Notify Python
-      if (OSC_CONTROL_MODE) {
-        OscMessage reply = new OscMessage("/carpet/state");
-        reply.add("entering_scene");
-        reply.add(newScene);
-        oscP5.send(reply, pythonAddress);
-      }
-
-      return;
-    }
-
     println("Starting transition from scene " + currentScene + " to scene " + newScene);
     startScene = currentScene;
     targetScene = newScene;
     animationDirection = (newScene > currentScene) ? -1 : 1;  // -1 = up (videos scroll down), 1 = down (videos scroll up)
-    totalDistance = directDistance;
+    totalDistance = abs(newScene - currentScene);
     animationProgress = 0.0;
     isAnimating = true;
 
@@ -866,10 +860,15 @@ class SharedState {
       oscP5.send(reply, pythonAddress);
     }
 
-    // Preload videos along the path
+    // Preload videos along the path (but limit how many we preload at once)
     int minScene = min(currentScene, targetScene);
     int maxScene = max(currentScene, targetScene);
-    for (int scene = minScene; scene <= maxScene; scene++) {
+
+    // Only preload videos within a reasonable range to avoid overwhelming GStreamer
+    int preloadMin = max(minScene, currentScene - KEEP_RANGE);
+    int preloadMax = min(maxScene, currentScene + SCENE_DISPLAY_NUMBERS.length + KEEP_RANGE);
+
+    for (int scene = preloadMin; scene <= preloadMax; scene++) {
       for (int i = 0; i < SCENE_DISPLAY_NUMBERS.length; i++) {
         int videoIdx = scene + i;
         if (videoIdx >= 0 && videoIdx < videoNames.size()) {
@@ -906,6 +905,28 @@ class SharedState {
       Floor floor = floors.get(index);
       if (floor != null && floor.video != null) {
         videos.set(index, floor.video);
+      }
+    }
+  }
+
+  /**
+   * Unload videos that are far from the current scene to free resources.
+   * GStreamer can only handle so many concurrent video streams.
+   * Keep videos within KEEP_RANGE floors of current scene.
+   */
+  static final int KEEP_RANGE = 4;  // Keep videos within 4 floors of current scene
+
+  void unloadDistantVideos() {
+    int minKeep = max(0, currentScene - KEEP_RANGE);
+    int maxKeep = min(videoNames.size() - 1, currentScene + SCENE_DISPLAY_NUMBERS.length + KEEP_RANGE);
+
+    for (int i = 0; i < floors.size(); i++) {
+      Floor floor = floors.get(i);
+      if (floor != null && (i < minKeep || i > maxKeep)) {
+        println("Unloading distant Floor " + i + " (current scene: " + currentScene + ")");
+        floor.cleanup();
+        floors.set(i, null);
+        videos.set(i, null);
       }
     }
   }
@@ -1155,10 +1176,15 @@ class Floor {
     if (video != null) {
       try {
         video.stop();
+      } catch (Exception e) {
+        println("  Floor " + floorNumber + " stop error: " + e.getMessage());
+      }
+      try {
         video.dispose();
       } catch (Exception e) {
-        // Ignore cleanup errors
+        println("  Floor " + floorNumber + " dispose error: " + e.getMessage());
       }
+      video = null;  // Clear reference to help GC
     }
   }
 }
@@ -1305,9 +1331,16 @@ class FloorWindow extends PApplet {
 
     Movie video = floor.video;
 
-    // Read frame
-    if (video.available()) {
-      video.read();
+    // Read frame with error handling
+    try {
+      if (video.available()) {
+        video.read();
+      }
+    } catch (Exception e) {
+      println("⚠ Floor " + videoIdx + " video.read() error: " + e.getMessage());
+      // Try to restart the video
+      floor.restartVideo();
+      return;
     }
 
     // Draw video
