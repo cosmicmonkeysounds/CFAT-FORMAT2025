@@ -1018,8 +1018,8 @@ class Floor {
   float lastKnownTime = 0;
   int stallFrameCount = 0;
   int lastCheckFrame = 0;
-  static final int STALL_THRESHOLD = 180;  // ~3 seconds at 60fps before restart
-  static final int CHECK_INTERVAL = 60;    // Check every 60 frames (~1 second)
+  static final int STALL_THRESHOLD = 120;  // ~2 seconds at 60fps before restart
+  static final int CHECK_INTERVAL = 30;    // Check every 30 frames (~0.5 second) for faster loop detection
 
   Floor(PApplet parent, String videoFile, String audioFile, int number) {
     this.parentRef = parent;
@@ -1073,6 +1073,18 @@ class Floor {
 
     try {
       float currentTime = video.time();
+      float duration = video.duration();
+
+      // Check if video has reached the end (within 0.5s of duration)
+      // This catches the case where loop() isn't working
+      if (duration > 0 && currentTime >= duration - 0.5) {
+        println("⚠ Floor " + floorNumber + " video reached end (" + currentTime + "/" + duration + "s) - restarting loop...");
+        video.jump(0);
+        video.play();
+        lastKnownTime = 0;
+        stallFrameCount = 0;
+        return;
+      }
 
       // Check if video time is progressing
       if (abs(currentTime - lastKnownTime) < 0.001) {
