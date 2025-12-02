@@ -72,6 +72,12 @@ class CarpetHotelGUI:
         self.audio_running = False
         self.hardware_running = False
 
+        # Auto-restart timer (30 minutes = 1800 seconds)
+        self.auto_restart_interval = 30 * 60  # 30 minutes in seconds
+        self.video_start_time = None
+        self.audio_start_time = None
+        self._restart_check_id = None
+
         # Display configuration now managed in Hardware tab via video_config.json
 
         # Create GUI
@@ -84,6 +90,9 @@ class CarpetHotelGUI:
 
         # Start status polling
         self._poll_status()
+
+        # Start auto-restart check (every 10 seconds)
+        self._start_auto_restart_check()
 
         # Load saved settings and apply them
         self.load_settings()
@@ -296,8 +305,9 @@ class CarpetHotelGUI:
 
             if success:
                 self.video_running = True
+                self.video_start_time = time.time()
                 self.root.after(0, self.update_video_ui, True)
-                self.log_to_widget(self.video_log, "✓ Processing started")
+                self.log_to_widget(self.video_log, "✓ Processing started (auto-restart in 30 min)")
             else:
                 self.log_to_widget(self.video_log, "✗ Failed to start Processing")
                 self.root.after(0, self.update_video_ui, False)
@@ -314,6 +324,7 @@ class CarpetHotelGUI:
         def stop_thread():
             if self.core.stop_processing():
                 self.video_running = False
+                self.video_start_time = None
                 self.log_to_widget(self.video_log, "✓ Processing stopped")
             else:
                 self.log_to_widget(self.video_log, "✗ Failed to stop Processing")
@@ -481,8 +492,9 @@ class CarpetHotelGUI:
 
             if success:
                 self.audio_running = True
+                self.audio_start_time = time.time()
                 self.root.after(0, self.update_audio_ui, True)
-                self.log_to_widget(self.audio_log, "✓ SuperCollider started")
+                self.log_to_widget(self.audio_log, "✓ SuperCollider started (auto-restart in 30 min)")
             else:
                 self.log_to_widget(self.audio_log, "✗ Failed to start SuperCollider")
                 self.log_to_widget(self.audio_log, "  See AUDIO_SETUP.md for configuration help")
@@ -500,6 +512,7 @@ class CarpetHotelGUI:
         def stop_thread():
             if self.core.stop_supercollider():
                 self.audio_running = False
+                self.audio_start_time = None
                 self.log_to_widget(self.audio_log, "✓ SuperCollider stopped")
             else:
                 self.log_to_widget(self.audio_log, "✗ Failed to stop SuperCollider")
@@ -1698,6 +1711,100 @@ Arduino: Auto-detected on first connection attempt"""
 
         if self.audio_running:
             self.stop_audio()
+
+    # ========================================================================
+    # AUTO-RESTART (30 min cycle)
+    # ========================================================================
+
+    def _start_auto_restart_check(self):
+        """Start the periodic auto-restart check."""
+        self._check_auto_restart()
+
+    def _check_auto_restart(self):
+        """Check if Processing or SuperCollider need to be restarted."""
+        current_time = time.time()
+
+        # Check if video needs restart
+        if self.video_running and self.video_start_time:
+            elapsed = current_time - self.video_start_time
+            if elapsed >= self.auto_restart_interval:
+                self.log_to_widget(self.video_log, f"⏱ Auto-restart: 30 minutes elapsed, restarting Processing...")
+                self._auto_restart_video()
+
+        # Check if audio needs restart
+        if self.audio_running and self.audio_start_time:
+            elapsed = current_time - self.audio_start_time
+            if elapsed >= self.auto_restart_interval:
+                self.log_to_widget(self.audio_log, f"⏱ Auto-restart: 30 minutes elapsed, restarting SuperCollider...")
+                self._auto_restart_audio()
+
+        # Schedule next check in 10 seconds
+        self._restart_check_id = self.root.after(10000, self._check_auto_restart)
+
+    def _auto_restart_video(self):
+        """Automatically restart Processing."""
+        def restart_thread():
+            # Stop
+            self.log_to_widget(self.video_log, "  Stopping Processing...")
+            if self.core.stop_processing():
+                self.video_running = False
+                self.root.after(0, self.update_video_ui, False)
+
+                # Wait a moment
+                time.sleep(2)
+
+                # Start again
+                self.log_to_widget(self.video_log, "  Starting Processing...")
+                success = self.core.start_processing(
+                    displays=None,
+                    enable_keyboard=self.video_keyboard_var.get()
+                )
+
+                if success:
+                    self.video_running = True
+                    self.video_start_time = time.time()
+                    self.root.after(0, self.update_video_ui, True)
+                    self.log_to_widget(self.video_log, "✓ Processing auto-restarted successfully")
+                else:
+                    self.log_to_widget(self.video_log, "✗ Failed to auto-restart Processing")
+                    self.root.after(0, self.update_video_ui, False)
+            else:
+                self.log_to_widget(self.video_log, "✗ Failed to stop Processing for auto-restart")
+
+        threading.Thread(target=restart_thread, daemon=True).start()
+
+    def _auto_restart_audio(self):
+        """Automatically restart SuperCollider."""
+        def restart_thread():
+            # Get the current routing mode
+            routing_str = self.audio_routing_var.get()
+            routing = routing_str.split(" - ")[0]
+
+            # Stop
+            self.log_to_widget(self.audio_log, "  Stopping SuperCollider...")
+            if self.core.stop_supercollider():
+                self.audio_running = False
+                self.root.after(0, self.update_audio_ui, False)
+
+                # Wait a moment
+                time.sleep(2)
+
+                # Start again
+                self.log_to_widget(self.audio_log, "  Starting SuperCollider...")
+                success = self.core.start_supercollider(audio_routing=routing)
+
+                if success:
+                    self.audio_running = True
+                    self.audio_start_time = time.time()
+                    self.root.after(0, self.update_audio_ui, True)
+                    self.log_to_widget(self.audio_log, "✓ SuperCollider auto-restarted successfully")
+                else:
+                    self.log_to_widget(self.audio_log, "✗ Failed to auto-restart SuperCollider")
+                    self.root.after(0, self.update_audio_ui, False)
+            else:
+                self.log_to_widget(self.audio_log, "✗ Failed to stop SuperCollider for auto-restart")
+
+        threading.Thread(target=restart_thread, daemon=True).start()
 
     # ========================================================================
     # UTILITIES
