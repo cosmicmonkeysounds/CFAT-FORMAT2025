@@ -1572,7 +1572,7 @@ Arduino: Auto-detected on first connection attempt"""
             self.log_to_widget(self.command_log, f"Scenes available: {num_scenes} (0-{max_scene})")
 
     def scene_up(self):
-        """Increment scene and send goto command."""
+        """Increment scene and send goto command (with wrap-around)."""
         max_scene = self.core.get_max_scene()
         current = int(self.scene_var.get())
         new_scene = (current + 1) % (max_scene + 1)
@@ -1580,7 +1580,7 @@ Arduino: Auto-detected on first connection attempt"""
         self.send_osc_command('/carpet/goto', [new_scene])
 
     def scene_down(self):
-        """Decrement scene and send goto command."""
+        """Decrement scene and send goto command (with wrap-around)."""
         max_scene = self.core.get_max_scene()
         current = int(self.scene_var.get())
         new_scene = (current - 1) % (max_scene + 1)

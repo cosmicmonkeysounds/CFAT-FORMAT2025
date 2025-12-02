@@ -813,11 +813,45 @@ class SharedState {
       return; // Already there or currently animating
     }
 
+    // Calculate direct distance vs wrap-around distance
+    int numScenes = getNumScenes();
+    int directDistance = abs(newScene - currentScene);
+    int wrapDistance = numScenes - directDistance;
+
+    // If wrap-around is shorter (or equal), do an instant jump instead of animating
+    // This handles going from scene 32 -> 0 or 0 -> 32
+    if (wrapDistance < directDistance || directDistance > numScenes / 2) {
+      println("Wrap-around detected: " + currentScene + " -> " + newScene + " (direct=" + directDistance + ", wrap=" + wrapDistance + ")");
+      println("Performing instant jump instead of long animation");
+
+      // Instant jump - just set the scene directly
+      currentScene = newScene;
+      lastSentScene = -1;  // Force OSC update
+
+      // Preload videos for the new scene
+      for (int i = 0; i < SCENE_DISPLAY_NUMBERS.length; i++) {
+        int videoIdx = newScene + i;
+        if (videoIdx >= 0 && videoIdx < videoNames.size()) {
+          ensureVideoLoaded(videoIdx);
+        }
+      }
+
+      // Notify Python
+      if (OSC_CONTROL_MODE) {
+        OscMessage reply = new OscMessage("/carpet/state");
+        reply.add("entering_scene");
+        reply.add(newScene);
+        oscP5.send(reply, pythonAddress);
+      }
+
+      return;
+    }
+
     println("Starting transition from scene " + currentScene + " to scene " + newScene);
     startScene = currentScene;
     targetScene = newScene;
     animationDirection = (newScene > currentScene) ? -1 : 1;  // -1 = up (videos scroll down), 1 = down (videos scroll up)
-    totalDistance = abs(newScene - currentScene);
+    totalDistance = directDistance;
     animationProgress = 0.0;
     isAnimating = true;
 

@@ -272,7 +272,7 @@ class CarpetHotelCore:
             self.arduino.set_led_animation_mode("TRANSITION", direction="up")
             print(f"[CORE] Set LED animation to TRANSITION (up)")
 
-        # Increment scene
+        # Increment scene with wrap-around
         max_scene = self.get_max_scene()
         self.current_scene = (self.current_scene + 1) % (max_scene + 1)
 
@@ -301,7 +301,7 @@ class CarpetHotelCore:
             self.arduino.set_led_animation_mode("TRANSITION", direction="down")
             print(f"[CORE] Set LED animation to TRANSITION (down)")
 
-        # Decrement scene
+        # Decrement scene with wrap-around
         max_scene = self.get_max_scene()
         self.current_scene = (self.current_scene - 1) % (max_scene + 1)
 
